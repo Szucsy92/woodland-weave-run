@@ -90,7 +90,7 @@ function World({ state, onScore, onCrash }: { state: State; onScore: (n: number)
       s.cell = key;
       s.trees = treesAround(Math.floor(s.x / CELL), Math.floor(s.z / CELL));
       s.trees.forEach((t, i) => {
-        dummy.position.set(t.x, 15, t.z); dummy.scale.setScalar(t.s); dummy.rotation.set(0, t.x, 0); dummy.updateMatrix();
+        dummy.position.set(t.x, 15, t.z); dummy.scale.set(t.s, 1, t.s); dummy.rotation.set(0, t.x, 0); dummy.updateMatrix();
         trunks.current!.setMatrixAt(i, dummy.matrix);
       });
       for (const m of [trunks.current]) { m.count = s.trees.length; m.instanceMatrix.needsUpdate = true; }
