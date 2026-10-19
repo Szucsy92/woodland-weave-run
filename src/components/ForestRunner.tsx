@@ -1,6 +1,5 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { useTexture } from "@react-three/drei";
 import barkUrl from "@/assets/bark.jpg";
 import floorUrl from "@/assets/forest-floor.jpg";
 
@@ -65,8 +64,8 @@ function World({ state, onScore, onCrash }: { state: State; onScore: (n: number)
     if (k) return k;
     return tilt.active ? (Math.abs(tilt.v) < 0.08 ? 0 : -tilt.v) : 0;
   };
-  const bark = useTexture(barkUrl);
-  const floor = useTexture(floorUrl);
+  const bark = useMemo(() => new THREE.TextureLoader().load(barkUrl), []);
+  const floor = useMemo(() => new THREE.TextureLoader().load(floorUrl), []);
   useMemo(() => {
     for (const t of [bark, floor]) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; }
     bark.repeat.set(1, 8);
