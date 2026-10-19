@@ -107,8 +107,8 @@ function World({ state, onScore, onCrash }: { state: State; onScore: (n: number)
     <>
       <pointLight ref={lamp} intensity={60} distance={28} decay={1.6} color="#ffe6b8" />
       <mesh ref={ground} rotation-x={-Math.PI / 2} receiveShadow>
-        <circleGeometry args={[RADIUS * CELL * 1.2, 48]} />
-        <meshStandardMaterial color="#3a4a3a" />
+        <planeGeometry args={[200, 200]} />
+        <meshStandardMaterial color="#4a5e44" side={THREE.DoubleSide} />
       </mesh>
       <instancedMesh ref={trunks} args={[undefined, undefined, MAX]} castShadow>
         <cylinderGeometry args={[0.4, 0.45, 30, 8]} />
