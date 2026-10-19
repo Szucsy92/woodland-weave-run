@@ -25,6 +25,7 @@ const RADIUS = 9; // cells around player
 const BASE_SPEED = 9;
 const TURN = 2.2;
 const SAFE = 12;
+const MAX_HEADING = 1.1; // ~63°, the player can never turn back
 
 function hash(x: number, z: number, s = 0) {
   let h = (x * 374761393 + z * 668265263 + s * 982451653) | 0;
@@ -55,6 +56,14 @@ function World({ state, onScore, onCrash }: { state: State; onScore: (n: number)
   const trunks = useRef<THREE.InstancedMesh>(null);
   const ground = useRef<THREE.Mesh>(null);
   const lamp = useRef<THREE.PointLight>(null);
+  const glow = useRef<THREE.Group>(null);
+  const glowTex = useMemo(() => {
+    const c = document.createElement("canvas"); c.width = c.height = 256;
+    const g = c.getContext("2d")!; const r = g.createRadialGradient(128, 128, 0, 128, 128, 128);
+    r.addColorStop(0, "rgba(255,255,255,1)"); r.addColorStop(0.25, "rgba(255,255,255,0.55)"); r.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = r; g.fillRect(0, 0, 256, 256);
+    const t = new THREE.CanvasTexture(c); return t;
+  }, []);
   const keys = useRef({ l: false, r: false });
   const sim = useRef({ x: 0, z: 0, h: 0, dist: 0, cell: "", trees: [] as Tree[], t: 0 });
   const { camera } = useThree();
@@ -105,7 +114,7 @@ function World({ state, onScore, onCrash }: { state: State; onScore: (n: number)
     s.t += dt;
     if (state === "run") {
       const speed = BASE_SPEED + s.dist / 60;
-      s.h += steer() * TURN * dt;
+      s.h = THREE.MathUtils.clamp(s.h + steer() * TURN * dt, -MAX_HEADING, MAX_HEADING);
       s.x += -Math.sin(s.h) * speed * dt;
       s.z += -Math.cos(s.h) * speed * dt;
       s.dist += speed * dt;
@@ -133,17 +142,32 @@ function World({ state, onScore, onCrash }: { state: State; onScore: (n: number)
     camera.position.set(s.x, 1.6 + bob, s.z);
     camera.lookAt(s.x - Math.sin(s.h) * 10, 1.6 + bob, s.z - Math.cos(s.h) * 10);
     lamp.current?.position.set(s.x, 2.2, s.z);
+    if (glow.current) {
+      glow.current.position.set(s.x, 3, s.z - 90);
+      glow.current.children.forEach((c, i) => {
+        const p = 1 + Math.sin(s.t * (0.8 + i * 0.5) + i * 2) * 0.15;
+        c.scale.setScalar([40, 26, 12][i] * p);
+        c.position.x = Math.sin(s.t * 0.4 + i * 2.1) * 3 * i;
+      });
+    }
     camera.rotateZ(steer() * 0.08);
   });
 
   return (
     <>
       <pointLight ref={lamp} intensity={60} distance={28} decay={1.6} color="#ffe6b8" />
+      <group ref={glow}>
+        {["#9b4dff", "#3dff9a", "#e8d8ff"].map((c, i) => (
+          <sprite key={c} renderOrder={-1}>
+            <spriteMaterial map={glowTex} color={c} transparent opacity={[0.55, 0.5, 0.8][i]} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} />
+          </sprite>
+        ))}
+      </group>
       <mesh ref={ground} rotation-x={-Math.PI / 2} receiveShadow>
         <planeGeometry args={[200, 200]} />
         <meshStandardMaterial map={floor} color="#9aa896" />
       </mesh>
-      <instancedMesh ref={trunks} args={[undefined, undefined, MAX]} castShadow>
+      <instancedMesh ref={trunks} args={[undefined, undefined, MAX]} castShadow frustumCulled={false}>
         <cylinderGeometry args={[0.4, 0.45, 30, 8]} />
         <meshStandardMaterial map={bark} color="#d8ccc0" />
       </instancedMesh>
