@@ -157,7 +157,7 @@ function World({ state, onScore, onCrash }: { state: State; onScore: (n: number)
     <>
       <pointLight ref={lamp} intensity={60} distance={28} decay={1.6} color="#ffe6b8" />
       <group ref={glow}>
-        {["#9b4dff", "#3dff9a", "#e8d8ff"].map((c, i) => (
+        {["#2dff8a", "#a04dff", "#e8d8ff"].map((c, i) => (
           <sprite key={c} renderOrder={-1}>
             <spriteMaterial map={glowTex} color={c} transparent opacity={[0.55, 0.5, 0.8][i] ?? 0.6} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} />
           </sprite>
