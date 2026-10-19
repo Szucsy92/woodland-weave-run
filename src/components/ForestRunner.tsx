@@ -143,7 +143,7 @@ function World({ state, onScore, onCrash }: { state: State; onScore: (n: number)
     camera.lookAt(s.x - Math.sin(s.h) * 10, 1.6 + bob, s.z - Math.cos(s.h) * 10);
     lamp.current?.position.set(s.x, 2.2, s.z);
     if (glow.current) {
-      glow.current.position.set(s.x, 3, s.z - 90);
+      glow.current.position.set(s.x, 9, s.z - 85);
       glow.current.children.forEach((c, i) => {
         const p = 1 + Math.sin(s.t * (0.8 + i * 0.5) + i * 2) * 0.15;
         c.scale.setScalar(([40, 26, 12][i] ?? 12) * p);
