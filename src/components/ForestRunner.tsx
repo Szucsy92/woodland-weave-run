@@ -65,7 +65,8 @@ function World({ state, onScore, onCrash }: { state: State; onScore: (n: number)
     if (k) return k;
     return tilt.active ? (Math.abs(tilt.v) < 0.08 ? 0 : -tilt.v) : 0;
   };
-  const [bark, floor] = useTexture([barkUrl, floorUrl]);
+  const bark = useTexture(barkUrl);
+  const floor = useTexture(floorUrl);
   useMemo(() => {
     for (const t of [bark, floor]) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; }
     bark.repeat.set(1, 8);
