@@ -146,7 +146,7 @@ function World({ state, onScore, onCrash }: { state: State; onScore: (n: number)
       glow.current.position.set(s.x, 3, s.z - 90);
       glow.current.children.forEach((c, i) => {
         const p = 1 + Math.sin(s.t * (0.8 + i * 0.5) + i * 2) * 0.15;
-        c.scale.setScalar([40, 26, 12][i] * p);
+        c.scale.setScalar(([40, 26, 12][i] ?? 12) * p);
         c.position.x = Math.sin(s.t * 0.4 + i * 2.1) * 3 * i;
       });
     }
@@ -159,7 +159,7 @@ function World({ state, onScore, onCrash }: { state: State; onScore: (n: number)
       <group ref={glow}>
         {["#9b4dff", "#3dff9a", "#e8d8ff"].map((c, i) => (
           <sprite key={c} renderOrder={-1}>
-            <spriteMaterial map={glowTex} color={c} transparent opacity={[0.55, 0.5, 0.8][i]} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} />
+            <spriteMaterial map={glowTex} color={c} transparent opacity={[0.55, 0.5, 0.8][i] ?? 0.6} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} />
           </sprite>
         ))}
       </group>
