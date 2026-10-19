@@ -1,5 +1,24 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useTexture } from "@react-three/drei";
+import barkUrl from "@/assets/bark.jpg";
+import floorUrl from "@/assets/forest-floor.jpg";
+
+// Phone tilt (-1..1), written by the deviceorientation listener
+const tilt = { v: 0, active: false };
+function onOrient(e: DeviceOrientationEvent) {
+  if (e.gamma == null) return;
+  tilt.active = true;
+  const landscape = Math.abs((screen.orientation?.angle ?? 0)) === 90;
+  const raw = landscape ? (e.beta ?? 0) * Math.sign(screen.orientation.angle) : e.gamma;
+  tilt.v = THREE.MathUtils.clamp(raw / 25, -1, 1);
+}
+async function enableTilt() {
+  const D = DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> };
+  try { if (typeof D?.requestPermission === "function" && (await D.requestPermission()) !== "granted") return; } catch { return; }
+  window.removeEventListener("deviceorientation", onOrient);
+  window.addEventListener("deviceorientation", onOrient);
+}
 import * as THREE from "three";
 
 const CELL = 6;
@@ -41,6 +60,17 @@ function World({ state, onScore, onCrash }: { state: State; onScore: (n: number)
   const sim = useRef({ x: 0, z: 0, h: 0, dist: 0, cell: "", trees: [] as Tree[], t: 0 });
   const { camera } = useThree();
   const dummy = useMemo(() => new THREE.Object3D(), []);
+  const steer = () => {
+    const k = (keys.current.l ? 1 : 0) - (keys.current.r ? 1 : 0);
+    if (k) return k;
+    return tilt.active ? (Math.abs(tilt.v) < 0.08 ? 0 : -tilt.v) : 0;
+  };
+  const [bark, floor] = useTexture([barkUrl, floorUrl]);
+  useMemo(() => {
+    for (const t of [bark, floor]) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; }
+    bark.repeat.set(1, 8);
+    floor.repeat.set(60, 60);
+  }, [bark, floor]);
 
   useEffect(() => {
     const set = (v: boolean) => (e: KeyboardEvent) => {
@@ -75,7 +105,7 @@ function World({ state, onScore, onCrash }: { state: State; onScore: (n: number)
     s.t += dt;
     if (state === "run") {
       const speed = BASE_SPEED + s.dist / 60;
-      s.h += ((keys.current.l ? 1 : 0) - (keys.current.r ? 1 : 0)) * TURN * dt;
+      s.h += steer() * TURN * dt;
       s.x += -Math.sin(s.h) * speed * dt;
       s.z += -Math.cos(s.h) * speed * dt;
       s.dist += speed * dt;
@@ -95,12 +125,15 @@ function World({ state, onScore, onCrash }: { state: State; onScore: (n: number)
       });
       for (const m of [trunks.current]) { m.count = s.trees.length; m.instanceMatrix.needsUpdate = true; }
     }
-    if (ground.current) ground.current.position.set(s.x, 0, s.z);
+    if (ground.current) {
+      ground.current.position.set(s.x, 0, s.z);
+      floor.offset.set(s.x / (200 / 60), -s.z / (200 / 60));
+    }
     const bob = state === "run" ? Math.sin(s.t * 12) * 0.05 : 0;
     camera.position.set(s.x, 1.6 + bob, s.z);
     camera.lookAt(s.x - Math.sin(s.h) * 10, 1.6 + bob, s.z - Math.cos(s.h) * 10);
     lamp.current?.position.set(s.x, 2.2, s.z);
-    camera.rotateZ(THREE.MathUtils.clamp(((keys.current.l ? 1 : 0) - (keys.current.r ? 1 : 0)) * 0.06, -0.1, 0.1));
+    camera.rotateZ(steer() * 0.08);
   });
 
   return (
@@ -108,11 +141,11 @@ function World({ state, onScore, onCrash }: { state: State; onScore: (n: number)
       <pointLight ref={lamp} intensity={60} distance={28} decay={1.6} color="#ffe6b8" />
       <mesh ref={ground} rotation-x={-Math.PI / 2} receiveShadow>
         <planeGeometry args={[200, 200]} />
-        <meshStandardMaterial color="#4a5e44" side={THREE.DoubleSide} />
+        <meshStandardMaterial map={floor} color="#9aa896" />
       </mesh>
       <instancedMesh ref={trunks} args={[undefined, undefined, MAX]} castShadow>
         <cylinderGeometry args={[0.4, 0.45, 30, 8]} />
-        <meshStandardMaterial color="#b8a58c" flatShading />
+        <meshStandardMaterial map={bark} color="#d8ccc0" />
       </instancedMesh>
     </>
   );
@@ -137,13 +170,13 @@ export function ForestRunner() {
   };
 
   return (
-    <div className="dark fixed inset-0 bg-background" onClick={() => state !== "run" && setState("run")}>
+    <div className="dark fixed inset-0 bg-background" onClick={() => { if (state !== "run") { enableTilt(); setState("run"); } }}>
       <Canvas shadows dpr={[1, 2]} camera={{ fov: 70, position: [0, 1.6, 0] }}>
         <color attach="background" args={["#0b1424"]} />
         <fog attach="fog" args={["#0b1424", 6, 45]} />
         <hemisphereLight args={["#8aa0d0", "#1a2418", 1.2]} />
         <directionalLight position={[-10, 25, -5]} intensity={0.9} color="#b8c8ff" />
-        <World state={state} onScore={(n) => { if (n !== scoreRef.current) { scoreRef.current = n; setScore(n); } }} onCrash={crash} />
+        <Suspense fallback={null}><World state={state} onScore={(n) => { if (n !== scoreRef.current) { scoreRef.current = n; setScore(n); } }} onCrash={crash} /></Suspense>
       </Canvas>
       <div className="pointer-events-none fixed inset-0 z-10 flex flex-col items-center p-6 font-mono text-foreground">
         <div className="flex w-full justify-between text-lg">
@@ -153,7 +186,7 @@ export function ForestRunner() {
           <div className="mt-[30vh] rounded-lg bg-background/80 px-8 py-6 text-center shadow-lg">
             <h1 className="text-3xl font-bold">{state === "over" ? "Fának ütköztél!" : "Erdei futás"}</h1>
             {state === "over" && <p className="mt-2">Távolság: {score} m</p>}
-            <p className="mt-3 text-sm">← / → vagy A / D: kanyarodás · mobilon érintsd a képernyő bal/jobb felét</p>
+            <p className="mt-3 text-sm">← / → vagy A / D: kanyarodás · mobilon döntsd meg a telefont balra/jobbra</p>
             <p className="mt-3 font-semibold">Szóköz vagy kattintás az indításhoz</p>
           </div>
         )}
