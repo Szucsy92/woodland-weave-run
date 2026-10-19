@@ -1,5 +1,23 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import barkUrl from "@/assets/bark.jpg";
+import floorUrl from "@/assets/forest-floor.jpg";
+
+// Phone tilt (-1..1), written by the deviceorientation listener
+const tilt = { v: 0, active: false };
+function onOrient(e: DeviceOrientationEvent) {
+  if (e.gamma == null) return;
+  tilt.active = true;
+  const landscape = Math.abs((screen.orientation?.angle ?? 0)) === 90;
+  const raw = landscape ? (e.beta ?? 0) * Math.sign(screen.orientation.angle) : e.gamma;
+  tilt.v = THREE.MathUtils.clamp(raw / 25, -1, 1);
+}
+async function enableTilt() {
+  const D = DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> };
+  try { if (typeof D?.requestPermission === "function" && (await D.requestPermission()) !== "granted") return; } catch { return; }
+  window.removeEventListener("deviceorientation", onOrient);
+  window.addEventListener("deviceorientation", onOrient);
+}
 import * as THREE from "three";
 
 const CELL = 6;
@@ -34,15 +52,25 @@ const MAX = (RADIUS * 2 + 1) ** 2;
 type State = "ready" | "run" | "over";
 
 function World({ state, onScore, onCrash }: { state: State; onScore: (n: number) => void; onCrash: () => void }) {
-  const player = useRef<THREE.Group>(null);
   const trunks = useRef<THREE.InstancedMesh>(null);
-  const crowns = useRef<THREE.InstancedMesh>(null);
-  const crowns2 = useRef<THREE.InstancedMesh>(null);
   const ground = useRef<THREE.Mesh>(null);
+  const lamp = useRef<THREE.PointLight>(null);
   const keys = useRef({ l: false, r: false });
   const sim = useRef({ x: 0, z: 0, h: 0, dist: 0, cell: "", trees: [] as Tree[], t: 0 });
   const { camera } = useThree();
   const dummy = useMemo(() => new THREE.Object3D(), []);
+  const steer = () => {
+    const k = (keys.current.l ? 1 : 0) - (keys.current.r ? 1 : 0);
+    if (k) return k;
+    return tilt.active ? (Math.abs(tilt.v) < 0.08 ? 0 : -tilt.v) : 0;
+  };
+  const bark = useMemo(() => new THREE.TextureLoader().load(barkUrl), []);
+  const floor = useMemo(() => new THREE.TextureLoader().load(floorUrl), []);
+  useMemo(() => {
+    for (const t of [bark, floor]) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; }
+    bark.repeat.set(1, 8);
+    floor.repeat.set(60, 60);
+  }, [bark, floor]);
 
   useEffect(() => {
     const set = (v: boolean) => (e: KeyboardEvent) => {
@@ -77,7 +105,7 @@ function World({ state, onScore, onCrash }: { state: State; onScore: (n: number)
     s.t += dt;
     if (state === "run") {
       const speed = BASE_SPEED + s.dist / 60;
-      s.h += ((keys.current.l ? 1 : 0) - (keys.current.r ? 1 : 0)) * TURN * dt;
+      s.h += steer() * TURN * dt;
       s.x += -Math.sin(s.h) * speed * dt;
       s.z += -Math.cos(s.h) * speed * dt;
       s.dist += speed * dt;
@@ -88,57 +116,37 @@ function World({ state, onScore, onCrash }: { state: State; onScore: (n: number)
       }
     }
     const key = `${Math.floor(s.x / CELL)},${Math.floor(s.z / CELL)}`;
-    if (key !== s.cell && trunks.current && crowns.current && crowns2.current) {
+    if (key !== s.cell && trunks.current ) {
       s.cell = key;
       s.trees = treesAround(Math.floor(s.x / CELL), Math.floor(s.z / CELL));
       s.trees.forEach((t, i) => {
-        dummy.position.set(t.x, 1 * t.s, t.z); dummy.scale.setScalar(t.s); dummy.rotation.set(0, t.x, 0); dummy.updateMatrix();
+        dummy.position.set(t.x, 15, t.z); dummy.scale.set(t.s, 1, t.s); dummy.rotation.set(0, t.x, 0); dummy.updateMatrix();
         trunks.current!.setMatrixAt(i, dummy.matrix);
-        dummy.position.y = 3 * t.s; dummy.updateMatrix(); crowns.current!.setMatrixAt(i, dummy.matrix);
-        dummy.position.y = 4.4 * t.s; dummy.scale.setScalar(t.s * 0.75); dummy.updateMatrix(); crowns2.current!.setMatrixAt(i, dummy.matrix);
       });
-      for (const m of [trunks.current, crowns.current, crowns2.current]) { m.count = s.trees.length; m.instanceMatrix.needsUpdate = true; }
+      for (const m of [trunks.current]) { m.count = s.trees.length; m.instanceMatrix.needsUpdate = true; }
     }
-    if (player.current) {
-      player.current.position.set(s.x, state === "run" ? 0.6 + Math.abs(Math.sin(s.t * 12)) * 0.15 : 0.6, s.z);
-      player.current.rotation.y = s.h;
-      const lean = ((keys.current.l ? 1 : 0) - (keys.current.r ? 1 : 0)) * 0.25;
-      player.current.rotation.z = THREE.MathUtils.damp(player.current.rotation.z, state === "run" ? lean : 0, 8, dt);
+    if (ground.current) {
+      ground.current.position.set(s.x, 0, s.z);
+      floor.offset.set(s.x / (200 / 60), -s.z / (200 / 60));
     }
-    if (ground.current) ground.current.position.set(s.x, 0, s.z);
-    const back = new THREE.Vector3(Math.sin(s.h) * 7, 4, Math.cos(s.h) * 7);
-    camera.position.lerp(new THREE.Vector3(s.x, 0, s.z).add(back), 1 - Math.exp(-6 * dt));
-    camera.lookAt(s.x - Math.sin(s.h) * 6, 1, s.z - Math.cos(s.h) * 6);
+    const bob = state === "run" ? Math.sin(s.t * 12) * 0.05 : 0;
+    camera.position.set(s.x, 1.6 + bob, s.z);
+    camera.lookAt(s.x - Math.sin(s.h) * 10, 1.6 + bob, s.z - Math.cos(s.h) * 10);
+    lamp.current?.position.set(s.x, 2.2, s.z);
+    camera.rotateZ(steer() * 0.08);
   });
 
   return (
     <>
+      <pointLight ref={lamp} intensity={60} distance={28} decay={1.6} color="#ffe6b8" />
       <mesh ref={ground} rotation-x={-Math.PI / 2} receiveShadow>
-        <circleGeometry args={[RADIUS * CELL * 1.2, 48]} />
-        <meshStandardMaterial color="#5f7d3a" />
+        <planeGeometry args={[200, 200]} />
+        <meshStandardMaterial map={floor} color="#9aa896" />
       </mesh>
       <instancedMesh ref={trunks} args={[undefined, undefined, MAX]} castShadow>
-        <cylinderGeometry args={[0.25, 0.4, 2, 6]} />
-        <meshStandardMaterial color="#6b4423" flatShading />
+        <cylinderGeometry args={[0.4, 0.45, 30, 8]} />
+        <meshStandardMaterial map={bark} color="#d8ccc0" />
       </instancedMesh>
-      <instancedMesh ref={crowns} args={[undefined, undefined, MAX]} castShadow>
-        <coneGeometry args={[1.6, 3, 7]} />
-        <meshStandardMaterial color="#2f5d34" flatShading />
-      </instancedMesh>
-      <instancedMesh ref={crowns2} args={[undefined, undefined, MAX]} castShadow>
-        <coneGeometry args={[1.3, 2.4, 7]} />
-        <meshStandardMaterial color="#3e7a3f" flatShading />
-      </instancedMesh>
-      <group ref={player}>
-        <mesh castShadow position={[0, 0.2, 0]}>
-          <capsuleGeometry args={[0.35, 0.6, 4, 10]} />
-          <meshStandardMaterial color="#d9622b" flatShading />
-        </mesh>
-        <mesh castShadow position={[0, 0.95, -0.05]}>
-          <sphereGeometry args={[0.28, 10, 8]} />
-          <meshStandardMaterial color="#f0c9a0" flatShading />
-        </mesh>
-      </group>
     </>
   );
 }
@@ -162,13 +170,13 @@ export function ForestRunner() {
   };
 
   return (
-    <div className="fixed inset-0 bg-background" onClick={() => state !== "run" && setState("run")}>
-      <Canvas shadows dpr={[1, 2]} camera={{ fov: 60, position: [0, 4, 7] }}>
-        <color attach="background" args={["#c9d8c0"]} />
-        <fog attach="fog" args={["#c9d8c0", 15, 55]} />
-        <hemisphereLight args={["#fff4dc", "#3b4a2a", 0.9]} />
-        <directionalLight position={[10, 20, 5]} intensity={1.6} color="#ffe2b0" />
-        <World state={state} onScore={(n) => { if (n !== scoreRef.current) { scoreRef.current = n; setScore(n); } }} onCrash={crash} />
+    <div className="dark fixed inset-0 bg-background" onClick={() => { if (state !== "run") { enableTilt(); setState("run"); } }}>
+      <Canvas shadows dpr={[1, 2]} camera={{ fov: 70, position: [0, 1.6, 0] }}>
+        <color attach="background" args={["#0b1424"]} />
+        <fog attach="fog" args={["#0b1424", 6, 45]} />
+        <hemisphereLight args={["#8aa0d0", "#1a2418", 1.2]} />
+        <directionalLight position={[-10, 25, -5]} intensity={0.9} color="#b8c8ff" />
+        <Suspense fallback={null}><World state={state} onScore={(n) => { if (n !== scoreRef.current) { scoreRef.current = n; setScore(n); } }} onCrash={crash} /></Suspense>
       </Canvas>
       <div className="pointer-events-none fixed inset-0 z-10 flex flex-col items-center p-6 font-mono text-foreground">
         <div className="flex w-full justify-between text-lg">
@@ -178,7 +186,7 @@ export function ForestRunner() {
           <div className="mt-[30vh] rounded-lg bg-background/80 px-8 py-6 text-center shadow-lg">
             <h1 className="text-3xl font-bold">{state === "over" ? "Fának ütköztél!" : "Erdei futás"}</h1>
             {state === "over" && <p className="mt-2">Távolság: {score} m</p>}
-            <p className="mt-3 text-sm">← / → vagy A / D: kanyarodás · mobilon érintsd a képernyő bal/jobb felét</p>
+            <p className="mt-3 text-sm">← / → vagy A / D: kanyarodás · mobilon döntsd meg a telefont balra/jobbra</p>
             <p className="mt-3 font-semibold">Szóköz vagy kattintás az indításhoz</p>
           </div>
         )}
