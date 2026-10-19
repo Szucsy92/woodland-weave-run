@@ -36,6 +36,7 @@ type State = "ready" | "run" | "over";
 function World({ state, onScore, onCrash }: { state: State; onScore: (n: number) => void; onCrash: () => void }) {
   const trunks = useRef<THREE.InstancedMesh>(null);
   const ground = useRef<THREE.Mesh>(null);
+  const lamp = useRef<THREE.PointLight>(null);
   const keys = useRef({ l: false, r: false });
   const sim = useRef({ x: 0, z: 0, h: 0, dist: 0, cell: "", trees: [] as Tree[], t: 0 });
   const { camera } = useThree();
@@ -98,18 +99,20 @@ function World({ state, onScore, onCrash }: { state: State; onScore: (n: number)
     const bob = state === "run" ? Math.sin(s.t * 12) * 0.05 : 0;
     camera.position.set(s.x, 1.6 + bob, s.z);
     camera.lookAt(s.x - Math.sin(s.h) * 10, 1.6 + bob, s.z - Math.cos(s.h) * 10);
+    lamp.current?.position.set(s.x, 2.2, s.z);
     camera.rotateZ(THREE.MathUtils.clamp(((keys.current.l ? 1 : 0) - (keys.current.r ? 1 : 0)) * 0.06, -0.1, 0.1));
   });
 
   return (
     <>
+      <pointLight ref={lamp} intensity={60} distance={28} decay={1.6} color="#ffe6b8" />
       <mesh ref={ground} rotation-x={-Math.PI / 2} receiveShadow>
         <circleGeometry args={[RADIUS * CELL * 1.2, 48]} />
-        <meshStandardMaterial color="#1c2a22" />
+        <meshStandardMaterial color="#3a4a3a" />
       </mesh>
       <instancedMesh ref={trunks} args={[undefined, undefined, MAX]} castShadow>
         <cylinderGeometry args={[0.4, 0.45, 30, 8]} />
-        <meshStandardMaterial color="#8a7a66" flatShading />
+        <meshStandardMaterial color="#b8a58c" flatShading />
       </instancedMesh>
     </>
   );
@@ -138,7 +141,7 @@ export function ForestRunner() {
       <Canvas shadows dpr={[1, 2]} camera={{ fov: 70, position: [0, 1.6, 0] }}>
         <color attach="background" args={["#0b1424"]} />
         <fog attach="fog" args={["#0b1424", 6, 45]} />
-        <hemisphereLight args={["#6f86b8", "#0d1410", 0.9]} />
+        <hemisphereLight args={["#8aa0d0", "#1a2418", 1.2]} />
         <directionalLight position={[-10, 25, -5]} intensity={0.9} color="#b8c8ff" />
         <World state={state} onScore={(n) => { if (n !== scoreRef.current) { scoreRef.current = n; setScore(n); } }} onCrash={crash} />
       </Canvas>
