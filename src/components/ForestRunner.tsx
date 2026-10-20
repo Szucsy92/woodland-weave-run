@@ -305,7 +305,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     <instancedMesh ref={branches} args={[resources.branchGeometry, undefined, MAX_INSTANCES * BRANCHES_PER_TREE]} frustumCulled={false}>
       <meshStandardMaterial map={resources.bark} normalMap={resources.barkN} roughnessMap={resources.barkR} normalScale={new THREE.Vector2(.7, .7)} color={palette.trunk} roughness={.95} metalness={0} />
     </instancedMesh>
-    <instancedMesh ref={crowns} args={[resources.crownGeometry, undefined, MAX_INSTANCES * CROWNS_PER_TREE]} frustumCulled={false}>
+    <instancedMesh ref={crowns} args={[resources.crownGeometry, undefined, MAX_INSTANCES * CROWN_SLOTS]} frustumCulled={false}>
       <meshStandardMaterial color={palette.crown} roughness={.9} metalness={0} />
     </instancedMesh>
     <instancedMesh ref={rocks} args={[resources.rockGeometry, undefined, MAX_INSTANCES]} frustumCulled={false}>
