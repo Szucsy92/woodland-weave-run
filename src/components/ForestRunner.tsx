@@ -20,6 +20,18 @@ const BRANCHES_PER_TREE = 11;
 const CROWNS_PER_TREE = 5;
 const CROWN_SLOTS = CROWNS_PER_TREE + BRANCHES_PER_TREE;
 
+// Installed apps lock to landscape where the OS allows it; browsers get the
+// request after fullscreen and simply ignore it when unsupported.
+async function lockOrientation(mode: "landscape" | "any") {
+  const so = screen.orientation as (ScreenOrientation & { lock?: (o: string) => Promise<void>; unlock?: () => void }) | undefined;
+  try {
+    if (mode === "landscape") {
+      if (!document.fullscreenElement && document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen();
+      await so?.lock?.("landscape");
+    } else so?.unlock?.();
+  } catch { /* The game still works in any orientation. */ }
+}
+
 // Mirrors groundHeight() in the simulation so the displaced ground, the camera
 // height and every planted object always agree.
 const GROUND_GLSL = `
@@ -531,6 +543,13 @@ export function ForestRunner() {
                 <div className="forest-seg">
                   <button className={touchMode ? "" : "on"} onClick={() => changeTouch(false)}>Döntés</button>
                   <button className={touchMode ? "on" : ""} onClick={() => changeTouch(true)}>Érintés</button>
+                </div>
+              </div>
+              <div className="forest-row">
+                <span>Képernyő</span>
+                <div className="forest-seg">
+                  <button className={orient === "landscape" ? "on" : ""} onClick={() => changeOrient("landscape")}>Fekvő</button>
+                  <button className={orient === "any" ? "on" : ""} onClick={() => changeOrient("any")}>Bármely</button>
                 </div>
               </div>
               <div className="forest-row">
