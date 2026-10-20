@@ -16,7 +16,7 @@ type Palette = Record<"fog" | "moon" | "lamp" | "green" | "purple" | "lavender" 
 type Input = { tilt: number; touch: number; touchMode: boolean; neutral: number | null; angle: number };
 const MAX_INSTANCES = (RADIUS * 2 + 1) ** 2;
 const BRANCHES_PER_TREE = 11;
-const CROWNS_PER_TREE = 3;
+const CROWNS_PER_TREE = 6;
 
 // Mirrors groundHeight() in the simulation so the displaced ground, the camera
 // height and every planted object always agree.
@@ -72,8 +72,17 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     }
     trunkGeometry.computeVertexNormals();
     trunkGeometry.translate(0, 11, 0);
-    const branchGeometry = new THREE.CylinderGeometry(.03, .06, 2.2, 5, 1);
+    const branchGeometry = new THREE.CylinderGeometry(.03, .07, 2.2, 6, 8);
     branchGeometry.translate(0, 1.1, 0);
+    {
+      // Crooked, knotty branch: bends sideways and droops along its length.
+      const p = branchGeometry.getAttribute("position") as THREE.BufferAttribute;
+      for (let i = 0; i < p.count; i++) {
+        const y = p.getY(i), t = y / 2.2;
+        p.setXYZ(i, p.getX(i) + Math.sin(t * 7.3) * .09 * t + t * t * .25, y, p.getZ(i) + Math.sin(t * 5.1 + 1) * .08 * t);
+      }
+      branchGeometry.computeVertexNormals();
+    }
     const jitter = (geometry: THREE.BufferGeometry, xz: number, y: number, seed: number) => {
       const p = geometry.getAttribute("position") as THREE.BufferAttribute;
       for (let i = 0; i < p.count; i++) {
@@ -90,7 +99,8 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       for (let i = 0; i < p.count; i++) {
         v.fromBufferAttribute(p, i);
         const n = Math.sin(v.x * 5.1 + v.y * 2.3) * Math.sin(v.z * 4.7 - v.y * 3.1) * .16 + Math.sin(v.x * 11 + v.z * 9) * .05;
-        v.multiplyScalar(1 + n);
+        const lump = Math.sin(v.x * 2.1 + 1.3) * Math.sin(v.z * 1.7 + v.y * 2.6) * .32 + Math.sin(v.y * 7.7 + v.x * 6.1) * Math.cos(v.z * 8.3) * .12;
+        v.multiplyScalar(Math.max(.35, 1 + n + lump));
         v.y *= v.y < 0 ? .45 : .8;
         p.setXYZ(i, v.x, v.y, v.z);
       }
@@ -170,12 +180,13 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
         }
         resources.dummy.rotation.order = "XYZ";
         for (let c = 0; c < CROWNS_PER_TREE; c++) {
-          const spread = c === 0 ? .6 : 2.4;
+          // Overlapping, irregular leaf masses that spread far enough to merge with neighbours.
+          const spread = c === 0 ? .5 : 1.8 + hash(seedX, seedZ, 81 + c) * 2.6;
           const angle = hash(seedX, seedZ, 74 + c) * Math.PI * 2;
-          resources.dummy.position.set(tree.x + Math.cos(angle) * spread, base + 19.6 + hash(seedX, seedZ, 71 + c * 3) * 1.6 - (c ? .8 : 0), tree.z + Math.sin(angle) * spread);
-          resources.dummy.rotation.set(0, angle, (hash(seedX, seedZ, 77 + c) - .5) * .5);
-          const r = (c === 0 ? 3.2 : 2.1) + hash(seedX, seedZ, 73 + c) * 1.4;
-          resources.dummy.scale.set(r * tree.scale, r * .8 * tree.scale, r * (.8 + hash(seedX, seedZ, 79 + c) * .4) * tree.scale);
+          resources.dummy.position.set(tree.x + Math.cos(angle) * spread, base + 18.6 + hash(seedX, seedZ, 71 + c * 3) * 2.8, tree.z + Math.sin(angle) * spread);
+          resources.dummy.rotation.set((hash(seedX, seedZ, 83 + c) - .5) * .9, angle, (hash(seedX, seedZ, 77 + c) - .5) * .9);
+          const r = (c === 0 ? 3 : 1.6) + hash(seedX, seedZ, 73 + c) * 1.8;
+          resources.dummy.scale.set(r * (.8 + hash(seedX, seedZ, 85 + c) * .6) * tree.scale, r * (.45 + hash(seedX, seedZ, 87 + c) * .4) * tree.scale, r * (.7 + hash(seedX, seedZ, 79 + c) * .6) * tree.scale);
           resources.dummy.updateMatrix();
           crownMesh?.setMatrixAt(i * CROWNS_PER_TREE + c, resources.dummy.matrix);
         }
@@ -269,7 +280,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       <meshStandardMaterial map={resources.bark} normalMap={resources.barkN} roughnessMap={resources.barkR} normalScale={new THREE.Vector2(.7, .7)} color={palette.trunk} roughness={.95} metalness={0} />
     </instancedMesh>
     <instancedMesh ref={branches} args={[resources.branchGeometry, undefined, MAX_INSTANCES * BRANCHES_PER_TREE]} frustumCulled={false}>
-      <meshStandardMaterial color={palette.trunk} roughness={.95} metalness={0} />
+      <meshStandardMaterial map={resources.bark} normalMap={resources.barkN} roughnessMap={resources.barkR} normalScale={new THREE.Vector2(.7, .7)} color={palette.trunk} roughness={.95} metalness={0} />
     </instancedMesh>
     <instancedMesh ref={crowns} args={[resources.crownGeometry, undefined, MAX_INSTANCES * CROWNS_PER_TREE]} frustumCulled={false}>
       <meshStandardMaterial color={palette.crown} roughness={.9} metalness={0} />
