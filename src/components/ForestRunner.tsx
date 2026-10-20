@@ -337,6 +337,7 @@ export function ForestRunner() {
   const [sound, setSound] = useState(true);
   const [touchMode, setTouchMode] = useState(false);
   const [haptics, setHaptics] = useState(true);
+  const [orient, setOrient] = useState<"landscape" | "any">("landscape");
   const [difficulty, setDifficulty] = useState<Difficulty>("easy");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [palette, setPalette] = useState<Palette | null>(null);
@@ -362,6 +363,7 @@ export function ForestRunner() {
       const vib = localStorage.getItem("forest-haptics") !== "off";
       setHaptics(vib);
       hapticsRef.current = vib;
+      if (localStorage.getItem("forest-orient") === "any") setOrient("any");
     } catch { /* Local storage may be disabled. */ }
     const canvas = document.createElement("canvas");
     canvas.width = canvas.height = 1;
@@ -422,6 +424,7 @@ export function ForestRunner() {
     if (phase !== "menu" && phase !== "fallen") return;
     setNotice("");
     drone.current?.unlock();
+    await lockOrientation(orient);
     if (!touchMode) {
       if (typeof DeviceOrientationEvent === "undefined") {
         setNotice("Döntés nem elérhető. Kapcsold be az érintéses irányítást.");
@@ -470,7 +473,11 @@ export function ForestRunner() {
     simulation.current.cell = "";
     try { localStorage.setItem("forest-difficulty", level); } catch { /* Local storage may be disabled. */ }
   };
-
+  const changeOrient = (mode: "landscape" | "any") => {
+    setOrient(mode);
+    try { localStorage.setItem("forest-orient", mode); } catch { /* Local storage may be disabled. */ }
+    void lockOrientation(mode);
+  };
   return <main
     className="forest-game dark"
     data-phase={phase}
