@@ -13,5 +13,5 @@
 - Keep pure simulation and gameplay rules in src/lib/forest/simulation.ts with rule tests; the scene reads mutable refs and reports only phase transitions to React to avoid per-frame rerenders.
 - Keep the continuous browser-only drone in its own lifecycle-managed module and postprocessing in ForestEffects; this separates audio, camera presentation, and gameplay.
 - Use local device storage for this game's personal scores/settings only, not shared data; no account or cross-device persistence is implied.
-- Preserve procedural trunk-only geometry with generated surface maps rather than full-tree models because the game's visual constraint excludes crowns and branches.
+- Keep every tree fully procedural (deformed trunk cylinder, hash-placed branch cylinders, displaced icosahedron crowns) rather than full-tree models; crowns sit low enough (~19-21 m) to touch overhead. Terrain height comes from the shared groundHeight() formula in simulation.ts, mirrored verbatim as GLSL in the ground shader so physics and visuals agree.
 - Source scene colors from global semantic CSS tokens, and keep browser/PWA metadata in the root head; installed fullscreen remains platform-dependent.
