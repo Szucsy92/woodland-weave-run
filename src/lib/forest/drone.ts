@@ -1,6 +1,6 @@
 // Continuous background loop served from /audio/, filtered per game state.
 const SOURCES = ["/audio/forest-loop.wav", "/audio/forest-loop.mp3"];
-const MENU_HZ = 220;
+const MENU_HZ = 700;
 const RUN_HZ = 4000;
 
 // Removes the click at the loop point: fade both ends to silence (30 ms).
@@ -85,7 +85,7 @@ export class ForestDrone {
   private apply() {
     const now = this.context?.currentTime;
     if (now == null || !this.master || !this.filter) return;
-    const target = this.enabled ? (this.running ? 0.45 : 0.18) : 0;
+    const target = this.enabled ? (this.running ? 0.45 : 0.3) : 0;
     this.master.gain.setTargetAtTime(target, now, this.enabled ? 0.8 : 0.05);
     this.filter.frequency.setTargetAtTime(this.running ? RUN_HZ : MENU_HZ, now, 0.65);
   }

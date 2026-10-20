@@ -11,12 +11,12 @@ import barkNormal from "@/assets/bark-normal.jpg";
 import barkRough from "@/assets/bark-rough.jpg";
 import floorNormal from "@/assets/ground-normal.jpg";
 import floorRough from "@/assets/ground-rough.jpg";
-import introIcon from "@/assets/forest-icon.jpg";
 
 type Palette = Record<"fog" | "moon" | "lamp" | "green" | "purple" | "lavender" | "trunk" | "ground" | "crown" | "rock" | "plant", THREE.Color>;
 type Input = { tilt: number; touch: number; touchMode: boolean; neutral: number | null; angle: number };
 const MAX_INSTANCES = (RADIUS * 2 + 1) ** 2;
-const BRANCHES_PER_TREE = 6;
+const BRANCHES_PER_TREE = 11;
+const CROWNS_PER_TREE = 3;
 
 // Mirrors groundHeight() in the simulation so the displaced ground, the camera
 // height and every planted object always agree.
@@ -83,8 +83,19 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       }
       geometry.computeVertexNormals();
     };
-    const crownGeometry = new THREE.IcosahedronGeometry(1, 1);
-    jitter(crownGeometry, .28, .35, 21);
+    const crownGeometry = new THREE.IcosahedronGeometry(1, 3);
+    {
+      const p = crownGeometry.getAttribute("position") as THREE.BufferAttribute;
+      const v = new THREE.Vector3();
+      for (let i = 0; i < p.count; i++) {
+        v.fromBufferAttribute(p, i);
+        const n = Math.sin(v.x * 5.1 + v.y * 2.3) * Math.sin(v.z * 4.7 - v.y * 3.1) * .16 + Math.sin(v.x * 11 + v.z * 9) * .05;
+        v.multiplyScalar(1 + n);
+        v.y *= v.y < 0 ? .45 : .8;
+        p.setXYZ(i, v.x, v.y, v.z);
+      }
+      crownGeometry.computeVertexNormals();
+    }
     const rockGeometry = new THREE.IcosahedronGeometry(1, 2);
     jitter(rockGeometry, .18, .14, 33);
     const plantGeometry = new THREE.IcosahedronGeometry(1, 2);
@@ -144,23 +155,34 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
         trunkMesh.setMatrixAt(i, resources.dummy.matrix);
         for (let b = 0; b < BRANCHES_PER_TREE; b++) {
           const seed = hash(seedX, seedZ, 20 + b);
-          const top = base + 19 + hash(seedX, seedZ, 60 + b) * 2.2;
+          // First branches fan up into the crown; the rest stick out from the trunk lower down.
+          const upper = b < 5;
+          const top = upper ? base + 19 + hash(seedX, seedZ, 60 + b) * 2.2 : base + 8.5 + hash(seedX, seedZ, 60 + b) * 9.5;
           resources.dummy.position.set(tree.x, top, tree.z);
           resources.dummy.rotation.order = "YXZ";
-          resources.dummy.rotation.set(.55 + hash(seedX, seedZ, 40 + b) * .75, seed * Math.PI * 2, 0);
-          resources.dummy.scale.set(tree.scale, tree.scale * (.7 + seed * .6), tree.scale);
+          const tilt = upper ? .55 + hash(seedX, seedZ, 40 + b) * .75 : 1.05 + hash(seedX, seedZ, 40 + b) * .5;
+          resources.dummy.rotation.set(tilt, seed * Math.PI * 2, (hash(seedX, seedZ, 80 + b) - .5) * .4);
+          const thick = upper ? 1 : 2.2 + hash(seedX, seedZ, 90 + b) * 1.4;
+          const len = upper ? .7 + seed * .6 : 1.1 + hash(seedX, seedZ, 95 + b) * 1.1;
+          resources.dummy.scale.set(tree.scale * thick, tree.scale * len, tree.scale * thick);
           resources.dummy.updateMatrix();
           branchMesh?.setMatrixAt(i * BRANCHES_PER_TREE + b, resources.dummy.matrix);
         }
         resources.dummy.rotation.order = "XYZ";
-        resources.dummy.position.set(tree.x + (hash(seedX, seedZ, 70) - .5) * 1.6, base + 19.4 + hash(seedX, seedZ, 71) * 1.4, tree.z + (hash(seedX, seedZ, 72) - .5) * 1.6);
-        resources.dummy.scale.setScalar((3.1 + hash(seedX, seedZ, 73) * 1.9) * tree.scale);
-        resources.dummy.updateMatrix();
-        crownMesh?.setMatrixAt(i, resources.dummy.matrix);
+        for (let c = 0; c < CROWNS_PER_TREE; c++) {
+          const spread = c === 0 ? .6 : 2.4;
+          const angle = hash(seedX, seedZ, 74 + c) * Math.PI * 2;
+          resources.dummy.position.set(tree.x + Math.cos(angle) * spread, base + 19.6 + hash(seedX, seedZ, 71 + c * 3) * 1.6 - (c ? .8 : 0), tree.z + Math.sin(angle) * spread);
+          resources.dummy.rotation.set(0, angle, (hash(seedX, seedZ, 77 + c) - .5) * .5);
+          const r = (c === 0 ? 3.2 : 2.1) + hash(seedX, seedZ, 73 + c) * 1.4;
+          resources.dummy.scale.set(r * tree.scale, r * .8 * tree.scale, r * (.8 + hash(seedX, seedZ, 79 + c) * .4) * tree.scale);
+          resources.dummy.updateMatrix();
+          crownMesh?.setMatrixAt(i * CROWNS_PER_TREE + c, resources.dummy.matrix);
+        }
       });
       trunkMesh.count = s.trees.length;
       if (branchMesh) branchMesh.count = s.trees.length * BRANCHES_PER_TREE;
-      if (crownMesh) crownMesh.count = s.trees.length;
+      if (crownMesh) crownMesh.count = s.trees.length * CROWNS_PER_TREE;
       let rockCount = 0, plantCount = 0;
       s.obstacles.forEach((o, i) => {
         const gy = groundHeight(o.x, o.z);
@@ -249,8 +271,8 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     <instancedMesh ref={branches} args={[resources.branchGeometry, undefined, MAX_INSTANCES * BRANCHES_PER_TREE]} frustumCulled={false}>
       <meshStandardMaterial color={palette.trunk} roughness={.95} metalness={0} />
     </instancedMesh>
-    <instancedMesh ref={crowns} args={[resources.crownGeometry, undefined, MAX_INSTANCES]} frustumCulled={false}>
-      <meshStandardMaterial color={palette.crown} roughness={1} metalness={0} flatShading />
+    <instancedMesh ref={crowns} args={[resources.crownGeometry, undefined, MAX_INSTANCES * CROWNS_PER_TREE]} frustumCulled={false}>
+      <meshStandardMaterial color={palette.crown} roughness={.9} metalness={0} />
     </instancedMesh>
     <instancedMesh ref={rocks} args={[resources.rockGeometry, undefined, MAX_INSTANCES]} frustumCulled={false}>
       <meshStandardMaterial color={palette.rock} roughness={.55} metalness={0} />
@@ -270,31 +292,6 @@ function Hud({ simulation }: { simulation: MutableRefObject<Simulation> }) {
   return <div className="forest-hud" aria-live="off">{meters}<small>m</small></div>;
 }
 
-function ForestIntro({ onDone }: { onDone: () => void }) {
-  useEffect(() => {
-    const timer = window.setTimeout(onDone, 2700);
-    return () => window.clearTimeout(timer);
-  }, [onDone]);
-  const figure = (
-    <svg viewBox="0 0 120 160" className="forest-figure-svg">
-      <ellipse className="forest-fig-arm forest-fig-arm-l" cx="42" cy="82" rx="5.5" ry="16" />
-      <ellipse className="forest-fig-arm forest-fig-arm-r" cx="78" cy="98" rx="5.5" ry="16" />
-      <ellipse className="forest-fig-shoulders" cx="60" cy="74" rx="21" ry="12" />
-      <circle className="forest-fig-head" cx="60" cy="46" r="11.5" />
-      <path className="forest-fig-torso" d="M46 82 Q60 74 74 82 L70 116 Q60 122 50 116 Z" />
-      <ellipse className="forest-fig-leg forest-fig-leg-l" cx="50" cy="132" rx="7" ry="22" />
-      <ellipse className="forest-fig-leg forest-fig-leg-r" cx="70" cy="128" rx="7" ry="22" />
-    </svg>
-  );
-  return <div className="forest-intro" aria-hidden="true">
-    <img className="forest-intro-icon" src={introIcon} alt="" />
-    <div className="forest-intro-blur">
-      {figure}
-      <div className="forest-intro-fig-glitch-a">{figure}</div>
-      <div className="forest-intro-fig-glitch-b">{figure}</div>
-    </div>
-  </div>;
-}
 
 export function ForestRunner() {
   const simulation = useRef(makeSimulation());
@@ -310,9 +307,6 @@ export function ForestRunner() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [palette, setPalette] = useState<Palette | null>(null);
   const [notice, setNotice] = useState("");
-  const [introDone, setIntroDone] = useState(() => {
-    try { return sessionStorage.getItem("forest-intro") === "done"; } catch { return false; }
-  });
   const hapticsRef = useRef(true);
   const menu = phase === "menu" || phase === "fallen";
 
@@ -442,10 +436,6 @@ export function ForestRunner() {
     simulation.current.cell = "";
     try { localStorage.setItem("forest-difficulty", level); } catch { /* Local storage may be disabled. */ }
   };
-  const markIntroDone = useCallback(() => {
-    setIntroDone(true);
-    try { sessionStorage.setItem("forest-intro", "done"); } catch { /* Session storage may be disabled. */ }
-  }, []);
 
   return <main
     className="forest-game dark"
@@ -475,13 +465,12 @@ export function ForestRunner() {
       <color attach="background" args={[palette.fog]} />
       <fog attach="fog" args={[palette.fog, 7, FOG_END]} />
       <hemisphereLight args={[palette.moon, palette.fog, .85]} />
-      <directionalLight position={[-15, 22, -20]} color={palette.moon} intensity={.7} />
+      <directionalLight position={[0, 24, -20]} color={palette.moon} intensity={.7} />
       <World simulation={simulation} input={input} palette={palette} onPhase={onPhase} onImpact={onImpact} onStumble={onStumble} />
       <ForestEffects simulation={simulation} />
     </Canvas>}
-    {!introDone && <ForestIntro onDone={markIntroDone} />}
     {(phase === "running" || phase === "awakening" || phase === "falling") && <Hud simulation={simulation} />}
-    {introDone && menu && (
+    {menu && (
       <div className="forest-menu">
         <section className="forest-glass" aria-label="Futás menü">
           {settingsOpen ? (
