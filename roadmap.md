@@ -8,5 +8,9 @@
 - [x] Edge-to-edge presentation and monochrome app identity
 - [x] Uneven non-repeating terrain, rocks/undergrowth stumbles, branchy crowns, dynamic camera lean
 - [x] live meters HUD, three difficulty levels, dimmer remote lights
-- [ ] WAV loop re-upload — drone code is ready, stays silent until /audio/forest-loop.wav exists
-- [ ] Verify full play/restart flow and both orientations
+- [x] WAV loop re-upload — public/audio/forest-loop.wav present
+- [x] 75° total turn arc (±37.5°)
+- [x] Calm breathing menu camera (no step rhythm in menu)
+- [x] Landscape default open + settings switch for all orientations
+- [x] Lower merged canopy (~15-17.5 m), leafy branch tips, canopy light bleed
+- [ ] Verify full play/restart flow and both orientations on a phone

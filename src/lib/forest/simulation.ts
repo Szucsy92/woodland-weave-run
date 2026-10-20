@@ -1,8 +1,8 @@
 export const CELL = 6;
 export const RADIUS = 13;
 export const FOG_END = 38;
-// ±50° → at most 100° total turning arc.
-export const MAX_HEADING = (50 * Math.PI) / 180;
+// ±37.5° → at most 75° total turning arc (tight slalom, agreed with the player).
+export const MAX_HEADING = (37.5 * Math.PI) / 180;
 export const IMPACT_DURATION = 0.5;
 export const MAX_IMPACTS = 3;
 export type Phase = "menu" | "awakening" | "running" | "falling" | "fallen";

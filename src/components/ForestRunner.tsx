@@ -16,7 +16,21 @@ type Palette = Record<"fog" | "moon" | "lamp" | "green" | "purple" | "lavender" 
 type Input = { tilt: number; touch: number; touchMode: boolean; neutral: number | null; angle: number };
 const MAX_INSTANCES = (RADIUS * 2 + 1) ** 2;
 const BRANCHES_PER_TREE = 11;
-const CROWNS_PER_TREE = 6;
+// Five core leaf masses per tree plus a leaf clump on every branch tip.
+const CROWNS_PER_TREE = 5;
+const CROWN_SLOTS = CROWNS_PER_TREE + BRANCHES_PER_TREE;
+
+// Installed apps lock to landscape where the OS allows it; browsers get the
+// request after fullscreen and simply ignore it when unsupported.
+async function lockOrientation(mode: "landscape" | "any") {
+  const so = screen.orientation as (ScreenOrientation & { lock?: (o: string) => Promise<void>; unlock?: () => void }) | undefined;
+  try {
+    if (mode === "landscape") {
+      if (!document.fullscreenElement && document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen();
+      await so?.lock?.("landscape");
+    } else so?.unlock?.();
+  } catch { /* The game still works in any orientation. */ }
+}
 
 // Mirrors groundHeight() in the simulation so the displaced ground, the camera
 // height and every planted object always agree.
@@ -60,7 +74,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     [barkN, barkR, floorN, floorR].forEach(t => { t.colorSpace = THREE.NoColorSpace; });
     [bark, barkN, barkR].forEach(t => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(1.5, 7); t.anisotropy = 8; });
     [floor, floorN, floorR].forEach(t => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(64, 64); t.anisotropy = 8; });
-    // Bare trunks, low enough that neighbouring crowns touch overhead.
+    // Trunks with low crowns (~15-17.5 m) that neighbours' foliage merges into overhead.
     const trunkGeometry = new THREE.CylinderGeometry(.36, .46, 22, 14, 24);
     const pos = trunkGeometry.getAttribute("position") as THREE.BufferAttribute;
     for (let i = 0; i < pos.count; i++) {
@@ -92,7 +106,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       }
       geometry.computeVertexNormals();
     };
-    const crownGeometry = new THREE.IcosahedronGeometry(1, 3);
+    const crownGeometry = new THREE.IcosahedronGeometry(1, 2);
     {
       const p = crownGeometry.getAttribute("position") as THREE.BufferAttribute;
       const v = new THREE.Vector3();
@@ -167,7 +181,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
           const seed = hash(seedX, seedZ, 20 + b);
           // First branches fan up into the crown; the rest stick out from the trunk lower down.
           const upper = b < 5;
-          const top = upper ? base + 19 + hash(seedX, seedZ, 60 + b) * 2.2 : base + 8.5 + hash(seedX, seedZ, 60 + b) * 9.5;
+          const top = upper ? base + 14.5 + hash(seedX, seedZ, 60 + b) * 2.5 : base + 8 + hash(seedX, seedZ, 60 + b) * 6.5;
           resources.dummy.position.set(tree.x, top, tree.z);
           resources.dummy.rotation.order = "YXZ";
           const tilt = upper ? .55 + hash(seedX, seedZ, 40 + b) * .75 : 1.05 + hash(seedX, seedZ, 40 + b) * .5;
@@ -177,23 +191,34 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
           resources.dummy.scale.set(tree.scale * thick, tree.scale * len, tree.scale * thick);
           resources.dummy.updateMatrix();
           branchMesh?.setMatrixAt(i * BRANCHES_PER_TREE + b, resources.dummy.matrix);
+          // Every branch ends in foliage — no bare wood anywhere in the forest.
+          const reach = 2.2 * tree.scale * len;
+          resources.dummy.position.set(
+            tree.x + reach * Math.sin(tilt) * Math.sin(seed * Math.PI * 2),
+            top + reach * Math.cos(tilt),
+            tree.z + reach * Math.sin(tilt) * Math.cos(seed * Math.PI * 2));
+          resources.dummy.rotation.set((hash(seedX, seedZ, 83 + b) - .5) * .9, seed * Math.PI * 2, (hash(seedX, seedZ, 77 + b) - .5) * .9);
+          const cr = .9 + hash(seedX, seedZ, 120 + b) * 1.1;
+          resources.dummy.scale.set(cr * tree.scale, cr * (.5 + hash(seedX, seedZ, 122 + b) * .3) * tree.scale, cr * tree.scale);
+          resources.dummy.updateMatrix();
+          crownMesh?.setMatrixAt(i * CROWN_SLOTS + CROWNS_PER_TREE + b, resources.dummy.matrix);
         }
         resources.dummy.rotation.order = "XYZ";
         for (let c = 0; c < CROWNS_PER_TREE; c++) {
-          // Overlapping, irregular leaf masses that spread far enough to merge with neighbours.
-          const spread = c === 0 ? .5 : 1.8 + hash(seedX, seedZ, 81 + c) * 2.6;
+          // Overlapping, irregular leaf masses, low enough and wide enough to merge with neighbours.
+          const spread = c === 0 ? .5 : 2.2 + hash(seedX, seedZ, 81 + c) * 3.2;
           const angle = hash(seedX, seedZ, 74 + c) * Math.PI * 2;
-          resources.dummy.position.set(tree.x + Math.cos(angle) * spread, base + 18.6 + hash(seedX, seedZ, 71 + c * 3) * 2.8, tree.z + Math.sin(angle) * spread);
+          resources.dummy.position.set(tree.x + Math.cos(angle) * spread, base + 15.4 + hash(seedX, seedZ, 71 + c * 3) * 2.2, tree.z + Math.sin(angle) * spread);
           resources.dummy.rotation.set((hash(seedX, seedZ, 83 + c) - .5) * .9, angle, (hash(seedX, seedZ, 77 + c) - .5) * .9);
-          const r = (c === 0 ? 3 : 1.6) + hash(seedX, seedZ, 73 + c) * 1.8;
+          const r = (c === 0 ? 3.6 : 2.4) + hash(seedX, seedZ, 73 + c) * 2.0;
           resources.dummy.scale.set(r * (.8 + hash(seedX, seedZ, 85 + c) * .6) * tree.scale, r * (.45 + hash(seedX, seedZ, 87 + c) * .4) * tree.scale, r * (.7 + hash(seedX, seedZ, 79 + c) * .6) * tree.scale);
           resources.dummy.updateMatrix();
-          crownMesh?.setMatrixAt(i * CROWNS_PER_TREE + c, resources.dummy.matrix);
+          crownMesh?.setMatrixAt(i * CROWN_SLOTS + c, resources.dummy.matrix);
         }
       });
       trunkMesh.count = s.trees.length;
       if (branchMesh) branchMesh.count = s.trees.length * BRANCHES_PER_TREE;
-      if (crownMesh) crownMesh.count = s.trees.length * CROWNS_PER_TREE;
+      if (crownMesh) crownMesh.count = s.trees.length * CROWN_SLOTS;
       let rockCount = 0, plantCount = 0;
       s.obstacles.forEach((o, i) => {
         const gy = groundHeight(o.x, o.z);
@@ -234,8 +259,12 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     const bump = s.impact > 0 ? Math.sin((1 - s.impact / IMPACT_DURATION) * Math.PI) * s.impactSide : 0;
     const leanAmount = lean.current;
     const tripping = Math.min(1, s.stumble * (s.speedMul < .8 ? 1 : 2));
-    const bob = s.phase === "running" ? Math.abs(Math.sin(t * 5.5)) * .018 : Math.sin(t * .5) * .015;
-    lean.current += (getSteering(input.current.touchMode, input.current.touch, input.current.tilt) - lean.current) * Math.min(1, raw * 9);
+    const running = s.phase === "running";
+    const steering = getSteering(input.current.touchMode, input.current.touch, input.current.tilt);
+    // Menu and lying phases: no step rhythm, only a barely noticeable breathing sway.
+    const leanTarget = lying ? Math.sin(t * .13) * .035 : steering;
+    const bob = running ? Math.abs(Math.sin(t * 5.5)) * .018 : Math.sin(t * .4) * .012;
+    lean.current += (leanTarget - lean.current) * Math.min(1, raw * (running ? 9 : 2));
     camera.position.set(
       s.x + fall * .45 + leanAmount * .3,
       groundHeight(s.x, s.z) + 1.6 - fall * 1.28 + bob,
@@ -247,7 +276,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     camera.lookAt(resources.target);
     camera.rotateX(bump * .085 + waking * Math.sin(t * 5) * .045 + fall * .065 * Math.sin(t * .32) + tripping * Math.sin(t * 17) * .085);
     camera.rotateY(-leanAmount * .06);
-    camera.rotateZ(-leanAmount * .055 + bump * .12 + fall * .72 + waking * Math.sin(t * 4) * .03 + Math.sin(t * 5.5) * .018 + tripping * Math.sin(t * 13) * .07);
+    camera.rotateZ(-leanAmount * .055 + bump * .12 + fall * .72 + waking * Math.sin(t * 4) * .03 + (running ? Math.sin(t * 5.5) * .018 : Math.sin(t * .4) * .008) + tripping * Math.sin(t * 13) * .07);
     if (lamp.current) {
       lamp.current.position.copy(camera.position);
       lamp.current.position.y += .35;
@@ -259,19 +288,25 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       glow.current.position.set(s.x, groundHeight(s.x, s.z - 42) + 4.2, s.z - 42);
       glow.current.children.forEach((child, i) => {
         const sprite = child as THREE.Sprite;
-        sprite.scale.setScalar((i === 0 ? 24 : 20) * (1 + Math.sin(t * .4 + i) * .08));
-        sprite.position.x = (i === 0 ? -5 : i === 1 ? 5 : 0) + Math.sin(t * .16 + i) * 1.5;
+        const high = i > 2;
+        sprite.scale.setScalar((high ? 30 : i === 0 ? 24 : 20) * (1 + Math.sin(t * .4 + i) * .08));
+        if (high) {
+          // Blurred light bleeding through the canopy, far above the runners head.
+          sprite.position.set((i === 3 ? -3.5 : 3.5) + Math.sin(t * .2 + i) * 2, 13.5 + Math.sin(t * .24 + i) * 1.4, 0);
+        } else {
+          sprite.position.x = (i === 0 ? -5 : i === 1 ? 5 : 0) + Math.sin(t * .16 + i) * 1.5;
+        }
       });
     }
   });
   return <>
     <pointLight ref={lamp} color={palette.lamp} intensity={65} distance={27} decay={1.6} />
     <group ref={glow}>
-      {[palette.green, palette.purple, palette.lavender].map((color, i) => (
-        <sprite key={i} renderOrder={-1}>
-          <spriteMaterial map={resources.glowTexture} color={color} transparent opacity={.66} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} />
-        </sprite>
-      ))}
+        {[palette.green, palette.purple, palette.lavender, palette.purple, palette.lavender].map((color, i) => (
+          <sprite key={i} renderOrder={-1}>
+            <spriteMaterial map={resources.glowTexture} color={color} transparent opacity={i > 2 ? .14 : .66} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} />
+          </sprite>
+        ))}
     </group>
     <mesh ref={ground} rotation-x={-Math.PI / 2} material={resources.groundMaterial}>
       <planeGeometry args={[200, 200, 160, 160]} />
@@ -282,7 +317,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     <instancedMesh ref={branches} args={[resources.branchGeometry, undefined, MAX_INSTANCES * BRANCHES_PER_TREE]} frustumCulled={false}>
       <meshStandardMaterial map={resources.bark} normalMap={resources.barkN} roughnessMap={resources.barkR} normalScale={new THREE.Vector2(.7, .7)} color={palette.trunk} roughness={.95} metalness={0} />
     </instancedMesh>
-    <instancedMesh ref={crowns} args={[resources.crownGeometry, undefined, MAX_INSTANCES * CROWNS_PER_TREE]} frustumCulled={false}>
+    <instancedMesh ref={crowns} args={[resources.crownGeometry, undefined, MAX_INSTANCES * CROWN_SLOTS]} frustumCulled={false}>
       <meshStandardMaterial color={palette.crown} roughness={.9} metalness={0} />
     </instancedMesh>
     <instancedMesh ref={rocks} args={[resources.rockGeometry, undefined, MAX_INSTANCES]} frustumCulled={false}>
@@ -314,6 +349,7 @@ export function ForestRunner() {
   const [sound, setSound] = useState(true);
   const [touchMode, setTouchMode] = useState(false);
   const [haptics, setHaptics] = useState(true);
+  const [orient, setOrient] = useState<"landscape" | "any">("landscape");
   const [difficulty, setDifficulty] = useState<Difficulty>("easy");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [palette, setPalette] = useState<Palette | null>(null);
@@ -339,6 +375,7 @@ export function ForestRunner() {
       const vib = localStorage.getItem("forest-haptics") !== "off";
       setHaptics(vib);
       hapticsRef.current = vib;
+      if (localStorage.getItem("forest-orient") === "any") setOrient("any");
     } catch { /* Local storage may be disabled. */ }
     const canvas = document.createElement("canvas");
     canvas.width = canvas.height = 1;
@@ -399,6 +436,7 @@ export function ForestRunner() {
     if (phase !== "menu" && phase !== "fallen") return;
     setNotice("");
     drone.current?.unlock();
+    await lockOrientation(orient);
     if (!touchMode) {
       if (typeof DeviceOrientationEvent === "undefined") {
         setNotice("Döntés nem elérhető. Kapcsold be az érintéses irányítást.");
@@ -447,7 +485,11 @@ export function ForestRunner() {
     simulation.current.cell = "";
     try { localStorage.setItem("forest-difficulty", level); } catch { /* Local storage may be disabled. */ }
   };
-
+  const changeOrient = (mode: "landscape" | "any") => {
+    setOrient(mode);
+    try { localStorage.setItem("forest-orient", mode); } catch { /* Local storage may be disabled. */ }
+    void lockOrientation(mode);
+  };
   return <main
     className="forest-game dark"
     data-phase={phase}
@@ -501,6 +543,13 @@ export function ForestRunner() {
                 <div className="forest-seg">
                   <button className={touchMode ? "" : "on"} onClick={() => changeTouch(false)}>Döntés</button>
                   <button className={touchMode ? "on" : ""} onClick={() => changeTouch(true)}>Érintés</button>
+                </div>
+              </div>
+              <div className="forest-row">
+                <span>Képernyő</span>
+                <div className="forest-seg">
+                  <button className={orient === "landscape" ? "on" : ""} onClick={() => changeOrient("landscape")}>Fekvő</button>
+                  <button className={orient === "any" ? "on" : ""} onClick={() => changeOrient("any")}>Bármely</button>
                 </div>
               </div>
               <div className="forest-row">
