@@ -7,6 +7,6 @@
 - [x] Drone audio, glass score menu, tilt-default optional touch controls
 - [x] Edge-to-edge presentation and monochrome app identity
 - [x] Uneven non-repeating terrain, rocks/undergrowth stumbles, branchy crowns, dynamic camera lean
-- [x] 2s silhouette intro, live meters HUD, three difficulty levels, dimmer remote lights
+- [x] live meters HUD, three difficulty levels, dimmer remote lights
 - [ ] WAV loop re-upload — drone code is ready, stays silent until /audio/forest-loop.wav exists
 - [ ] Verify full play/restart flow and both orientations
