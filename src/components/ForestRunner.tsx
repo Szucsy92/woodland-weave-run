@@ -1,220 +1,142 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import barkUrl from "@/assets/bark.jpg";
-import floorUrl from "@/assets/forest-floor.jpg";
-
-// Phone tilt (-1..1), written by the deviceorientation listener
-const tilt = { v: 0, active: false };
-function onOrient(e: DeviceOrientationEvent) {
-  if (e.gamma == null) return;
-  tilt.active = true;
-  const landscape = Math.abs((screen.orientation?.angle ?? 0)) === 90;
-  const raw = landscape ? (e.beta ?? 0) * Math.sign(screen.orientation.angle) : e.gamma;
-  tilt.v = THREE.MathUtils.clamp(raw / 25, -1, 1);
-}
-async function enableTilt() {
-  const D = DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> };
-  try { if (typeof D?.requestPermission === "function" && (await D.requestPermission()) !== "granted") return; } catch { return; }
-  window.removeEventListener("deviceorientation", onOrient);
-  window.addEventListener("deviceorientation", onOrient);
-}
+import { Environment, Lightformer, useTexture } from "@react-three/drei";
+import { Suspense, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { Volume2, VolumeX, Smartphone, ChevronRight } from "lucide-react";
 import * as THREE from "three";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ForestEffects } from "./ForestEffects";
+import { ForestDrone } from "@/lib/forest/drone";
+import { beginRun, CELL, FOG_END, getSteering, hash, makeSimulation, orientationValue, RADIUS, stepSimulation, treesAround, type Phase, type Simulation } from "@/lib/forest/simulation";
+import barkUrl from "@/assets/wet-bark.jpg";
+import floorUrl from "@/assets/wet-ground.jpg";
+import barkNormal from "@/assets/bark-normal.jpg";
+import barkRough from "@/assets/bark-rough.jpg";
+import floorNormal from "@/assets/ground-normal.jpg";
+import floorRough from "@/assets/ground-rough.jpg";
+import icon from "@/assets/forest-icon.jpg";
 
-const CELL = 6;
-const RADIUS = 9; // cells around player
-const BASE_SPEED = 9;
-const TURN = 2.2;
-const SAFE = 12;
-const MAX_HEADING = 1.1; // ~63°, the player can never turn back
+type Palette = Record<"fog" | "moon" | "lamp" | "green" | "purple" | "surface", THREE.Color>;
+type Input = { tilt: number; touch: number; touchMode: boolean; neutral: number | null; angle: number };
 
-function hash(x: number, z: number, s = 0) {
-  let h = (x * 374761393 + z * 668265263 + s * 982451653) | 0;
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
-}
-
-type Tree = { x: number; z: number; s: number; r: number };
-function treesAround(cx: number, cz: number): Tree[] {
-  const out: Tree[] = [];
-  for (let i = -RADIUS; i <= RADIUS; i++)
-    for (let j = -RADIUS; j <= RADIUS; j++) {
-      const gx = cx + i, gz = cz + j;
-      if (hash(gx, gz) > 0.55) continue;
-      const x = gx * CELL + hash(gx, gz, 1) * CELL;
-      const z = gz * CELL + hash(gx, gz, 2) * CELL;
-      if (x * x + z * z < SAFE * SAFE) continue;
-      out.push({ x, z, s: 0.8 + hash(gx, gz, 3) * 0.8, r: 0.5 });
-    }
-  return out;
-}
-
-const MAX = (RADIUS * 2 + 1) ** 2;
-
-type State = "ready" | "run" | "over";
-
-function World({ state, onScore, onCrash }: { state: State; onScore: (n: number) => void; onCrash: () => void }) {
-  const trunks = useRef<THREE.InstancedMesh>(null);
-  const ground = useRef<THREE.Mesh>(null);
-  const lamp = useRef<THREE.PointLight>(null);
-  const glow = useRef<THREE.Group>(null);
-  const glowTex = useMemo(() => {
-    const c = document.createElement("canvas"); c.width = c.height = 256;
-    const g = c.getContext("2d")!; const r = g.createRadialGradient(128, 128, 0, 128, 128, 128);
-    r.addColorStop(0, "rgba(255,255,255,1)"); r.addColorStop(0.25, "rgba(255,255,255,0.55)"); r.addColorStop(1, "rgba(255,255,255,0)");
-    g.fillStyle = r; g.fillRect(0, 0, 256, 256);
-    const t = new THREE.CanvasTexture(c); return t;
-  }, []);
-  const keys = useRef({ l: false, r: false });
-  const sim = useRef({ x: 0, z: 0, h: 0, dist: 0, cell: "", trees: [] as Tree[], t: 0 });
+function World({ simulation, input, palette, onPhase }: { simulation: MutableRefObject<Simulation>; input: MutableRefObject<Input>; palette: Palette; onPhase: (phase: Phase, score: number) => void }) {
+  const trunks = useRef<THREE.InstancedMesh>(null), ground = useRef<THREE.Mesh>(null), lamp = useRef<THREE.PointLight>(null), glow = useRef<THREE.Group>(null);
   const { camera } = useThree();
-  const dummy = useMemo(() => new THREE.Object3D(), []);
-  const steer = () => {
-    const k = (keys.current.l ? 1 : 0) - (keys.current.r ? 1 : 0);
-    if (k) return k;
-    return tilt.active ? (Math.abs(tilt.v) < 0.08 ? 0 : -tilt.v) : 0;
-  };
-  const bark = useMemo(() => new THREE.TextureLoader().load(barkUrl), []);
-  const floor = useMemo(() => new THREE.TextureLoader().load(floorUrl), []);
-  useMemo(() => {
-    for (const t of [bark, floor]) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; }
-    bark.repeat.set(1, 8);
-    floor.repeat.set(60, 60);
-  }, [bark, floor]);
-
-  useEffect(() => {
-    const set = (v: boolean) => (e: KeyboardEvent) => {
-      if (["ArrowLeft", "KeyA"].includes(e.code)) keys.current.l = v;
-      if (["ArrowRight", "KeyD"].includes(e.code)) keys.current.r = v;
-    };
-    const d = set(true), u = set(false);
-    window.addEventListener("keydown", d);
-    window.addEventListener("keyup", u);
-    const touch = (e: TouchEvent) => {
-      const t = e.touches[0];
-      keys.current.l = !!t && t.clientX < window.innerWidth / 2;
-      keys.current.r = !!t && t.clientX >= window.innerWidth / 2;
-    };
-    window.addEventListener("touchstart", touch);
-    window.addEventListener("touchend", touch);
-    return () => {
-      window.removeEventListener("keydown", d);
-      window.removeEventListener("keyup", u);
-      window.removeEventListener("touchstart", touch);
-      window.removeEventListener("touchend", touch);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (state === "run") Object.assign(sim.current, { x: 0, z: 0, h: 0, dist: 0, cell: "" });
-  }, [state]);
-
+  const maps = useTexture([barkUrl, barkNormal, barkRough, floorUrl, floorNormal, floorRough]);
+  const resources = useMemo(() => {
+    maps.forEach((t, i) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = i === 0 || i === 3 ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = 8; t.repeat.set(i < 3 ? 1.5 : 64, i < 3 ? 9 : 64); });
+    const geometry = new THREE.CylinderGeometry(.36, .46, 30, 14, 24);
+    const pos = geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const y = pos.getY(i), a = Math.atan2(pos.getZ(i), pos.getX(i));
+      const swell = 1 + Math.sin(a * 5 + y * .7) * .065 + Math.sin(a * 9 - y * .3) * .025;
+      const root = 1 + Math.pow(Math.max(0, (1 - (y + 15) / 2)), 2) * .65;
+      pos.setXYZ(i, pos.getX(i) * swell * root + Math.sin(y * .22) * .065, y, pos.getZ(i) * swell * root);
+    }
+    geometry.computeVertexNormals();
+    const canvas = document.createElement("canvas"); canvas.width = canvas.height = 128;
+    const ctx = canvas.getContext("2d");
+    if (ctx) { const r = ctx.createRadialGradient(64,64,0,64,64,64); r.addColorStop(0,"rgba(255,255,255,1)"); r.addColorStop(.2,"rgba(255,255,255,.6)"); r.addColorStop(1,"rgba(255,255,255,0)"); ctx.fillStyle=r;ctx.fillRect(0,0,128,128); }
+    return { geometry, glowTexture: new THREE.CanvasTexture(canvas), dummy: new THREE.Object3D(), target: new THREE.Vector3() };
+  }, [maps]);
+  useEffect(() => () => { resources.geometry.dispose(); resources.glowTexture.dispose(); }, [resources]);
+  const previousPhase = useRef<Phase>("menu");
   useFrame((_, raw) => {
-    const dt = Math.min(raw, 0.05);
-    const s = sim.current;
-    s.t += dt;
-    if (state === "run") {
-      const speed = BASE_SPEED + s.dist / 60;
-      s.h = THREE.MathUtils.clamp(s.h + steer() * TURN * dt, -MAX_HEADING, MAX_HEADING);
-      s.x += -Math.sin(s.h) * speed * dt;
-      s.z += -Math.cos(s.h) * speed * dt;
-      s.dist += speed * dt;
-      onScore(Math.floor(s.dist));
-      for (const t of s.trees) {
-        const dx = t.x - s.x, dz = t.z - s.z;
-        if (dx * dx + dz * dz < (t.r * t.s + 0.45) ** 2) { onCrash(); break; }
-      }
-    }
-    const key = `${Math.floor(s.x / CELL)},${Math.floor(s.z / CELL)}`;
-    if (key !== s.cell && trunks.current ) {
-      s.cell = key;
-      s.trees = treesAround(Math.floor(s.x / CELL), Math.floor(s.z / CELL));
-      s.trees.forEach((t, i) => {
-        dummy.position.set(t.x, 15, t.z); dummy.scale.set(t.s, 1, t.s); dummy.rotation.set(0, t.x, 0); dummy.updateMatrix();
-        trunks.current!.setMatrixAt(i, dummy.matrix);
+    const s = simulation.current;
+    const key = `${Math.floor(s.x/CELL)},${Math.floor(s.z/CELL)}`;
+    const mesh = trunks.current;
+    if (mesh && key !== s.cell) {
+      s.cell = key; s.trees = treesAround(Math.floor(s.x/CELL),Math.floor(s.z/CELL));
+      s.trees.forEach((tree,i) => {
+        resources.dummy.position.set(tree.x,15,tree.z); resources.dummy.scale.set(tree.scale,1,tree.scale); resources.dummy.rotation.set(0,hash(Math.floor(tree.x),Math.floor(tree.z),5)*6,0); resources.dummy.updateMatrix(); mesh.setMatrixAt(i,resources.dummy.matrix);
       });
-      for (const m of [trunks.current]) { m.count = s.trees.length; m.instanceMatrix.needsUpdate = true; }
+      mesh.count = s.trees.length; mesh.instanceMatrix.needsUpdate = true;
     }
-    if (ground.current) {
-      ground.current.position.set(s.x, 0, s.z);
-      floor.offset.set(s.x / (200 / 60), -s.z / (200 / 60));
-    }
-    const bob = state === "run" ? Math.sin(s.t * 12) * 0.05 : 0;
-    camera.position.set(s.x, 1.6 + bob, s.z);
-    camera.lookAt(s.x - Math.sin(s.h) * 10, 1.6 + bob, s.z - Math.cos(s.h) * 10);
-    lamp.current?.position.set(s.x, 2.2, s.z);
+    stepSimulation(s, getSteering(input.current.touchMode,input.current.touch,input.current.tilt), raw);
+    if (s.phase !== previousPhase.current) { previousPhase.current=s.phase; onPhase(s.phase,Math.floor(s.distance)); }
+    if (ground.current) { ground.current.position.set(s.x,0,s.z); for (const t of maps.slice(3)) t.offset.set(s.x/3.125,-s.z/3.125); }
+    const t=s.elapsed, lying=s.phase === "falling" || s.phase === "fallen";
+    const fall=lying ? THREE.MathUtils.smoothstep(s.phaseTime,0,1.25) : 0;
+    const waking=s.phase === "awakening" ? 1-THREE.MathUtils.smoothstep(s.phaseTime,0,1.15) : 0;
+    const bump=s.impact>0 ? Math.sin((1-s.impact/.25)*Math.PI)*s.impactSide : 0;
+    const bob=s.phase === "running" ? Math.sin(t*11)*.025 : Math.sin(t*.5)*.015;
+    camera.position.set(s.x + fall*.45,1.6 - fall*1.28 + bob,s.z + fall*.65);
+    resources.target.set(s.x-Math.sin(s.heading)*18,1.65+fall*3,s.z-Math.cos(s.heading)*18);
+    camera.lookAt(resources.target); camera.rotateX(bump*.085 + waking*Math.sin(t*5)*.045 + fall*.065*Math.sin(t*.32)); camera.rotateZ(-getSteering(input.current.touchMode,input.current.touch,input.current.tilt)*.035 + bump*.12 + fall*.72 + waking*Math.sin(t*4)*.03);
+    if (lamp.current) { lamp.current.position.copy(camera.position); lamp.current.position.y+=.35; const flicker=lying ? (Math.sin(t*5.7)+Math.sin(t*13.2)>.25 ? .14 : .035) : 1-waking*.8; lamp.current.intensity=65*flicker; }
     if (glow.current) {
-      glow.current.position.set(s.x, 9, s.z - 85);
-      glow.current.children.forEach((c, i) => {
-        const p = 1 + Math.sin(s.t * (0.8 + i * 0.5) + i * 2) * 0.15;
-        c.scale.setScalar(([40, 26, 12][i] ?? 12) * p);
-        c.position.x = Math.sin(s.t * 0.4 + i * 2.1) * 3 * i;
-      });
+      // At the fog wall, behind every visible trunk. Constant distance makes the lights unreachable.
+      glow.current.position.set(s.x,4.2,s.z-42);
+      glow.current.children.forEach((child,i) => { const sprite=child as THREE.Sprite; sprite.scale.setScalar((i===0?24:20)*(1+Math.sin(t*.4+i)*.08)); sprite.position.x=(i===0?-5:5)+Math.sin(t*.16+i)*1.5; });
     }
-    camera.rotateZ(steer() * 0.08);
   });
-
-  return (
-    <>
-      <pointLight ref={lamp} intensity={60} distance={28} decay={1.6} color="#ffe6b8" />
-      <group ref={glow}>
-        {["#2dff8a", "#a04dff", "#e8d8ff"].map((c, i) => (
-          <sprite key={c} renderOrder={-1}>
-            <spriteMaterial map={glowTex} color={c} transparent opacity={[0.55, 0.5, 0.8][i] ?? 0.6} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} />
-          </sprite>
-        ))}
-      </group>
-      <mesh ref={ground} rotation-x={-Math.PI / 2} receiveShadow>
-        <planeGeometry args={[200, 200]} />
-        <meshStandardMaterial map={floor} color="#9aa896" />
-      </mesh>
-      <instancedMesh ref={trunks} args={[undefined, undefined, MAX]} castShadow frustumCulled={false}>
-        <cylinderGeometry args={[0.4, 0.45, 30, 8]} />
-        <meshStandardMaterial map={bark} color="#d8ccc0" />
-      </instancedMesh>
-    </>
-  );
+  return <>
+    <pointLight ref={lamp} color={palette.lamp} intensity={65} distance={27} decay={1.6} />
+    <group ref={glow}>
+      {[palette.green,palette.purple].map((color,i)=><sprite key={i} renderOrder={-1}><spriteMaterial map={resources.glowTexture} color={color} transparent opacity={.66} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} /></sprite>)}
+    </group>
+    <mesh ref={ground} rotation-x={-Math.PI/2} receiveShadow><planeGeometry args={[200,200]} /><meshPhysicalMaterial map={maps[3]} normalMap={maps[4]} roughnessMap={maps[5]} normalScale={new THREE.Vector2(.55,.55)} color={palette.surface} roughness={.68} clearcoat={.7} clearcoatRoughness={.24} envMapIntensity={.45} /></mesh>
+    <instancedMesh ref={trunks} args={[resources.geometry,undefined,(RADIUS*2+1)**2]} frustumCulled={false}><meshPhysicalMaterial map={maps[0]} normalMap={maps[1]} roughnessMap={maps[2]} normalScale={new THREE.Vector2(.8,.8)} color={palette.surface} roughness={.56} clearcoat={.65} clearcoatRoughness={.2} envMapIntensity={.5} /></instancedMesh>
+  </>;
 }
 
 export function ForestRunner() {
-  const [state, setState] = useState<State>("ready");
-  const [score, setScore] = useState(0);
-  const [best, setBest] = useState(0);
-  const scoreRef = useRef(0);
-
-  useEffect(() => { setBest(Number(localStorage.getItem("forest-best") || 0)); }, []);
-  useEffect(() => {
-    const k = (e: KeyboardEvent) => { if (e.code === "Space" && state !== "run") setState("run"); };
-    window.addEventListener("keydown", k);
-    return () => window.removeEventListener("keydown", k);
-  }, [state]);
-
-  const crash = () => {
-    setState("over");
-    if (scoreRef.current > best) { setBest(scoreRef.current); localStorage.setItem("forest-best", String(scoreRef.current)); }
+  const simulation=useRef(makeSimulation()), input=useRef<Input>({tilt:0,touch:0,touchMode:false,neutral:null,angle:0});
+  const drone=useRef<ForestDrone | null>(null);
+  const [phase,setPhase]=useState<Phase>("menu"), [best,setBest]=useState(0), [last,setLast]=useState(0), [sound,setSound]=useState(true), [touchMode,setTouchMode]=useState(false), [palette,setPalette]=useState<Palette | null>(null), [notice,setNotice]=useState("");
+  const menu=phase === "menu" || phase === "fallen";
+  useEffect(()=>{
+    const audio=new ForestDrone();drone.current=audio;
+    try { setBest(Number(localStorage.getItem("forest-best"))||0);setLast(Number(localStorage.getItem("forest-last"))||0);setSound(localStorage.getItem("forest-sound")!=="off"); const touch=localStorage.getItem("forest-touch")==="on";setTouchMode(touch);input.current.touchMode=touch; } catch { /* Local score storage may be disabled. */ }
+    const canvas=document.createElement("canvas");canvas.width=canvas.height=1;const ctx=canvas.getContext("2d");
+    if(ctx){ const styles=getComputedStyle(document.documentElement), p={} as Palette; for(const name of ["fog","moon","lamp","green","purple","surface"] as const){ctx.fillStyle=styles.getPropertyValue(`--forest-${name}`).trim();ctx.fillRect(0,0,1,1);const data=ctx.getImageData(0,0,1,1).data;p[name]=new THREE.Color().setRGB(data[0]/255,data[1]/255,data[2]/255,THREE.SRGBColorSpace);}setPalette(p); }
+    const orientation=(e:DeviceOrientationEvent)=>{
+      if(e.gamma==null || e.beta==null)return;
+      const angle=screen.orientation?.angle ?? (window as unknown as {orientation?:number}).orientation ?? 0;
+      const raw=orientationValue(e.gamma,e.beta,angle);
+      if(input.current.neutral==null || input.current.angle!==angle){input.current.neutral=raw;input.current.angle=angle;}
+      input.current.tilt=THREE.MathUtils.clamp(raw-(input.current.neutral??0),-1,1);
+    };
+    const visibility=()=>{input.current.touch=0;if(document.hidden)audio.suspend();};
+    window.addEventListener("deviceorientation",orientation);document.addEventListener("visibilitychange",visibility);
+    return ()=>{window.removeEventListener("deviceorientation",orientation);document.removeEventListener("visibilitychange",visibility);audio.dispose();};
+  },[]);
+  useEffect(()=>{drone.current?.setMode(sound,phase==="awakening"||phase==="running");},[sound,phase]);
+  const onPhase=(next:Phase,score:number)=>{
+    setPhase(next);
+    if(next==="falling") {setLast(score);setBest(old=>Math.max(old,score));try{localStorage.setItem("forest-last",String(score));localStorage.setItem("forest-best",String(Math.max(best,score)));}catch{}}
   };
-
-  return (
-    <div className="dark fixed inset-0 bg-background" onClick={() => { if (state !== "run") { enableTilt(); setState("run"); } }}>
-      <Canvas shadows dpr={[1, 2]} camera={{ fov: 70, position: [0, 1.6, 0] }}>
-        <color attach="background" args={["#0b1424"]} />
-        <fog attach="fog" args={["#0b1424", 6, 45]} />
-        <hemisphereLight args={["#8aa0d0", "#1a2418", 1.2]} />
-        <directionalLight position={[-10, 25, -5]} intensity={0.9} color="#b8c8ff" />
-        <Suspense fallback={null}><World state={state} onScore={(n) => { if (n !== scoreRef.current) { scoreRef.current = n; setScore(n); } }} onCrash={crash} /></Suspense>
-      </Canvas>
-      <div className="pointer-events-none fixed inset-0 z-10 flex flex-col items-center p-6 font-mono text-foreground">
-        <div className="flex w-full justify-between text-lg">
-          <span>{score} m</span><span>Rekord: {best} m</span>
-        </div>
-        {state !== "run" && (
-          <div className="mt-[30vh] rounded-lg bg-background/80 px-8 py-6 text-center shadow-lg">
-            <h1 className="text-3xl font-bold">{state === "over" ? "Fának ütköztél!" : "Erdei futás"}</h1>
-            {state === "over" && <p className="mt-2">Távolság: {score} m</p>}
-            <p className="mt-3 text-sm">← / → vagy A / D: kanyarodás · mobilon döntsd meg a telefont balra/jobbra</p>
-            <p className="mt-3 font-semibold">Szóköz vagy kattintás az indításhoz</p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  const start=async()=>{
+    if(!menu)return;
+    setNotice("");drone.current?.unlock();
+    if(!touchMode){
+      if(typeof DeviceOrientationEvent === "undefined"){setNotice("Döntés nem elérhető. Kapcsold be az érintéses irányítást.");return;}
+      const D=DeviceOrientationEvent as unknown as {requestPermission?:()=>Promise<string>};
+      try{if(D.requestPermission && await D.requestPermission()!=="granted"){setNotice("Döntés nem engedélyezett. Kapcsold be az érintéses irányítást.");return;}}catch{setNotice("Kapcsold be az érintéses irányítást.");return;}
+      input.current.neutral=null;
+    }
+    input.current.touch=0;
+    if(!document.fullscreenElement && document.documentElement.requestFullscreen)void document.documentElement.requestFullscreen().catch(()=>undefined);
+    beginRun(simulation.current);setPhase("awakening");
+  };
+  const toggleSound=()=>{drone.current?.unlock();const next=!sound;setSound(next);try{localStorage.setItem("forest-sound",next?"on":"off");}catch{}};
+  const changeTouch=(checked:boolean)=>{drone.current?.unlock();setTouchMode(checked);input.current.touchMode=checked;input.current.touch=0;setNotice("");try{localStorage.setItem("forest-touch",checked?"on":"off");}catch{}};
+  return <main className="forest-game dark" data-phase={phase} onPointerDown={e=>{drone.current?.unlock();if(menu || !touchMode)return;e.currentTarget.setPointerCapture(e.pointerId);input.current.touch=e.clientX<e.currentTarget.clientWidth/2?-1:1;}} onPointerMove={e=>{if(e.buttons && !menu && touchMode)input.current.touch=e.clientX<e.currentTarget.clientWidth/2?-1:1;}} onPointerUp={()=>{input.current.touch=0;}} onPointerCancel={()=>{input.current.touch=0;}}>
+    {palette && <Canvas dpr={[1,1.5]} camera={{fov:72,position:[0,1.6,0]}} gl={{antialias:true}}>
+      <color attach="background" args={[palette.fog]} /><fog attach="fog" args={[palette.fog,7,FOG_END]} />
+      <hemisphereLight args={[palette.moon,palette.fog,.85]} /><directionalLight position={[-15,22,-20]} color={palette.moon} intensity={.7} />
+      <Environment resolution={64}><Lightformer color={palette.moon} intensity={.7} position={[0,10,0]} rotation-x={Math.PI/2} scale={[25,25,1]} /><Lightformer color={palette.green} intensity={.4} position={[-10,3,-15]} scale={[10,4,1]} /><Lightformer color={palette.purple} intensity={.4} position={[10,3,-15]} scale={[10,4,1]} /></Environment>
+      <Suspense fallback={null}><World simulation={simulation} input={input} palette={palette} onPhase={onPhase} /></Suspense><ForestEffects simulation={simulation} />
+    </Canvas>}
+    {menu && <div className="forest-menu">
+      <Button variant="ghost" className="forest-title" onClick={start} aria-label="tap and run!">tap and run!</Button>
+      <section className="forest-glass" aria-label="Futás menü">
+        <img src={icon} className="forest-mark" alt="" width={64} height={64} />
+        <div className="forest-scores"><div><span>Előző futás</span><strong>{last}<small>m</small></strong></div><div><span>Rekord</span><strong>{best}<small>m</small></strong></div></div>
+        <div className="forest-settings"><Button variant="ghost" size="icon" onClick={toggleSound} aria-label={sound?"Hang kikapcsolása":"Hang bekapcsolása"} aria-pressed={sound} title="Hang">{sound?<Volume2/>:<VolumeX/>}</Button><label className="forest-touch"><Checkbox checked={touchMode} onCheckedChange={value=>changeTouch(value===true)} aria-label="Érintéses irányítás"/><Smartphone size={17}/><span>Érintés</span></label></div>
+        <Button variant="ghost" className="forest-start" onClick={start} aria-label="Futás indítása"><ChevronRight size={25}/></Button>
+        {notice && <p role="status" className="forest-notice">{notice}</p>}
+      </section>
+    </div>}
+  </main>;
 }
