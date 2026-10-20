@@ -99,7 +99,7 @@ describe("Terrain and obstacles", () => {
     for (let i = 0; i < 22; i++) stepSimulation(s, 0, 0.05);
     expect(s.distance).toBeGreaterThan(before);
     expect(s.stumble).toBe(0);
-    s.cooldown = 0; s.lastTree = "";
+    s.x = 0; s.z = -0.05;
     expect(collideObstacle(s, { x: 0, z: -0.05, big: false, radius: 0.3, id: "p1" })).toBe(true);
     expect(s.stumble).toBeCloseTo(0.5); expect(s.speedMul).toBeCloseTo(0.85);
   });
