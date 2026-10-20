@@ -10,8 +10,8 @@ function softenLoopEnds(buffer: AudioBuffer) {
     const data = buffer.getChannelData(channel);
     for (let k = 0; k < edge; k++) {
       const g = k / edge;
-      data[k] *= g;
-      data[data.length - 1 - k] *= g;
+      data[k] = (data[k] ?? 0) * g;
+      data[data.length - 1 - k] = (data[data.length - 1 - k] ?? 0) * g;
     }
   }
   return buffer;

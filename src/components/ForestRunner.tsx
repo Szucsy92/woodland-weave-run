@@ -181,7 +181,7 @@ export function ForestRunner() {
         ctx.fillStyle = styles.getPropertyValue(`--forest-${name}`).trim();
         ctx.fillRect(0, 0, 1, 1);
         const data = ctx.getImageData(0, 0, 1, 1).data;
-        p[name] = new THREE.Color().setRGB(data[0] / 255, data[1] / 255, data[2] / 255, THREE.SRGBColorSpace);
+        p[name] = new THREE.Color().setRGB((data[0] ?? 0) / 255, (data[1] ?? 0) / 255, (data[2] ?? 0) / 255, THREE.SRGBColorSpace);
       }
       setPalette(p);
     }
