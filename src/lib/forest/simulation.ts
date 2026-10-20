@@ -6,7 +6,17 @@ export const IMPACT_DURATION = 0.5;
 export const MAX_IMPACTS = 3;
 export type Phase = "menu" | "awakening" | "running" | "falling" | "fallen";
 export type Tree = { x: number; z: number; scale: number; id: string };
+export type Obstacle = { x: number; z: number; big: boolean; radius: number; id: string };
+export type Difficulty = "easy" | "normal" | "hard";
 export type Simulation = ReturnType<typeof makeSimulation>;
+
+// Speed comes from a gentler base with a stronger ramp; density decides how
+// much room the runner has to weave through. Easy is the original balance.
+export const DIFFICULTIES = {
+  easy: { treeGap: 0.57, accel: 100, maxSpeed: 17, obstacleGap: 0.84 },
+  normal: { treeGap: 0.5, accel: 66, maxSpeed: 20, obstacleGap: 0.76 },
+  hard: { treeGap: 0.42, accel: 46, maxSpeed: 23.5, obstacleGap: 0.66 },
+} satisfies Record<Difficulty, { treeGap: number; accel: number; maxSpeed: number; obstacleGap: number }>;
 
 export function hash(x: number, z: number, salt = 0) {
   let h = (x * 374761393 + z * 668265263 + salt * 982451653) | 0;
@@ -14,12 +24,22 @@ export function hash(x: number, z: number, salt = 0) {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
 }
 
-export function treesAround(cx: number, cz: number): Tree[] {
+// Layered irrational-frequency waves: never repeats within a run, but the same
+// formula runs on both CPU (physics, camera, object placement) and GPU
+// (displaced ground), so visuals and movement always agree.
+export function groundHeight(x: number, z: number) {
+  const w1 = Math.sin(x * 0.11 + Math.sin(z * 0.07) * 2.4) * Math.cos(z * 0.09 + Math.sin(x * 0.05) * 2.1);
+  const w2 = Math.sin(z * 0.23 - Math.sin(x * 0.16) * 1.8) * Math.cos(x * 0.19 + Math.sin(z * 0.12) * 1.4);
+  const w3 = Math.sin((x + z) * 0.47 + Math.sin(x * 0.3) * 1.2);
+  return (w1 * 1.15 + w2 * 0.55 + w3 * 0.35) * 0.62;
+}
+
+export function treesAround(cx: number, cz: number, keep = 0.57): Tree[] {
   const trees: Tree[] = [];
   for (let i = -RADIUS; i <= RADIUS; i++) {
     for (let j = -RADIUS; j <= RADIUS; j++) {
       const gx = cx + i, gz = cz + j;
-      if (hash(gx, gz) > 0.57) continue;
+      if (hash(gx, gz) > keep) continue;
       const x = gx * CELL + hash(gx, gz, 1) * CELL;
       const z = gz * CELL + hash(gx, gz, 2) * CELL;
       if (x * x + z * z < 12 * 12) continue;
@@ -29,14 +49,35 @@ export function treesAround(cx: number, cz: number): Tree[] {
   return trees;
 }
 
+// Rocks are big enough to trip over (a real stumble, not damage); undergrowth
+// only drags the pace for a moment.
+export function obstaclesAround(cx: number, cz: number, keep = 0.84): Obstacle[] {
+  const obstacles: Obstacle[] = [];
+  for (let i = -RADIUS; i <= RADIUS; i++) {
+    for (let j = -RADIUS; j <= RADIUS; j++) {
+      const gx = cx + i, gz = cz + j;
+      if (hash(gx, gz, 9) <= keep) continue;
+      const x = gx * CELL + hash(gx, gz, 11) * CELL;
+      const z = gz * CELL + hash(gx, gz, 12) * CELL;
+      if (x * x + z * z < 12 * 12) continue;
+      const big = hash(gx, gz, 13) > 0.62;
+      const radius = big ? 0.5 + hash(gx, gz, 14) * 0.45 : 0.22 + hash(gx, gz, 14) * 0.15;
+      obstacles.push({ x, z, big, radius, id: `o${gx}:${gz}` });
+    }
+  }
+  return obstacles;
+}
+
 export function makeSimulation() {
   return { x: 0, z: 0, heading: 0, distance: 0, elapsed: 0, phaseTime: 0,
     phase: "menu" as Phase, hits: 0, cooldown: 0, impact: 0, impactSide: 1,
-    pushX: 0, lastTree: "", cell: "", trees: [] as Tree[] };
+    pushX: 0, lastTree: "", cell: "", trees: [] as Tree[], obstacles: [] as Obstacle[],
+    difficulty: "easy" as Difficulty, stumble: 0, speedMul: 1, lastObstacle: "" };
 }
 
 export function beginRun(s: Simulation) {
-  Object.assign(s, makeSimulation(), { phase: "awakening" });
+  const { difficulty } = s;
+  Object.assign(s, makeSimulation(), { phase: "awakening", difficulty });
 }
 
 // Physical circle separation, with a small tangential impulse instead of a hard stop.
@@ -64,12 +105,25 @@ export function collide(s: Simulation, tree: Tree) {
   return true;
 }
 
+// Obstacles never damage or stop the runner: a heavy stumble (1 s at 65%
+// speed) for big rocks, a brief drag (0.5 s at 85%) for undergrowth.
+export function collideObstacle(s: Simulation, obstacle: Obstacle) {
+  if (s.phase !== "running" || s.stumble > 0) return false;
+  const distance = Math.hypot(s.x - obstacle.x, s.z - obstacle.z);
+  if (distance >= obstacle.radius + 0.24) return false;
+  s.stumble = obstacle.big ? 1 : 0.5;
+  s.speedMul = obstacle.big ? 0.65 : 0.85;
+  s.lastObstacle = obstacle.id;
+  return true;
+}
+
 export function stepSimulation(s: Simulation, steering: number, delta: number) {
   const dt = Math.min(delta, 0.05);
   s.elapsed += dt;
   s.phaseTime += dt;
   s.impact = Math.max(0, s.impact - dt);
   s.cooldown = Math.max(0, s.cooldown - dt);
+  s.stumble = Math.max(0, s.stumble - dt);
   if (s.phase === "awakening" && s.phaseTime >= 1.15) {
     s.phase = "running"; s.phaseTime = 0;
   }
@@ -77,17 +131,19 @@ export function stepSimulation(s: Simulation, steering: number, delta: number) {
     s.phase = "fallen"; s.phaseTime = 2.8;
   }
   if (s.phase !== "running") return;
+  const level = DIFFICULTIES[s.difficulty];
   const count = Math.ceil(dt / (1 / 120));
   const sub = dt / count;
   for (let i = 0; i < count; i++) {
     if (s.phase !== "running") break;
-    const speed = Math.min(17, 8.4 + s.distance / 100);
+    const speed = Math.min(level.maxSpeed, 8.4 + s.distance / level.accel) * (s.stumble > 0 ? s.speedMul : 1);
     s.heading = Math.max(-MAX_HEADING, Math.min(MAX_HEADING, s.heading - steering * 1.7 * sub));
     s.pushX *= Math.exp(-7 * sub);
     s.x += (-Math.sin(s.heading) * speed + s.pushX) * sub;
     s.z -= Math.cos(s.heading) * speed * sub;
     s.distance += speed * sub;
     for (const tree of s.trees) collide(s, tree);
+    for (const obstacle of s.obstacles) collideObstacle(s, obstacle);
   }
 }
 
