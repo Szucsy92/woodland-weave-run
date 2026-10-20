@@ -31,7 +31,7 @@ export function groundHeight(x: number, z: number) {
   const w1 = Math.sin(x * 0.11 + Math.sin(z * 0.07) * 2.4) * Math.cos(z * 0.09 + Math.sin(x * 0.05) * 2.1);
   const w2 = Math.sin(z * 0.23 - Math.sin(x * 0.16) * 1.8) * Math.cos(x * 0.19 + Math.sin(z * 0.12) * 1.4);
   const w3 = Math.sin((x + z) * 0.47 + Math.sin(x * 0.3) * 1.2);
-  return (w1 * 1.15 + w2 * 0.55 + w3 * 0.35) * 0.62;
+  return (w1 * 1.15 + w2 * 0.55 + w3 * 0.35) * 0.3;
 }
 
 export function treesAround(cx: number, cz: number, keep = 0.57): Tree[] {
@@ -60,7 +60,7 @@ export function obstaclesAround(cx: number, cz: number, keep = 0.84): Obstacle[]
       const x = gx * CELL + hash(gx, gz, 11) * CELL;
       const z = gz * CELL + hash(gx, gz, 12) * CELL;
       if (x * x + z * z < 12 * 12) continue;
-      const big = hash(gx, gz, 13) > 0.62;
+      const big = hash(gx, gz, 13) > 0.86;
       const radius = big ? 0.5 + hash(gx, gz, 14) * 0.45 : 0.22 + hash(gx, gz, 14) * 0.15;
       obstacles.push({ x, z, big, radius, id: `o${gx}:${gz}` });
     }

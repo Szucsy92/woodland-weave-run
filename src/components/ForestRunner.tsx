@@ -25,7 +25,7 @@ float groundHeight(float x, float z) {
   float w1 = sin(x * 0.11 + sin(z * 0.07) * 2.4) * cos(z * 0.09 + sin(x * 0.05) * 2.1);
   float w2 = sin(z * 0.23 - sin(x * 0.16) * 1.8) * cos(x * 0.19 + sin(z * 0.12) * 1.4);
   float w3 = sin((x + z) * 0.47 + sin(x * 0.3) * 1.2);
-  return (w1 * 1.15 + w2 * 0.55 + w3 * 0.35) * 0.62;
+  return (w1 * 1.15 + w2 * 0.55 + w3 * 0.35) * 0.3;
 }`;
 
 function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
@@ -85,9 +85,10 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     };
     const crownGeometry = new THREE.IcosahedronGeometry(1, 1);
     jitter(crownGeometry, .28, .35, 21);
-    const rockGeometry = new THREE.IcosahedronGeometry(1, 1);
-    jitter(rockGeometry, .3, .2, 33);
-    const plantGeometry = new THREE.ConeGeometry(.5, 1, 6);
+    const rockGeometry = new THREE.IcosahedronGeometry(1, 2);
+    jitter(rockGeometry, .18, .14, 33);
+    const plantGeometry = new THREE.IcosahedronGeometry(1, 2);
+    jitter(plantGeometry, .35, .4, 47);
     const canvas = document.createElement("canvas");
     canvas.width = canvas.height = 128;
     const ctx = canvas.getContext("2d");
@@ -134,7 +135,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       const branchMesh = branches.current, crownMesh = crowns.current, rockMesh = rocks.current, plantMesh = plants.current;
       s.trees.forEach((tree, i) => {
         const seedX = Math.floor(tree.x), seedZ = Math.floor(tree.z);
-        const base = groundHeight(tree.x, tree.z) - .45;
+        const base = groundHeight(tree.x, tree.z) - 1.1;
         resources.dummy.rotation.order = "XYZ";
         resources.dummy.position.set(tree.x, base, tree.z);
         resources.dummy.scale.set(tree.scale, 1, tree.scale);
@@ -166,13 +167,13 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
         resources.dummy.rotation.order = "XYZ";
         resources.dummy.rotation.set(0, hash(Math.floor(o.x), Math.floor(o.z), 80) * 6, 0);
         if (o.big) {
-          resources.dummy.position.set(o.x, gy + o.radius * .45, o.z);
-          resources.dummy.scale.setScalar(o.radius * 1.25);
+          resources.dummy.position.set(o.x, gy + o.radius * .18, o.z);
+          resources.dummy.scale.set(o.radius * 1.35, o.radius * (.55 + hash(Math.floor(o.x), Math.floor(o.z), 82) * .35), o.radius * 1.15);
           resources.dummy.updateMatrix();
           rockMesh?.setMatrixAt(rockCount++, resources.dummy.matrix);
         } else {
-          resources.dummy.position.set(o.x, gy + .32, o.z);
-          resources.dummy.scale.set(1.2, .9 + hash(Math.floor(o.x), Math.floor(o.z), 81) * .8, 1.2);
+          resources.dummy.position.set(o.x, gy + .05, o.z);
+          resources.dummy.scale.set(.75, .35 + hash(Math.floor(o.x), Math.floor(o.z), 81) * .3, .75);
           resources.dummy.updateMatrix();
           plantMesh?.setMatrixAt(plantCount++, resources.dummy.matrix);
         }
@@ -200,7 +201,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     const bump = s.impact > 0 ? Math.sin((1 - s.impact / IMPACT_DURATION) * Math.PI) * s.impactSide : 0;
     const leanAmount = lean.current;
     const tripping = Math.min(1, s.stumble * (s.speedMul < .8 ? 1 : 2));
-    const bob = s.phase === "running" ? Math.sin(t * 11) * .025 : Math.sin(t * .5) * .015;
+    const bob = s.phase === "running" ? Math.abs(Math.sin(t * 5.5)) * .018 : Math.sin(t * .5) * .015;
     lean.current += (getSteering(input.current.touchMode, input.current.touch, input.current.tilt) - lean.current) * Math.min(1, raw * 9);
     camera.position.set(
       s.x + fall * .45 + leanAmount * .3,
@@ -208,7 +209,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       s.z + fall * .65);
     resources.target.set(
       s.x - Math.sin(s.heading) * 18,
-      groundHeight(s.x - Math.sin(s.heading) * 18, s.z - Math.cos(s.heading) * 18) + 1.65 + fall * 3,
+      groundHeight(s.x, s.z) * .6 + groundHeight(s.x - Math.sin(s.heading) * 18, s.z - Math.cos(s.heading) * 18) * .4 + 1.62 + fall * 3,
       s.z - Math.cos(s.heading) * 18);
     camera.lookAt(resources.target);
     camera.rotateX(bump * .085 + waking * Math.sin(t * 5) * .045 + fall * .065 * Math.sin(t * .32) + tripping * Math.sin(t * 17) * .085);
@@ -240,7 +241,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       ))}
     </group>
     <mesh ref={ground} rotation-x={-Math.PI / 2} material={resources.groundMaterial}>
-      <planeGeometry args={[200, 200, 1, 1]} />
+      <planeGeometry args={[200, 200, 160, 160]} />
     </mesh>
     <instancedMesh ref={trunks} args={[resources.trunkGeometry, undefined, MAX_INSTANCES]} frustumCulled={false}>
       <meshStandardMaterial map={resources.bark} normalMap={resources.barkN} roughnessMap={resources.barkR} normalScale={new THREE.Vector2(.7, .7)} color={palette.trunk} roughness={.95} metalness={0} />
@@ -252,10 +253,10 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       <meshStandardMaterial color={palette.crown} roughness={1} metalness={0} flatShading />
     </instancedMesh>
     <instancedMesh ref={rocks} args={[resources.rockGeometry, undefined, MAX_INSTANCES]} frustumCulled={false}>
-      <meshStandardMaterial color={palette.rock} roughness={.92} metalness={0} flatShading />
+      <meshStandardMaterial color={palette.rock} roughness={.55} metalness={0} />
     </instancedMesh>
     <instancedMesh ref={plants} args={[resources.plantGeometry, undefined, MAX_INSTANCES]} frustumCulled={false}>
-      <meshStandardMaterial color={palette.plant} roughness={1} metalness={0} flatShading />
+      <meshStandardMaterial color={palette.plant} roughness={.9} metalness={0} />
     </instancedMesh>
   </>;
 }
