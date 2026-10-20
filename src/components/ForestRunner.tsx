@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObjec
 import { ArrowLeft, Settings } from "lucide-react";
 import * as THREE from "three";
 import { ForestEffects } from "./ForestEffects";
-import ForestDrone from "@/lib/forest/drone";
+import { ForestDrone } from "@/lib/forest/drone";
 import { beginRun, CELL, DIFFICULTIES, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, obstaclesAround, orientationValue, RADIUS, stepSimulation, treesAround, type Difficulty, type Phase, type Simulation } from "@/lib/forest/simulation";
 import barkUrl from "@/assets/wet-bark.jpg";
 import floorUrl from "@/assets/wet-ground.jpg";
