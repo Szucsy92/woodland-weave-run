@@ -62,6 +62,18 @@
 }
 
 :root {
+  --forest-fog: oklch(0.265 0.014 305);
+  --forest-moon: oklch(0.74 0.035 290);
+  --forest-lamp: oklch(0.88 0.015 90);
+  --forest-green: oklch(0.82 0.17 155);
+  --forest-purple: oklch(0.7 0.19 305);
+  --forest-surface: oklch(0.76 0.006 290);
+  --forest-launch: oklch(0.277 0 0);
+  --forest-glass: oklch(0.36 0.009 290 / 0.3);
+  --forest-edge: oklch(0.87 0.01 290 / 0.2);
+  --forest-text: oklch(0.94 0.004 290);
+  --forest-muted: oklch(0.77 0.015 290);
+  --forest-shadow: 0 16px 70px oklch(0.12 0.01 290 / 0.35), inset 0 1px 0 oklch(1 0 0 / 0.1);
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.129 0.042 264.695);
@@ -138,7 +150,27 @@
   }
 
   body {
-    background-color: var(--color-background);
+    background-color: var(--forest-launch);
     color: var(--color-foreground);
   }
 }
+
+html, body { margin: 0; min-height: 100%; overscroll-behavior: none; }
+.forest-game { position: fixed; inset: 0; width: 100%; height: 100dvh; overflow: hidden; background: var(--forest-launch); color: var(--forest-text); touch-action: none; font-family: "Manrope", sans-serif; user-select: none; }
+.forest-menu { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 32px; padding: max(22px, env(safe-area-inset-top)) max(22px, env(safe-area-inset-right)) max(22px, env(safe-area-inset-bottom)) max(22px, env(safe-area-inset-left)); pointer-events: none; animation: forest-arrive 1.4s ease both; }
+.forest-title { pointer-events: auto; color: var(--forest-text); font-size: 24px; font-weight: 400; letter-spacing: 0; height: auto; padding: 8px 16px; background: transparent; }
+.forest-title:hover { background: transparent; opacity: .8; }
+.forest-glass { pointer-events: auto; width: min(340px, 100%); border-radius: 8px; background: var(--forest-glass); border: 1px solid var(--forest-edge); backdrop-filter: blur(22px) saturate(65%); box-shadow: var(--forest-shadow); padding: 24px 26px 12px; text-align: center; }
+.forest-mark { width: 52px; height: 52px; object-fit: cover; opacity: .85; margin: 0 auto 22px; border-radius: 4px; }
+.forest-scores { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 22px; }
+.forest-scores > div + div { border-left: 1px solid var(--forest-edge); }
+.forest-scores span { display: block; color: var(--forest-muted); font-size: 11px; margin-bottom: 7px; }
+.forest-scores strong { font-weight: 300; font-size: 32px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.forest-scores small { margin-left: 5px; font-size: 12px; color: var(--forest-muted); }
+.forest-settings { display: flex; justify-content: center; align-items: center; gap: 28px; border-top: 1px solid var(--forest-edge); padding-top: 12px; }
+.forest-touch { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--forest-muted); cursor: pointer; min-height: 44px; }
+.forest-start { width: 52px; height: 42px; margin-top: 8px; color: var(--forest-text); }
+.forest-notice { color: var(--forest-muted); font-size: 12px; line-height: 1.6; margin: 6px 0 8px; }
+@keyframes forest-arrive { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@media (orientation: landscape) and (max-height: 600px) { .forest-menu { gap: 12px; } .forest-title { font-size: 22px; } .forest-glass { padding: 14px 24px 6px; width: 340px; } .forest-mark { width: 38px; height: 38px; margin-bottom: 12px; } .forest-scores { margin-bottom: 12px; } .forest-scores strong { font-size: 28px; } .forest-settings { padding-top: 4px; } .forest-start { margin-top: 0; height: 32px; } }
+@media (prefers-reduced-motion: reduce) { .forest-menu { animation: none; } }
