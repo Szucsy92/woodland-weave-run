@@ -14,8 +14,8 @@ export type Simulation = ReturnType<typeof makeSimulation>;
 // much room the runner has to weave through. Easy is the original balance.
 export const DIFFICULTIES = {
   easy: { treeGap: 0.57, accel: 100, maxSpeed: 17, obstacleGap: 0.84 },
-  normal: { treeGap: 0.5, accel: 66, maxSpeed: 20, obstacleGap: 0.76 },
-  hard: { treeGap: 0.42, accel: 46, maxSpeed: 23.5, obstacleGap: 0.66 },
+  normal: { treeGap: 0.66, accel: 66, maxSpeed: 20, obstacleGap: 0.76 },
+  hard: { treeGap: 0.75, accel: 46, maxSpeed: 23.5, obstacleGap: 0.66 },
 } satisfies Record<Difficulty, { treeGap: number; accel: number; maxSpeed: number; obstacleGap: number }>;
 
 export function hash(x: number, z: number, salt = 0) {

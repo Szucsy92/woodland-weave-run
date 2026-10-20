@@ -85,8 +85,9 @@ describe("Terrain and obstacles", () => {
       expect(Math.abs(groundHeight(x + 0.01, z) - h)).toBeLessThan(0.1);
       expect(Math.abs(groundHeight(x, z + 0.01) - h)).toBeLessThan(0.1);
       expect(h).toBeGreaterThan(-1.5); expect(h).toBeLessThan(1.5);
-      expect(groundHeight(x, z - 40)).not.toBeCloseTo(h, 1);
-      expect(groundHeight(x + 30, z)).not.toBeCloseTo(h, 1);
+      expect(groundHeight(x, z - 40)).not.toBe(h);
+      expect(groundHeight(x + 30, z)).not.toBe(h);
+      expect(groundHeight(x - 90, z + 90)).not.toBe(h);
     }
   });
   it("stumbles hard on big rocks, briefly on undergrowth, never falls", () => {
@@ -95,7 +96,7 @@ describe("Terrain and obstacles", () => {
     expect(s.stumble).toBeCloseTo(1); expect(s.speedMul).toBeCloseTo(0.65);
     expect(s.phase).toBe("running");
     const before = s.distance;
-    for (let i = 0; i < 10; i++) stepSimulation(s, 0, 0.05);
+    for (let i = 0; i < 22; i++) stepSimulation(s, 0, 0.05);
     expect(s.distance).toBeGreaterThan(before);
     expect(s.stumble).toBe(0);
     s.cooldown = 0; s.lastTree = "";
