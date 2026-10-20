@@ -17,12 +17,12 @@ describe("Agreed forest rules", () => {
     collide(s, tree); expect(s.x).toBeGreaterThan(0.67); expect(s.pushX).toBeGreaterThan(0);
     s.x = 0.5; s.cooldown = 0; collide(s, tree); expect(s.hits).toBe(1);
   });
-  it("uses exactly a 250 ms soft-impact envelope", () => {
-    expect(IMPACT_DURATION).toBe(0.25);
+  it("uses exactly a 500 ms soft-impact envelope", () => {
+    expect(IMPACT_DURATION).toBe(0.5);
     const s = makeSimulation(); s.phase = "running"; s.x = 0.4;
     collide(s, { x: 0, z: 0, scale: 1, id: "one" });
-    expect(s.impact).toBe(0.25);
-    for (let i = 0; i < 6; i++) stepSimulation(s, 0, 0.05);
+    expect(s.impact).toBe(0.5);
+    for (let i = 0; i < 12; i++) stepSimulation(s, 0, 0.05);
     expect(s.impact).toBe(0);
   });
   it("never turns or runs backwards, including sustained steering", () => {
