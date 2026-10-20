@@ -25,8 +25,8 @@ describe("Agreed forest rules", () => {
     for (let i = 0; i < 12; i++) stepSimulation(s, 0, 0.05);
     expect(s.impact).toBe(0);
   });
-  it("caps the total turning arc at 100 degrees", () => {
-    expect((MAX_HEADING * 2 * 180) / Math.PI).toBeCloseTo(100, 5);
+  it("caps the total turning arc at 75 degrees", () => {
+    expect((MAX_HEADING * 2 * 180) / Math.PI).toBeCloseTo(75, 5);
   });
   it("never turns or runs backwards, including sustained steering", () => {
     const s = makeSimulation(); s.phase = "running";

@@ -16,7 +16,9 @@ type Palette = Record<"fog" | "moon" | "lamp" | "green" | "purple" | "lavender" 
 type Input = { tilt: number; touch: number; touchMode: boolean; neutral: number | null; angle: number };
 const MAX_INSTANCES = (RADIUS * 2 + 1) ** 2;
 const BRANCHES_PER_TREE = 11;
-const CROWNS_PER_TREE = 6;
+// Five core leaf masses per tree plus a leaf clump on every branch tip.
+const CROWNS_PER_TREE = 5;
+const CROWN_SLOTS = CROWNS_PER_TREE + BRANCHES_PER_TREE;
 
 // Mirrors groundHeight() in the simulation so the displaced ground, the camera
 // height and every planted object always agree.
@@ -60,7 +62,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     [barkN, barkR, floorN, floorR].forEach(t => { t.colorSpace = THREE.NoColorSpace; });
     [bark, barkN, barkR].forEach(t => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(1.5, 7); t.anisotropy = 8; });
     [floor, floorN, floorR].forEach(t => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(64, 64); t.anisotropy = 8; });
-    // Bare trunks, low enough that neighbouring crowns touch overhead.
+    // Trunks with low crowns (~15-17.5 m) that neighbours' foliage merges into overhead.
     const trunkGeometry = new THREE.CylinderGeometry(.36, .46, 22, 14, 24);
     const pos = trunkGeometry.getAttribute("position") as THREE.BufferAttribute;
     for (let i = 0; i < pos.count; i++) {
@@ -92,7 +94,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       }
       geometry.computeVertexNormals();
     };
-    const crownGeometry = new THREE.IcosahedronGeometry(1, 3);
+    const crownGeometry = new THREE.IcosahedronGeometry(1, 2);
     {
       const p = crownGeometry.getAttribute("position") as THREE.BufferAttribute;
       const v = new THREE.Vector3();
