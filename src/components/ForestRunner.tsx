@@ -55,6 +55,8 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
   const crowns = useRef<THREE.InstancedMesh>(null);
   const rocks = useRef<THREE.InstancedMesh>(null);
   const plants = useRef<THREE.InstancedMesh>(null);
+  const shadows = useRef<THREE.InstancedMesh>(null);
+  const mist = useRef<THREE.Group>(null);
   const ground = useRef<THREE.Mesh>(null);
   const lamp = useRef<THREE.PointLight>(null);
   const glow = useRef<THREE.Group>(null);
@@ -141,20 +143,48 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     });
     groundMaterial.onBeforeCompile = shader => {
       shader.vertexShader = shader.vertexShader
-        .replace("#include <common>", `#include <common>\n${GROUND_GLSL}`)
+        .replace("#include <common>", `#include <common>\nvarying vec2 vGW;\n${GROUND_GLSL}`)
         .replace("#include <beginnormal_vertex>", `vec4 gwp = modelMatrix * vec4(position, 1.0);
           float gh = groundHeight(gwp.x, gwp.z);
+          vGW = gwp.xz;
           float ge = .55;
           float gxh = (groundHeight(gwp.x + ge, gwp.z) - groundHeight(gwp.x - ge, gwp.z)) / (2. * ge);
           float gzh = (groundHeight(gwp.x, gwp.z + ge) - groundHeight(gwp.x, gwp.z - ge)) / (2. * ge);
           #include <beginnormal_vertex>
           objectNormal = normalize(objectNormal + vec3(-gxh, gzh, 0.));`)
         .replace("#include <begin_vertex>", `#include <begin_vertex>\ntransformed.z += gh;`);
+      // Baked surface variety: mossy patches, darker damp earth and leaf litter, no extra lights.
+      shader.fragmentShader = shader.fragmentShader
+        .replace("#include <common>", `#include <common>\nvarying vec2 vGW;`)
+        .replace("#include <map_fragment>", `#include <map_fragment>
+          float mossN = sin(vGW.x * .21 + sin(vGW.y * .17) * 2.) * sin(vGW.y * .19 - sin(vGW.x * .13) * 1.7);
+          float litN = sin(vGW.x * 1.3 + vGW.y * .7) * sin(vGW.y * 1.1 - vGW.x * .5);
+          float moss = smoothstep(.25, .75, mossN);
+          float damp = smoothstep(.2, -.6, mossN);
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(.72, 1.18, .74), moss * .6);
+          diffuseColor.rgb *= 1. - damp * .3;
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.25, 1.02, .78), smoothstep(.55, .95, litN) * .35);`);
     };
-    return { bark, barkN, barkR, floor, floorN, floorR, trunkGeometry, branchGeometry, crownGeometry, rockGeometry, plantGeometry, groundMaterial, glowTexture: new THREE.CanvasTexture(canvas), dummy: new THREE.Object3D(), target: new THREE.Vector3() };
+    const trunkMaterial = new THREE.MeshStandardMaterial({
+      map: bark, normalMap: barkN, roughnessMap: barkR, normalScale: new THREE.Vector2(.75, .75), color: palette.trunk, roughness: .95, metalness: 0,
+    });
+    trunkMaterial.onBeforeCompile = shader => {
+      // Baked contact darkening and moss at the trunk foot instead of dynamic shadows.
+      shader.vertexShader = shader.vertexShader
+        .replace("#include <common>", `#include <common>\nvarying float vTH;`)
+        .replace("#include <begin_vertex>", `#include <begin_vertex>\nvTH = position.y;`);
+      shader.fragmentShader = shader.fragmentShader
+        .replace("#include <common>", `#include <common>\nvarying float vTH;`)
+        .replace("#include <map_fragment>", `#include <map_fragment>
+          float foot = 1. - smoothstep(1.0, 3.2, vTH);
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(.75, 1.15, .72), foot * .55);
+          diffuseColor.rgb *= mix(.45, 1., smoothstep(.9, 2.4, vTH)) * mix(1., .7, smoothstep(10., 18., vTH));`);
+    };
+    return { bark, barkN, barkR, floor, floorN, floorR, trunkGeometry, branchGeometry, crownGeometry, rockGeometry, plantGeometry, groundMaterial, trunkMaterial, shadowGeometry: new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), glowTexture: new THREE.CanvasTexture(canvas), dummy: new THREE.Object3D(), target: new THREE.Vector3() };
   }, [palette]);
   useEffect(() => () => {
-    [resources.trunkGeometry, resources.branchGeometry, resources.crownGeometry, resources.rockGeometry, resources.plantGeometry, resources.glowTexture, resources.groundMaterial].forEach(g => g.dispose());
+    [resources.trunkGeometry, resources.branchGeometry, resources.crownGeometry, resources.rockGeometry, resources.plantGeometry, resources.glowTexture, resources.groundMaterial, resources.trunkMaterial, resources.shadowGeometry].forEach(g => g.dispose());
+
     [resources.bark, resources.barkN, resources.barkR, resources.floor, resources.floorN, resources.floorR].forEach(t => t.dispose());
   }, [resources]);
   const previousPhase = useRef<Phase>("menu");
@@ -177,6 +207,11 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
         resources.dummy.rotation.set(0, hash(seedX, seedZ, 5) * 6, 0);
         resources.dummy.updateMatrix();
         trunkMesh.setMatrixAt(i, resources.dummy.matrix);
+        // Soft dark contact patch where the trunk meets the ground.
+        resources.dummy.position.set(tree.x, groundHeight(tree.x, tree.z) + .05, tree.z);
+        resources.dummy.scale.set(3.4 * tree.scale, 1, 3.4 * tree.scale);
+        resources.dummy.updateMatrix();
+        shadows.current?.setMatrixAt(i, resources.dummy.matrix);
         for (let b = 0; b < BRANCHES_PER_TREE; b++) {
           const seed = hash(seedX, seedZ, 20 + b);
           // First branches fan up into the crown; the rest stick out from the trunk lower down.
@@ -231,7 +266,12 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
           resources.dummy.position.set(o.x, gy + o.radius * .08, o.z);
           resources.dummy.scale.set(o.radius * 1.35, o.radius * (.55 + hash(Math.floor(o.x), Math.floor(o.z), 82) * .35), o.radius * 1.15);
           resources.dummy.updateMatrix();
-          rockMesh?.setMatrixAt(rockCount++, resources.dummy.matrix);
+          rockMesh?.setMatrixAt(rockCount, resources.dummy.matrix);
+          resources.dummy.position.set(o.x, groundHeight(o.x, o.z) + .05, o.z);
+          resources.dummy.scale.set(o.radius * 3.2, 1, o.radius * 3);
+          resources.dummy.updateMatrix();
+          shadows.current?.setMatrixAt(s.trees.length + rockCount, resources.dummy.matrix);
+          rockCount++;
         } else {
           resources.dummy.position.set(o.x, gy - .05, o.z);
           resources.dummy.scale.set(.75, .35 + hash(Math.floor(o.x), Math.floor(o.z), 81) * .3, .75);
@@ -239,6 +279,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
           plantMesh?.setMatrixAt(plantCount++, resources.dummy.matrix);
         }
       });
+      if (shadows.current) { shadows.current.count = s.trees.length + rockCount; shadows.current.instanceMatrix.needsUpdate = true; }
       if (rockMesh) { rockMesh.count = rockCount; rockMesh.instanceMatrix.needsUpdate = true; }
       if (plantMesh) { plantMesh.count = plantCount; plantMesh.instanceMatrix.needsUpdate = true; }
       trunkMesh.instanceMatrix.needsUpdate = true;
@@ -286,6 +327,16 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       const flicker = lying ? (Math.sin(t * 5.7) + Math.sin(t * 13.2) > .25 ? .14 : .035) : 1 - waking * .8;
       lamp.current.intensity = 65 * flicker;
     }
+    if (mist.current) {
+      // Low layered mist drifting between the trunks ahead; a few large soft sprites only.
+      mist.current.children.forEach((child, i) => {
+        const d = 10 + i * 6;
+        const a = s.heading + Math.sin(t * .05 + i * 2.1) * .5 + (i % 2 ? .35 : -.35);
+        const mx = s.x - Math.sin(a) * d, mz = s.z - Math.cos(a) * d;
+        child.position.set(mx, groundHeight(mx, mz) + .7 + i * .15, mz);
+        child.scale.set(14 + i * 3, 3.2, 1);
+      });
+    }
     if (glow.current) {
       // Behind the fog wall, past every visible trunk. Constant distance keeps the lights unreachable.
       glow.current.position.set(s.x, groundHeight(s.x, s.z - 42) + 4.2, s.z - 42);
@@ -311,12 +362,20 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
           </sprite>
         ))}
     </group>
+    <group ref={mist}>
+      {[0, 1, 2, 3].map(i => (
+        <sprite key={i}>
+          <spriteMaterial map={resources.glowTexture} color={palette.moon} transparent opacity={.07} depthWrite={false} />
+        </sprite>
+      ))}
+    </group>
+    <instancedMesh ref={shadows} args={[resources.shadowGeometry, undefined, MAX_INSTANCES * 2]} frustumCulled={false} renderOrder={1}>
+      <meshBasicMaterial map={resources.glowTexture} color="black" transparent opacity={.6} depthWrite={false} polygonOffset polygonOffsetFactor={-2} />
+    </instancedMesh>
     <mesh ref={ground} rotation-x={-Math.PI / 2} material={resources.groundMaterial}>
       <planeGeometry args={[200, 200, 160, 160]} />
     </mesh>
-    <instancedMesh ref={trunks} args={[resources.trunkGeometry, undefined, MAX_INSTANCES]} frustumCulled={false}>
-      <meshStandardMaterial map={resources.bark} normalMap={resources.barkN} roughnessMap={resources.barkR} normalScale={new THREE.Vector2(.7, .7)} color={palette.trunk} roughness={.95} metalness={0} />
-    </instancedMesh>
+    <instancedMesh ref={trunks} args={[resources.trunkGeometry, undefined, MAX_INSTANCES]} material={resources.trunkMaterial} frustumCulled={false} />
     <instancedMesh ref={branches} args={[resources.branchGeometry, undefined, MAX_INSTANCES * BRANCHES_PER_TREE]} frustumCulled={false}>
       <meshStandardMaterial map={resources.bark} normalMap={resources.barkN} roughnessMap={resources.barkR} normalScale={new THREE.Vector2(.7, .7)} color={palette.trunk} roughness={.95} metalness={0} />
     </instancedMesh>
