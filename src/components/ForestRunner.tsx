@@ -220,17 +220,20 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       if (branchMesh) branchMesh.count = s.trees.length * BRANCHES_PER_TREE;
       if (crownMesh) crownMesh.count = s.trees.length * CROWN_SLOTS;
       let rockCount = 0, plantCount = 0;
+      // Lowest ground point under the footprint, so nothing floats on a slope.
+      const footGround = (x: number, z: number, r: number) => Math.min(groundHeight(x, z),
+        groundHeight(x + r, z), groundHeight(x - r, z), groundHeight(x, z + r), groundHeight(x, z - r));
       s.obstacles.forEach((o, i) => {
-        const gy = groundHeight(o.x, o.z);
+        const gy = footGround(o.x, o.z, o.big ? o.radius * 1.3 : .7);
         resources.dummy.rotation.order = "XYZ";
         resources.dummy.rotation.set(0, hash(Math.floor(o.x), Math.floor(o.z), 80) * 6, 0);
         if (o.big) {
-          resources.dummy.position.set(o.x, gy + o.radius * .18, o.z);
+          resources.dummy.position.set(o.x, gy + o.radius * .08, o.z);
           resources.dummy.scale.set(o.radius * 1.35, o.radius * (.55 + hash(Math.floor(o.x), Math.floor(o.z), 82) * .35), o.radius * 1.15);
           resources.dummy.updateMatrix();
           rockMesh?.setMatrixAt(rockCount++, resources.dummy.matrix);
         } else {
-          resources.dummy.position.set(o.x, gy + .05, o.z);
+          resources.dummy.position.set(o.x, gy - .05, o.z);
           resources.dummy.scale.set(.75, .35 + hash(Math.floor(o.x), Math.floor(o.z), 81) * .3, .75);
           resources.dummy.updateMatrix();
           plantMesh?.setMatrixAt(plantCount++, resources.dummy.matrix);
