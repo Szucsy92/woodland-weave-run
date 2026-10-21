@@ -206,11 +206,11 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
         resources.dummy.rotation.order = "XYZ";
         for (let c = 0; c < CROWNS_PER_TREE; c++) {
           // Overlapping, irregular leaf masses, low enough and wide enough to merge with neighbours.
-          const spread = c === 0 ? .5 : 2.2 + hash(seedX, seedZ, 81 + c) * 3.2;
+          const spread = c === 0 ? .5 : 2.6 + hash(seedX, seedZ, 81 + c) * 3.6;
           const angle = hash(seedX, seedZ, 74 + c) * Math.PI * 2;
-          resources.dummy.position.set(tree.x + Math.cos(angle) * spread, base + 15.4 + hash(seedX, seedZ, 71 + c * 3) * 2.2, tree.z + Math.sin(angle) * spread);
+          resources.dummy.position.set(tree.x + Math.cos(angle) * spread, base + 15.2 + hash(seedX, seedZ, 71 + c * 3) * 2.0, tree.z + Math.sin(angle) * spread);
           resources.dummy.rotation.set((hash(seedX, seedZ, 83 + c) - .5) * .9, angle, (hash(seedX, seedZ, 77 + c) - .5) * .9);
-          const r = (c === 0 ? 3.6 : 2.4) + hash(seedX, seedZ, 73 + c) * 2.0;
+          const r = (c === 0 ? 3.9 : 2.8) + hash(seedX, seedZ, 73 + c) * 2.0;
           resources.dummy.scale.set(r * (.8 + hash(seedX, seedZ, 85 + c) * .6) * tree.scale, r * (.45 + hash(seedX, seedZ, 87 + c) * .4) * tree.scale, r * (.7 + hash(seedX, seedZ, 79 + c) * .6) * tree.scale);
           resources.dummy.updateMatrix();
           crownMesh?.setMatrixAt(i * CROWN_SLOTS + c, resources.dummy.matrix);
