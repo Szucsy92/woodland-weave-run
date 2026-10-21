@@ -141,20 +141,48 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     });
     groundMaterial.onBeforeCompile = shader => {
       shader.vertexShader = shader.vertexShader
-        .replace("#include <common>", `#include <common>\n${GROUND_GLSL}`)
+        .replace("#include <common>", `#include <common>\nvarying vec2 vGW;\n${GROUND_GLSL}`)
         .replace("#include <beginnormal_vertex>", `vec4 gwp = modelMatrix * vec4(position, 1.0);
           float gh = groundHeight(gwp.x, gwp.z);
+          vGW = gwp.xz;
           float ge = .55;
           float gxh = (groundHeight(gwp.x + ge, gwp.z) - groundHeight(gwp.x - ge, gwp.z)) / (2. * ge);
           float gzh = (groundHeight(gwp.x, gwp.z + ge) - groundHeight(gwp.x, gwp.z - ge)) / (2. * ge);
           #include <beginnormal_vertex>
           objectNormal = normalize(objectNormal + vec3(-gxh, gzh, 0.));`)
         .replace("#include <begin_vertex>", `#include <begin_vertex>\ntransformed.z += gh;`);
+      // Baked surface variety: mossy patches, darker damp earth and leaf litter, no extra lights.
+      shader.fragmentShader = shader.fragmentShader
+        .replace("#include <common>", `#include <common>\nvarying vec2 vGW;`)
+        .replace("#include <map_fragment>", `#include <map_fragment>
+          float mossN = sin(vGW.x * .21 + sin(vGW.y * .17) * 2.) * sin(vGW.y * .19 - sin(vGW.x * .13) * 1.7);
+          float litN = sin(vGW.x * 1.3 + vGW.y * .7) * sin(vGW.y * 1.1 - vGW.x * .5);
+          float moss = smoothstep(.25, .75, mossN);
+          float damp = smoothstep(.2, -.6, mossN);
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(.72, 1.18, .74), moss * .6);
+          diffuseColor.rgb *= 1. - damp * .3;
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.25, 1.02, .78), smoothstep(.55, .95, litN) * .35);`);
     };
-    return { bark, barkN, barkR, floor, floorN, floorR, trunkGeometry, branchGeometry, crownGeometry, rockGeometry, plantGeometry, groundMaterial, glowTexture: new THREE.CanvasTexture(canvas), dummy: new THREE.Object3D(), target: new THREE.Vector3() };
+    const trunkMaterial = new THREE.MeshStandardMaterial({
+      map: bark, normalMap: barkN, roughnessMap: barkR, normalScale: new THREE.Vector2(.75, .75), color: palette.trunk, roughness: .95, metalness: 0,
+    });
+    trunkMaterial.onBeforeCompile = shader => {
+      // Baked contact darkening and moss at the trunk foot instead of dynamic shadows.
+      shader.vertexShader = shader.vertexShader
+        .replace("#include <common>", `#include <common>\nvarying float vTH;`)
+        .replace("#include <begin_vertex>", `#include <begin_vertex>\nvTH = position.y;`);
+      shader.fragmentShader = shader.fragmentShader
+        .replace("#include <common>", `#include <common>\nvarying float vTH;`)
+        .replace("#include <map_fragment>", `#include <map_fragment>
+          float foot = 1. - smoothstep(1.0, 3.2, vTH);
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(.75, 1.15, .72), foot * .55);
+          diffuseColor.rgb *= mix(.45, 1., smoothstep(.9, 2.4, vTH)) * mix(1., .7, smoothstep(10., 18., vTH));`);
+    };
+    return { bark, barkN, barkR, floor, floorN, floorR, trunkGeometry, branchGeometry, crownGeometry, rockGeometry, plantGeometry, groundMaterial, trunkMaterial, shadowGeometry: new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), glowTexture: new THREE.CanvasTexture(canvas), dummy: new THREE.Object3D(), target: new THREE.Vector3() };
   }, [palette]);
   useEffect(() => () => {
-    [resources.trunkGeometry, resources.branchGeometry, resources.crownGeometry, resources.rockGeometry, resources.plantGeometry, resources.glowTexture, resources.groundMaterial].forEach(g => g.dispose());
+    [resources.trunkGeometry, resources.branchGeometry, resources.crownGeometry, resources.rockGeometry, resources.plantGeometry, resources.glowTexture, resources.groundMaterial, resources.trunkMaterial, resources.shadowGeometry].forEach(g => g.dispose());
+
     [resources.bark, resources.barkN, resources.barkR, resources.floor, resources.floorN, resources.floorR].forEach(t => t.dispose());
   }, [resources]);
   const previousPhase = useRef<Phase>("menu");
