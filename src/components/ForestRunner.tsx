@@ -166,7 +166,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
           diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.25, 1.02, .78), smoothstep(.55, .95, litN) * .35);`);
     };
     const trunkMaterial = new THREE.MeshStandardMaterial({
-      map: bark, normalMap: barkN, roughnessMap: barkR, normalScale: new THREE.Vector2(.75, .75), color: palette.trunk, roughness: .95, metalness: 0,
+      map: bark, normalMap: barkN, roughnessMap: barkR, normalScale: new THREE.Vector2(.75, .75), color: palette.trunk, roughness: .8, metalness: 0,
     });
     trunkMaterial.onBeforeCompile = shader => {
       // Baked contact darkening and moss at the trunk foot instead of dynamic shadows.
@@ -178,7 +178,13 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
         .replace("#include <map_fragment>", `#include <map_fragment>
           float foot = 1. - smoothstep(1.0, 3.2, vTH);
           diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(.75, 1.15, .72), foot * .55);
-          diffuseColor.rgb *= mix(.45, 1., smoothstep(.9, 2.4, vTH)) * mix(1., .7, smoothstep(10., 18., vTH));`);
+          diffuseColor.rgb *= mix(.45, 1., smoothstep(.9, 2.4, vTH)) * mix(1., .7, smoothstep(10., 18., vTH));`)
+        .replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>
+          // Soft wet-bark rim glint, only on trunks close to the runner.
+          float near = 1. - smoothstep(4., 14., length(vViewPosition));
+          float rim = pow(1. - abs(dot(normal, normalize(vViewPosition))), 3.);
+          vec3 tint = mix(vec3(.18, .55, .35), vec3(.42, .26, .62), smoothstep(-.3, .3, sin(vTH * .35)));
+          totalEmissiveRadiance += tint * rim * near * .22 * smoothstep(.6, 2., vTH);`);
     };
     return { bark, barkN, barkR, floor, floorN, floorR, trunkGeometry, branchGeometry, crownGeometry, rockGeometry, plantGeometry, groundMaterial, trunkMaterial, shadowGeometry: new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), glowTexture: new THREE.CanvasTexture(canvas), dummy: new THREE.Object3D(), target: new THREE.Vector3() };
   }, [palette]);
@@ -307,8 +313,8 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     const steering = getSteering(input.current.touchMode, input.current.touch, input.current.tilt);
     // Menu and lying phases: no step rhythm, only a barely noticeable breathing sway.
     const leanTarget = lying ? Math.sin(t * .13) * .035 : steering;
-    const bob = running ? Math.abs(Math.sin(t * 5.5)) * .018 : Math.sin(t * .4) * .012;
-    lean.current += (leanTarget - lean.current) * Math.min(1, raw * (running ? 9 : 2));
+    const bob = running ? Math.abs(Math.sin(t * 7.2)) * .02 : Math.sin(t * .4) * .012;
+    lean.current += (leanTarget - lean.current) * Math.min(1, raw * (running ? 15 : 2));
     camera.position.set(
       s.x + fall * .45 + leanAmount * .3,
       groundHeight(s.x, s.z) + 1.6 - fall * 1.28 + bob,
@@ -320,7 +326,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     camera.lookAt(resources.target);
     camera.rotateX(bump * .085 + waking * Math.sin(t * 5) * .045 + fall * .065 * Math.sin(t * .32) + tripping * Math.sin(t * 17) * .085);
     camera.rotateY(-leanAmount * .06);
-    camera.rotateZ(-leanAmount * .055 + bump * .12 + fall * .72 + waking * Math.sin(t * 4) * .03 + (running ? Math.sin(t * 5.5) * .018 : Math.sin(t * .4) * .008) + tripping * Math.sin(t * 13) * .07);
+    camera.rotateZ(-leanAmount * .065 + bump * .12 + fall * .72 + waking * Math.sin(t * 4) * .03 + (running ? Math.sin(t * 7.2) * .022 : Math.sin(t * .4) * .008) + tripping * Math.sin(t * 13) * .07);
     if (lamp.current) {
       lamp.current.position.copy(camera.position);
       lamp.current.position.y += .35;
