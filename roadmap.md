@@ -13,4 +13,5 @@
 - [x] Calm breathing menu camera (no step rhythm in menu)
 - [x] Landscape default open + settings switch for all orientations
 - [x] Lower merged canopy (~15-17.5 m), leafy branch tips, canopy light bleed
-- [ ] Verify full play/restart flow and both orientations on a phone
+- [x] Verify full play/restart flow and both orientations in the browser (15/15 tests + live run)
+- [ ] Phone trial by the user (tilt steering, haptics, menu hum audibility), then publish
