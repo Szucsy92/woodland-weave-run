@@ -51,6 +51,14 @@ describe("Agreed forest rules", () => {
       expect(s.z).toBeLessThan(z); expect(Math.abs(s.heading)).toBeLessThanOrEqual(MAX_HEADING);
     }
   });
+  it("recovers from the turn limit: releasing or counter-steering turns back", () => {
+    const s = makeSimulation(); s.phase = "running"; s.heading = MAX_HEADING;
+    for (let i = 0; i < 60; i++) stepSimulation(s, 0, 1 / 60);
+    expect(s.heading).toBeLessThan(MAX_HEADING * 0.4);
+    s.heading = MAX_HEADING;
+    for (let i = 0; i < 30; i++) stepSimulation(s, 1, 1 / 60);
+    expect(s.heading).toBeLessThan(MAX_HEADING * 0.3);
+  });
   it("ignores screen presses until touch mode is explicitly enabled", () => {
     expect(getSteering(false, 1, 0)).toBe(0);
     expect(getSteering(false, -1, 0.5)).toBe(0.5);
