@@ -548,10 +548,13 @@ export function ForestRunner() {
   useEffect(() => {
     const audio = new ForestDrone();
     drone.current = audio;
+    let launchSound = true;
+    let launchOrientation: "landscape" | "any" = "landscape";
     try {
       setBest(Number(localStorage.getItem("forest-best")) || 0);
       setLast(Number(localStorage.getItem("forest-last")) || 0);
-      setSound(localStorage.getItem("forest-sound") !== "off");
+      launchSound = localStorage.getItem("forest-sound") !== "off";
+      setSound(launchSound);
       const touch = localStorage.getItem("forest-touch") === "on";
       setTouchMode(touch);
       input.current.touchMode = touch;
@@ -563,11 +566,13 @@ export function ForestRunner() {
       const vib = localStorage.getItem("forest-haptics") !== "off";
       setHaptics(vib);
       hapticsRef.current = vib;
-      if (localStorage.getItem("forest-orient") === "any") { setOrient("any"); void lockOrientation("any"); }
-      // Start the menu drone at once; the app allows sound before any tap,
-      // browsers simply keep it waiting for the first touch.
-      if (localStorage.getItem("forest-sound") !== "off") audio.unlock();
+      if (localStorage.getItem("forest-orient") === "any") launchOrientation = "any";
     } catch { /* Local storage may be disabled. */ }
+    setOrient(launchOrientation);
+    void lockOrientation(launchOrientation);
+    audio.setMode(launchSound, false);
+    // A storage failure must not stop the default menu sound.
+    if (launchSound) audio.unlock();
     const canvas = document.createElement("canvas");
     canvas.width = canvas.height = 1;
     const ctx = canvas.getContext("2d");
@@ -592,7 +597,15 @@ export function ForestRunner() {
       }
       input.current.tilt = THREE.MathUtils.clamp(raw - (input.current.neutral ?? 0), -1, 1);
     };
-    const visibility = () => { input.current.touch = 0; if (document.hidden) audio.suspend(); };
+    const visibility = () => {
+      input.current.touch = 0;
+      if (document.hidden) audio.suspend();
+      else {
+        let enabled = true;
+        try { enabled = localStorage.getItem("forest-sound") !== "off"; } catch { /* Keep default. */ }
+        if (enabled) audio.unlock();
+      }
+    };
     window.addEventListener("deviceorientation", orientation);
     document.addEventListener("visibilitychange", visibility);
     return () => {
