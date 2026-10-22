@@ -33,7 +33,7 @@ jobs:
         run: bun run build
 
       - name: Sync the bundle into the Android app
-        run: bunx cap sync android
+        run: ./node_modules/.bin/cap sync android
 
       - name: Decode release keystore (optional)
         if: env.HAS_KEYSTORE == 'true'
