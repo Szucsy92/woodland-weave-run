@@ -64,6 +64,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
   const lastStumble = useRef(0);
   const lean = useRef(0);
   const spores = useRef<THREE.Group>(null);
+  const sporeWorld = useRef<{ x: number; z: number; h: number }[]>([]);
   const menuLook = useRef(0);
   const lampSway = useRef(0);
   const { camera } = useThree();
@@ -366,17 +367,37 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       lamp.current.intensity = 65 * flicker;
     }
     if (spores.current) {
-      // A dozen drifting spores that twinkle as they cross the lamplight.
+      // Spores live in the world, scattered deep along the path: the runner
+      // approaches and passes them, and any left behind respawn far ahead.
+      const world = sporeWorld.current;
+      if (world.length === 0) {
+        for (let i = 0; i < 12; i++) {
+          world.push({
+            x: s.x + (hash(i, 11, 6) - .5) * 18,
+            z: s.z - (5 + hash(i, 3, 5) * 65),
+            h: .6 + hash(i, 5, 7) * 2.4,
+          });
+        }
+      }
       spores.current.children.forEach((child, i) => {
         const sprite = child as THREE.Sprite;
         const seed = i * 7.13;
-        const d = 2 + hash(i, 3, 5) * 10;
-        const a = viewHeading + (hash(i, 11, 6) - .5) * 1.6 + Math.sin(t * .11 + seed) * .3;
-        const mx = s.x - Math.sin(a) * d + Math.sin(t * .23 + seed * 2) * .6;
-        const mz = s.z - Math.cos(a) * d + Math.cos(t * .19 + seed) * .6;
-        sprite.position.set(mx, groundHeight(mx, mz) + .6 + hash(i, 5, 7) * 2.2 + Math.sin(t * .5 + seed) * .25, mz);
+        const spore = world[i]!;
+        if (spore.z > s.z + 4) {
+          // Passed by — drift back into the distant depths ahead.
+          spore.z = s.z - (35 + hash(i, Math.floor(s.distance), 5) * 45);
+          spore.x = s.x + (hash(i, Math.floor(s.distance), 6) - .5) * 18;
+          spore.h = .6 + hash(i, Math.floor(s.distance), 7) * 2.4;
+        }
+        const mx = spore.x + Math.sin(t * .23 + seed * 2) * .6;
+        const mz = spore.z + Math.cos(t * .19 + seed) * .6;
+        sprite.position.set(mx, groundHeight(mx, mz) + spore.h + Math.sin(t * .5 + seed) * .25, mz);
+        const dist = Math.hypot(mx - s.x, mz - s.z);
         const twinkle = Math.max(0, Math.sin(t * (.9 + hash(i, 2, 8)) + seed * 3));
-        (sprite.material as THREE.SpriteMaterial).opacity = (.1 + twinkle * .5) * (1 - d / 15);
+        // Fade in from the depths, glow brightest inside the lamplight.
+        const near = Math.max(0, 1 - dist / 40);
+        const lit = Math.max(0, 1 - dist / 14);
+        (sprite.material as THREE.SpriteMaterial).opacity = (.06 + twinkle * .45 * lit + .12 * lit) * near;
         sprite.scale.setScalar(.09 + hash(i, 4, 9) * .1);
       });
     }
