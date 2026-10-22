@@ -938,11 +938,11 @@ export function ForestRunner() {
                 <div><span>Best</span><strong>{best}<small>m</small></strong></div>
               </div>
               {pendingUpdate && !updateDismissed && (
-                <div className="forest-row" data-forest-ui role="status" style={{ flexWrap: "wrap", marginTop: 10 }}>
+                <div className="forest-row" data-forest-ui role="status" style={{ flexWrap: "wrap", marginTop: 10, pointerEvents: "auto" }} onPointerDown={e => e.stopPropagation()} onPointerUp={e => e.stopPropagation()}>
                   <span>{updateDownloading ? "Downloading… then confirm the install." : "New update available!"}</span>
                   {!updateDownloading && <>
-                    <button className="forest-switch" aria-pressed onClick={() => { nativeUpdater()?.download(pendingUpdate.apkUrl); setUpdateDownloading(true); }}>Update</button>
-                    <button className="forest-switch" aria-pressed={false} onClick={() => setUpdateDismissed(true)}>Later</button>
+                    <button className="forest-switch" aria-pressed onClick={e => { e.stopPropagation(); nativeUpdater()?.download(pendingUpdate.apkUrl); setUpdateDownloading(true); }}>Update</button>
+                    <button className="forest-switch" aria-pressed={false} onClick={e => { e.stopPropagation(); setUpdateDismissed(true); }}>Later</button>
                   </>}
                 </div>
               )}
