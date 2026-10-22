@@ -851,6 +851,7 @@ export function ForestRunner() {
                 <button className="forest-switch" aria-pressed={haptics} onClick={toggleHaptics}>{haptics ? "On" : "Off"}</button>
               </div>
               <UpdateRow />
+              </div>
             </div>
   );
   return <main
