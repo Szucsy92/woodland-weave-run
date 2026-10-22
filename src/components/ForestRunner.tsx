@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { ForestEffects } from "./ForestEffects";
 import { ForestDrone } from "@/lib/forest/drone";
 import { beginRun, CELL, DIFFICULTIES, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, obstaclesAround, orientationValue, RADIUS, stepSimulation, treesAround, type Difficulty, type Phase, type Simulation } from "@/lib/forest/simulation";
+import { checkForUpdate, nativeUpdater, type UpdateInfo } from "@/lib/forest/updater";
 import barkUrl from "@/assets/wet-bark.jpg";
 import floorUrl from "@/assets/wet-ground.jpg";
 import barkNormal from "@/assets/bark-normal.jpg";
@@ -800,4 +801,39 @@ export function ForestRunner() {
       </div>
     )}
   </main>;
+}
+
+function UpdateRow() {
+  const [state, setState] = useState<"idle" | "checking" | "latest" | "error" | "web" | "downloading">("idle");
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const check = async () => {
+    const native = nativeUpdater();
+    if (!native) { setState("web"); return; }
+    setState("checking"); setUpdate(null);
+    try {
+      const found = await checkForUpdate(native.versionCode());
+      if (found) { setUpdate(found); setState("idle"); } else setState("latest");
+    } catch { setState("error"); }
+  };
+  const download = () => {
+    const native = nativeUpdater();
+    if (!native || !update) return;
+    native.download(update.apkUrl);
+    setState("downloading");
+  };
+  const label = {
+    idle: "", checking: "Keresés…", latest: "A legfrissebb változatot használod.",
+    error: "Nem sikerült elérni a frissítéseket.", web: "Csak a telefonos alkalmazásban érhető el.",
+    downloading: "Letöltés… utána jóváhagyhatod a telepítést.",
+  }[state];
+  return (
+    <div className="forest-row" style={{ flexWrap: "wrap" }}>
+      <span>Frissítés</span>
+      {update && state !== "downloading"
+        ? <button className="forest-switch" aria-pressed onClick={download}>Letöltés</button>
+        : <button className="forest-switch" aria-pressed={false} disabled={state === "checking" || state === "downloading"} onClick={check}>Keresés</button>}
+      {(update && state !== "downloading") && <small style={{ width: "100%", opacity: .75 }}>Új frissítés érhető el (build {update.build}).</small>}
+      {label && <small style={{ width: "100%", opacity: .75 }}>{label}</small>}
+    </div>
+  );
 }
