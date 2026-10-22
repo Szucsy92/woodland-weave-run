@@ -60,6 +60,11 @@ jobs:
         id: version
         run: echo "name=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
 
+      # Unique, human-readable stamp for every build: 2026-10-22_08-46
+      - name: Build timestamp
+        id: stamp
+        run: echo "ts=$(date -u +%Y-%m-%d_%H-%M)" >> "$GITHUB_OUTPUT"
+
       - name: Build signed release APK
         if: env.HAS_KEYSTORE == 'true'
         working-directory: android
