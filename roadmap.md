@@ -19,6 +19,6 @@
 - [x] Look-around (tilt/drag) after a fall, same damped feel as the menu
 - [x] Capacitor Android app: static prerendered bundle (no server on-device), GitHub Actions APK build with optional signed release
 - [x] User connects GitHub; automatic APK build and Release succeeded
-- [ ] Repair native launch audio, force default landscape, match launcher identity, and hide both system bars
+- [x] Repair native launch audio and foreground resume, force default landscape, match web launcher identity/background, and hide both system bars (including built-in startup bar policy); 23 tests pass
 - [ ] Device-only verification of launch audio, orientation and immersive bars (requires installed APK trial)
 - [ ] Release signing (deferred by user)
