@@ -1,6 +1,6 @@
 // Continuous background loop served from /audio/, filtered per game state.
 const SOURCES = ["/audio/forest-loop.wav", "/audio/forest-loop.mp3"];
-const MENU_HZ = 700;
+const MENU_HZ = 220;
 const RUN_HZ = 4000;
 
 // Removes the click at the loop point: fade both ends to silence (30 ms).
