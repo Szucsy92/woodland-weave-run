@@ -32,7 +32,7 @@ describe("Continuous forest soundtrack", () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(4) })));
     audio = new ForestDrone();
   });
-  afterEach(() => { audio.dispose(); vi.useRealTimers(); vi.unstubAllGlobals(); delete (window as unknown as Record<string, unknown>).AndroidOrientation; });
+  afterEach(() => { audio.dispose(); vi.useRealTimers(); vi.unstubAllGlobals(); delete (window as unknown as Record<string, unknown>)["AndroidOrientation"]; });
 
   it("starts the menu loop without a tap at 220 Hz", async () => {
     audio.unlock();
@@ -65,7 +65,7 @@ describe("Continuous forest soundtrack", () => {
 
   it("retries suspended native startup and stops retrying after disposal", async () => {
     vi.useFakeTimers();
-    (window as unknown as Record<string, unknown>).AndroidOrientation = { set: vi.fn() };
+    (window as unknown as Record<string, unknown>)["AndroidOrientation"] = { set: vi.fn() };
     ctx.resume.mockImplementation(async () => {});
     audio.unlock();
     await vi.advanceTimersByTimeAsync(750);
