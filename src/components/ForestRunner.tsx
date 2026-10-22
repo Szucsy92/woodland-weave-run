@@ -437,11 +437,11 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       // real lamp strapped to a turning head.
       const swayTarget = running ? -steering * .55 : 0;
       lampSway.current += (swayTarget - lampSway.current) * Math.min(1, raw * 4);
-      const stepSway = running ? Math.sin(t * 12.5) * .06 : 0;
+      const stepSway = running ? Math.sin(t * 11) * .09 : 0;
       const rx = Math.cos(viewHeading), rz = -Math.sin(viewHeading);
       lamp.current.position.set(
         camera.position.x + rx * (lampSway.current + stepSway),
-        camera.position.y + .35 + (running ? Math.abs(Math.sin(t * 12.5)) * .035 : 0),
+        camera.position.y + .35 + (running ? (Math.sin(t * 11) * .5 + .5) * .05 : 0),
         camera.position.z + rz * (lampSway.current + stepSway));
       const flicker = lying ? (Math.sin(t * 5.7) + Math.sin(t * 13.2) > .25 ? .14 : .035) : 1 - waking * .8;
       lamp.current.intensity = 65 * flicker;
