@@ -12,6 +12,7 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { STALE_BUNDLE_RECOVERY_SCRIPT } from "../lib/stale-bundle-recovery";
 
 function NotFoundComponent() {
   return (
@@ -110,6 +111,9 @@ function RootShell({ children }: { children: ReactNode }) {
   return (
     <html lang="hu">
       <head>
+        {/* Registered before the app's own bootstrap: if a cached start-up
+            module goes stale, the page would otherwise stay blank forever. */}
+        <script dangerouslySetInnerHTML={{ __html: STALE_BUNDLE_RECOVERY_SCRIPT }} />
         <HeadContent />
       </head>
       <body>
