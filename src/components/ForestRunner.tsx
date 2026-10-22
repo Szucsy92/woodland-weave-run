@@ -16,6 +16,7 @@ type Palette = Record<"fog" | "moon" | "lamp" | "green" | "purple" | "lavender" 
 type Input = { tilt: number; touch: number; touchMode: boolean; neutral: number | null; angle: number };
 const MAX_INSTANCES = (RADIUS * 2 + 1) ** 2;
 const BRANCHES_PER_TREE = 11;
+const ROOTS_PER_TREE = 5;
 // Five core leaf masses per tree plus a leaf clump on every branch tip.
 const CROWNS_PER_TREE = 5;
 const CROWN_SLOTS = CROWNS_PER_TREE + BRANCHES_PER_TREE;
@@ -52,6 +53,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
 }) {
   const trunks = useRef<THREE.InstancedMesh>(null);
   const branches = useRef<THREE.InstancedMesh>(null);
+  const roots = useRef<THREE.InstancedMesh>(null);
   const crowns = useRef<THREE.InstancedMesh>(null);
   const rocks = useRef<THREE.InstancedMesh>(null);
   const plants = useRef<THREE.InstancedMesh>(null);
@@ -81,17 +83,34 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     [bark, barkN, barkR].forEach(t => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(1.5, 7); t.anisotropy = 8; });
     [floor, floorN, floorR].forEach(t => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(64, 64); t.anisotropy = 8; });
     // Trunks with low crowns (~15-17.5 m) that neighbours' foliage merges into overhead.
-    const trunkGeometry = new THREE.CylinderGeometry(.36, .46, 22, 14, 24);
+    // Slimmer, gnarled trunk: knots, irregular cross-section, gentle wander and a
+    // buttressed root flare whose lobes run into the separate surface roots.
+    const trunkGeometry = new THREE.CylinderGeometry(.27, .4, 22, 16, 32);
     const pos = trunkGeometry.getAttribute("position") as THREE.BufferAttribute;
     for (let i = 0; i < pos.count; i++) {
       const y = pos.getY(i);
       const a = Math.atan2(pos.getZ(i), pos.getX(i));
-      const swell = 1 + Math.sin(a * 5 + y * .9) * .065 + Math.sin(a * 9 - y * .4) * .025;
-      const root = 1 + Math.pow(Math.max(0, (1 - (y + 11) / 2)), 2) * .65;
-      pos.setXYZ(i, pos.getX(i) * swell * root + Math.sin(y * .3) * .065, y, pos.getZ(i) * swell * root);
+      const knot = Math.max(0, Math.sin(a * 3 + y * 1.7) * Math.sin(y * 2.3 + a)) ** 4 * .16;
+      const swell = 1 + Math.sin(a * 5 + y * .9) * .07 + Math.sin(a * 9 - y * .4) * .035 + Math.sin(a * 2 + y * .23) * .06 + knot;
+      const foot = Math.max(0, 1 - (y + 11) / 2.6);
+      const root = 1 + foot * foot * (.75 + Math.max(0, Math.cos(a * 5 + .4)) * 1.3);
+      const wx = Math.sin(y * .3) * .09 + Math.sin(y * .71 + 1.3) * .05;
+      const wz = Math.cos(y * .26 + .7) * .08;
+      pos.setXYZ(i, pos.getX(i) * swell * root + wx, y, pos.getZ(i) * swell * root + wz);
     }
     trunkGeometry.computeVertexNormals();
     trunkGeometry.translate(0, 11, 0);
+    // Surface root: lies along +x, tapers and dives into the soil at its tip.
+    const rootGeometry = new THREE.CylinderGeometry(.025, .16, 2.4, 7, 10);
+    {
+      const p = rootGeometry.getAttribute("position") as THREE.BufferAttribute;
+      for (let i = 0; i < p.count; i++) {
+        const y = p.getY(i) + 1.2, t = y / 2.4;
+        const flat = 1 - t * .35;
+        p.setXYZ(i, y, p.getX(i) * .75 * flat - t * t * .45 + Math.sin(t * 6) * .04, p.getZ(i) + Math.sin(t * 5.3) * .12 * t);
+      }
+      rootGeometry.computeVertexNormals();
+    }
     const branchGeometry = new THREE.CylinderGeometry(.03, .07, 2.2, 6, 8);
     branchGeometry.translate(0, 1.1, 0);
     {
@@ -206,10 +225,10 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
           vec3 glowTint = mix(vec3(.16, .5, .3), vec3(.42, .25, .62), .5 + .5 * sin(vCW.x * .23 + vCW.z * .31));
           totalEmissiveRadiance += glowTint * under * shard * .3;`);
     };
-    return { bark, barkN, barkR, floor, floorN, floorR, trunkGeometry, branchGeometry, crownGeometry, rockGeometry, plantGeometry, groundMaterial, trunkMaterial, crownMaterial, shadowGeometry: new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), glowTexture: new THREE.CanvasTexture(canvas), dummy: new THREE.Object3D(), target: new THREE.Vector3() };
+    return { bark, barkN, barkR, floor, floorN, floorR, trunkGeometry, rootGeometry, branchGeometry, crownGeometry, rockGeometry, plantGeometry, groundMaterial, trunkMaterial, crownMaterial, shadowGeometry: new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), glowTexture: new THREE.CanvasTexture(canvas), dummy: new THREE.Object3D(), target: new THREE.Vector3() };
   }, [palette]);
   useEffect(() => () => {
-    [resources.trunkGeometry, resources.branchGeometry, resources.crownGeometry, resources.rockGeometry, resources.plantGeometry, resources.glowTexture, resources.groundMaterial, resources.trunkMaterial, resources.crownMaterial, resources.shadowGeometry].forEach(g => g.dispose());
+    [resources.trunkGeometry, resources.rootGeometry, resources.branchGeometry, resources.crownGeometry, resources.rockGeometry, resources.plantGeometry, resources.glowTexture, resources.groundMaterial, resources.trunkMaterial, resources.crownMaterial, resources.shadowGeometry].forEach(g => g.dispose());
 
     [resources.bark, resources.barkN, resources.barkR, resources.floor, resources.floorN, resources.floorR].forEach(t => t.dispose());
   }, [resources]);
@@ -228,9 +247,17 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
         const seedX = Math.floor(tree.x), seedZ = Math.floor(tree.z);
         const base = groundHeight(tree.x, tree.z) - 1.1;
         resources.dummy.rotation.order = "XYZ";
+        // Four species: slender beech, V-forked, gnarled old oak, thin leaning sapling.
+        const species = Math.floor(hash(seedX, seedZ, 200) * 4);
+        const girth = ([.8, .9, 1.15, .68][species] ?? 1) * tree.scale;
+        const leanAmt = species === 3 ? .07 : species === 2 ? .03 : .015;
+        const leanDir = hash(seedX, seedZ, 201) * Math.PI * 2;
+        const lx = Math.cos(leanDir) * leanAmt, lz = Math.sin(leanDir) * leanAmt;
+        // Horizontal drift of the trunk axis at a given height above the base.
+        const ox = (h: number) => -h * lz, oz = (h: number) => h * lx;
         resources.dummy.position.set(tree.x, base, tree.z);
-        resources.dummy.scale.set(tree.scale, 1, tree.scale);
-        resources.dummy.rotation.set(0, hash(seedX, seedZ, 5) * 6, 0);
+        resources.dummy.scale.set(girth, 1, girth);
+        resources.dummy.rotation.set(lx, hash(seedX, seedZ, 5) * 6, lz);
         resources.dummy.updateMatrix();
         trunkMesh.setMatrixAt(i, resources.dummy.matrix);
         // Soft dark contact patch where the trunk meets the ground.
@@ -238,26 +265,40 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
         resources.dummy.scale.set(3.4 * tree.scale, 1, 3.4 * tree.scale);
         resources.dummy.updateMatrix();
         shadows.current?.setMatrixAt(i, resources.dummy.matrix);
+        for (let r = 0; r < ROOTS_PER_TREE; r++) {
+          const ang = (r / ROOTS_PER_TREE) * Math.PI * 2 + hash(seedX, seedZ, 210 + r) * .9;
+          const rx = tree.x + Math.cos(ang) * .2 * girth, rz = tree.z - Math.sin(ang) * .2 * girth;
+          resources.dummy.position.set(rx, groundHeight(rx, rz) + .1, rz);
+          resources.dummy.rotation.set(0, ang, -.12 - hash(seedX, seedZ, 220 + r) * .15);
+          const rl = (.7 + hash(seedX, seedZ, 230 + r) * .7) * (species === 2 ? 1.35 : 1);
+          resources.dummy.scale.set(rl * girth * 1.2, girth * 1.3, girth * 1.3);
+          resources.dummy.updateMatrix();
+          roots.current?.setMatrixAt(i * ROOTS_PER_TREE + r, resources.dummy.matrix);
+        }
         for (let b = 0; b < BRANCHES_PER_TREE; b++) {
           const seed = hash(seedX, seedZ, 20 + b);
           // First branches fan up into the crown; the rest stick out from the trunk lower down.
           const upper = b < 5;
-          const top = upper ? base + 14.5 + hash(seedX, seedZ, 60 + b) * 2.5 : base + 8 + hash(seedX, seedZ, 60 + b) * 6.5;
-          resources.dummy.position.set(tree.x, top, tree.z);
+          const fork = species === 1 && b < 2;
+          let top = upper ? base + 14.5 + hash(seedX, seedZ, 60 + b) * 2.5 : base + 8 + hash(seedX, seedZ, 60 + b) * 6.5;
+          if (fork) top = base + 7 + hash(seedX, seedZ, 61) * 1.5;
+          const forkYaw = hash(seedX, seedZ, 202) * Math.PI * 2 + b * Math.PI;
+          const yaw = fork ? forkYaw : seed * Math.PI * 2;
+          resources.dummy.position.set(tree.x + ox(top - base), top, tree.z + oz(top - base));
           resources.dummy.rotation.order = "YXZ";
-          const tilt = upper ? .55 + hash(seedX, seedZ, 40 + b) * .75 : 1.05 + hash(seedX, seedZ, 40 + b) * .5;
-          resources.dummy.rotation.set(tilt, seed * Math.PI * 2, (hash(seedX, seedZ, 80 + b) - .5) * .4);
-          const thick = upper ? 1 : 2.2 + hash(seedX, seedZ, 90 + b) * 1.4;
-          const len = upper ? .7 + seed * .6 : 1.1 + hash(seedX, seedZ, 95 + b) * 1.1;
+          const tilt = fork ? .32 + hash(seedX, seedZ, 41 + b) * .12 : upper ? .55 + hash(seedX, seedZ, 40 + b) * .75 : 1.05 + hash(seedX, seedZ, 40 + b) * .5;
+          resources.dummy.rotation.set(tilt, yaw, fork ? 0 : (hash(seedX, seedZ, 80 + b) - .5) * .4);
+          const thick = fork ? 4.2 : upper ? 1 : 2.2 + hash(seedX, seedZ, 90 + b) * 1.4;
+          const len = fork ? 3.6 : upper ? .7 + seed * .6 : 1.1 + hash(seedX, seedZ, 95 + b) * 1.1;
           resources.dummy.scale.set(tree.scale * thick, tree.scale * len, tree.scale * thick);
           resources.dummy.updateMatrix();
           branchMesh?.setMatrixAt(i * BRANCHES_PER_TREE + b, resources.dummy.matrix);
           // Every branch ends in foliage — no bare wood anywhere in the forest.
           const reach = 2.2 * tree.scale * len;
           resources.dummy.position.set(
-            tree.x + reach * Math.sin(tilt) * Math.sin(seed * Math.PI * 2),
+            tree.x + ox(top - base) + reach * Math.sin(tilt) * Math.sin(yaw),
             top + reach * Math.cos(tilt),
-            tree.z + reach * Math.sin(tilt) * Math.cos(seed * Math.PI * 2));
+            tree.z + oz(top - base) + reach * Math.sin(tilt) * Math.cos(yaw));
           resources.dummy.rotation.set((hash(seedX, seedZ, 83 + b) - .5) * .9, seed * Math.PI * 2, (hash(seedX, seedZ, 77 + b) - .5) * .9);
           const cr = .9 + hash(seedX, seedZ, 120 + b) * 1.1;
           resources.dummy.scale.set(cr * tree.scale, cr * (.5 + hash(seedX, seedZ, 122 + b) * .3) * tree.scale, cr * tree.scale);
@@ -269,7 +310,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
           // Overlapping, irregular leaf masses, low enough and wide enough to merge with neighbours.
           const spread = c === 0 ? .5 : 2.6 + hash(seedX, seedZ, 81 + c) * 3.6;
           const angle = hash(seedX, seedZ, 74 + c) * Math.PI * 2;
-          resources.dummy.position.set(tree.x + Math.cos(angle) * spread, base + 15.2 + hash(seedX, seedZ, 71 + c * 3) * 2.0, tree.z + Math.sin(angle) * spread);
+          resources.dummy.position.set(tree.x + ox(16) + Math.cos(angle) * spread, base + 15.2 + hash(seedX, seedZ, 71 + c * 3) * 2.0, tree.z + oz(16) + Math.sin(angle) * spread);
           resources.dummy.rotation.set((hash(seedX, seedZ, 83 + c) - .5) * .9, angle, (hash(seedX, seedZ, 77 + c) - .5) * .9);
           const r = (c === 0 ? 3.9 : 2.8) + hash(seedX, seedZ, 73 + c) * 2.0;
           resources.dummy.scale.set(r * (.8 + hash(seedX, seedZ, 85 + c) * .6) * tree.scale, r * (.45 + hash(seedX, seedZ, 87 + c) * .4) * tree.scale, r * (.7 + hash(seedX, seedZ, 79 + c) * .6) * tree.scale);
@@ -279,6 +320,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       });
       trunkMesh.count = s.trees.length;
       if (branchMesh) branchMesh.count = s.trees.length * BRANCHES_PER_TREE;
+      if (roots.current) { roots.current.count = s.trees.length * ROOTS_PER_TREE; roots.current.instanceMatrix.needsUpdate = true; }
       if (crownMesh) crownMesh.count = s.trees.length * CROWN_SLOTS;
       let rockCount = 0, plantCount = 0;
       // Lowest ground point under the footprint, so nothing floats on a slope.
@@ -458,6 +500,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       <planeGeometry args={[200, 200, 160, 160]} />
     </mesh>
     <instancedMesh ref={trunks} args={[resources.trunkGeometry, undefined, MAX_INSTANCES]} material={resources.trunkMaterial} frustumCulled={false} />
+    <instancedMesh ref={roots} args={[resources.rootGeometry, undefined, MAX_INSTANCES * ROOTS_PER_TREE]} material={resources.trunkMaterial} frustumCulled={false} />
     <instancedMesh ref={branches} args={[resources.branchGeometry, undefined, MAX_INSTANCES * BRANCHES_PER_TREE]} frustumCulled={false}>
       <meshStandardMaterial map={resources.bark} normalMap={resources.barkN} roughnessMap={resources.barkR} normalScale={new THREE.Vector2(.7, .7)} color={palette.trunk} roughness={.95} metalness={0} />
     </instancedMesh>
