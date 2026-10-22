@@ -13,7 +13,7 @@ import barkRough from "@/assets/bark-rough.jpg";
 import floorNormal from "@/assets/ground-normal.jpg";
 import floorRough from "@/assets/ground-rough.jpg";
 
-type Palette = Record<"fog" | "moon" | "lamp" | "green" | "purple" | "lavender" | "trunk" | "ground" | "crown" | "rock" | "plant", THREE.Color>;
+type Palette = Record<"fog" | "moon" | "lamp" | "green" | "purple" | "lavender" | "lemon" | "trunk" | "ground" | "crown" | "rock" | "plant", THREE.Color>;
 type Input = { tilt: number; touch: number; touchMode: boolean; neutral: number | null; angle: number };
 const MAX_INSTANCES = (RADIUS * 2 + 1) ** 2;
 const BRANCHES_PER_TREE = 11;
@@ -164,6 +164,20 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       ctx.fillStyle = r;
       ctx.fillRect(0, 0, 128, 128);
     }
+    const sporeCanvas = document.createElement("canvas");
+    sporeCanvas.width = sporeCanvas.height = 128;
+    const sctx = sporeCanvas.getContext("2d");
+    if (sctx) {
+      // Bright hot core with a soft halo: spores read as strong-glow motes
+      // without blooming over the view.
+      const core = sctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+      core.addColorStop(0, "rgba(255,255,255,1)");
+      core.addColorStop(.16, "rgba(255,255,255,.92)");
+      core.addColorStop(.4, "rgba(255,255,255,.26)");
+      core.addColorStop(1, "rgba(255,255,255,0)");
+      sctx.fillStyle = core;
+      sctx.fillRect(0, 0, 128, 128);
+    }
     const groundMaterial = new THREE.MeshStandardMaterial({
       map: floor, normalMap: floorN, roughnessMap: floorR,
       normalScale: new THREE.Vector2(.5, .5), color: palette.ground, roughness: .95, metalness: 0,
@@ -229,10 +243,10 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
           vec3 glowTint = mix(vec3(.16, .5, .3), vec3(.42, .25, .62), .5 + .5 * sin(vCW.x * .23 + vCW.z * .31));
           totalEmissiveRadiance += glowTint * under * shard * .3;`);
     };
-    return { bark, barkN, barkR, floor, floorN, floorR, trunkGeometry, rootGeometry, branchGeometry, crownGeometry, rockGeometry, plantGeometry, groundMaterial, trunkMaterial, crownMaterial, shadowGeometry: new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), glowTexture: new THREE.CanvasTexture(canvas), dummy: new THREE.Object3D(), target: new THREE.Vector3() };
+    return { bark, barkN, barkR, floor, floorN, floorR, trunkGeometry, rootGeometry, branchGeometry, crownGeometry, rockGeometry, plantGeometry, groundMaterial, trunkMaterial, crownMaterial, shadowGeometry: new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), glowTexture: new THREE.CanvasTexture(canvas), sporeTexture: new THREE.CanvasTexture(sporeCanvas), dummy: new THREE.Object3D(), target: new THREE.Vector3() };
   }, [palette]);
   useEffect(() => () => {
-    [resources.trunkGeometry, resources.rootGeometry, resources.branchGeometry, resources.crownGeometry, resources.rockGeometry, resources.plantGeometry, resources.glowTexture, resources.groundMaterial, resources.trunkMaterial, resources.crownMaterial, resources.shadowGeometry].forEach(g => g.dispose());
+    [resources.trunkGeometry, resources.rootGeometry, resources.branchGeometry, resources.crownGeometry, resources.rockGeometry, resources.plantGeometry, resources.glowTexture, resources.sporeTexture, resources.groundMaterial, resources.trunkMaterial, resources.crownMaterial, resources.shadowGeometry].forEach(g => g.dispose());
 
     [resources.bark, resources.barkN, resources.barkR, resources.floor, resources.floorN, resources.floorR].forEach(t => t.dispose());
   }, [resources]);
@@ -482,11 +496,15 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       ))}
     </group>
     <group ref={spores}>
-      {Array.from({ length: SPORE_COUNT }, (_, i) => (
-        <sprite key={i}>
-          <spriteMaterial map={resources.glowTexture} color={i % 3 === 0 ? palette.purple : i % 3 === 1 ? palette.green : palette.lamp} transparent opacity={.2} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} />
-        </sprite>
-      ))}
+      {Array.from({ length: SPORE_COUNT }, (_, i) => {
+        // Mostly lemon-yellow motes; purple and green stay rare accents.
+        const roll = hash(i, 3, 10);
+        return (
+          <sprite key={i}>
+            <spriteMaterial map={resources.sporeTexture} color={roll < .08 ? palette.purple : roll < .16 ? palette.green : palette.lemon} transparent opacity={.2} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} />
+          </sprite>
+        );
+      })}
     </group>
     <instancedMesh ref={shadows} args={[resources.shadowGeometry, undefined, MAX_INSTANCES * 2]} frustumCulled={false} renderOrder={1}>
       <meshBasicMaterial map={resources.glowTexture} color="black" transparent opacity={.6} depthWrite={false} polygonOffset polygonOffsetFactor={-2} />
@@ -572,7 +590,7 @@ export function ForestRunner() {
     if (ctx) {
       const styles = getComputedStyle(document.documentElement);
       const p = {} as Palette;
-      for (const name of ["fog", "moon", "lamp", "green", "purple", "lavender", "trunk", "ground", "crown", "rock", "plant"] as const) {
+      for (const name of ["fog", "moon", "lamp", "green", "purple", "lavender", "lemon", "trunk", "ground", "crown", "rock", "plant"] as const) {
         ctx.fillStyle = styles.getPropertyValue(`--forest-${name}`).trim();
         ctx.fillRect(0, 0, 1, 1);
         const data = ctx.getImageData(0, 0, 1, 1).data;
