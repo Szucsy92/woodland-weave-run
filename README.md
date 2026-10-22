@@ -1,26 +1,33 @@
-# Endless Woodland Weaves
+# Woodland Weave Run
 
-Igen, készítsd el az első játszható 3D prototípust: végtelen erdővel, futással, kanyarodással és fákkal mint akadályokkal.
+A first-person endless runner through a misty night forest, by **László Szűcs (Szucsy92)**.
 
-This project was built with [Lovable](https://lovable.dev).
+Dodge procedural trees, cross uneven ground and follow the lights through the woodland. Glowing spores, softly lit undergrowth and a continuous atmospheric soundtrack give the forest its depth.
 
-**Live app**: https://woodland-weave-run.lovable.app
+## Play on Android
 
-## Build with Lovable
+Download the latest signed APK from [Releases](https://github.com/Szucsy92/woodland-weave-run/releases). The game runs offline; scores and settings stay on your device. Internet access is only needed to check for and download updates.
 
-Continue developing this project in the [Lovable editor](https://lovable.dev/projects/61c6b3be-46dc-405d-9148-2fced2f5421c).
+- Three difficulty levels: Easy, Normal and Hard
+- Tilt or touch controls
+- Landscape-first, fullscreen presentation
+- In-game update checks under Settings; Android confirms installation
 
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: every change made in Lovable is committed straight to this repository.
-- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
+## Ownership and attribution
+
+Copyright © 2026 László Szűcs. All rights reserved for the original project content.
+
+This is a public, source-visible project, **not an open-source license grant**. GitHub permits viewing and forking public repositories; the Fork button cannot be disabled for a public repository.
+
+Keep the author credit, copyright notice and link to the [original repository](https://github.com/Szucsy92/woodland-weave-run) in any permitted copy or fork. A fork is not permission to redistribute, sell or publish a modified game. Uses beyond GitHub's applicable terms require the author's prior written permission. Third-party dependencies retain their own licenses. See [LICENSE](LICENSE).
 
 ## Development
 
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
+Requires Node.js 22 or later and Bun.
 
 ```sh
-git clone <this-repository-url>
-cd <repository-name>
-npm i
-npm run dev
+bun install
+bun run dev
 ```
+
+Android releases are built by GitHub Actions and signed using the project's permanent signing key, stored in Actions secrets. Never commit signing keys or passwords to this repository.
