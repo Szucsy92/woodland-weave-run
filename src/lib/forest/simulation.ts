@@ -5,6 +5,11 @@ export const FOG_END = 38;
 export const MAX_HEADING = (37.5 * Math.PI) / 180;
 export const IMPACT_DURATION = 0.5;
 export const MAX_IMPACTS = 3;
+export type PauseState = "none" | "slowing" | "paused" | "resuming" | "exiting";
+// Pause is a time warp: slow to a freeze, then accelerate back from it.
+export const PAUSE_SLOW = 0.7;
+export const RESUME_TIME = 1.3;
+export const EXIT_TIME = 0.9;
 export type Phase = "menu" | "awakening" | "running" | "falling" | "fallen";
 export type Tree = { x: number; z: number; scale: number; id: string };
 export type Obstacle = { x: number; z: number; big: boolean; radius: number; id: string };
@@ -100,7 +105,8 @@ export function makeSimulation() {
   return { x: 0, z: 0, heading: 0, distance: 0, elapsed: 0, phaseTime: 0,
     phase: "menu" as Phase, hits: 0, cooldown: 0, impact: 0, impactSide: 1,
     pushX: 0, lastTree: "", cell: "", trees: [] as Tree[], obstacles: [] as Obstacle[],
-    difficulty: "easy" as Difficulty, stumble: 0, speedMul: 1, lastObstacle: "", stride: 0 };
+    difficulty: "easy" as Difficulty, stumble: 0, speedMul: 1, lastObstacle: "", stride: 0,
+    pause: "none" as PauseState, pauseTime: 0 };
 }
 
 export function beginRun(s: Simulation) {
@@ -150,8 +156,48 @@ export function collideObstacle(s: Simulation, obstacle: Obstacle) {
   return true;
 }
 
+export function requestPause(s: Simulation) {
+  if (s.phase !== "running" && s.phase !== "awakening") return false;
+  if (s.pause !== "none" && s.pause !== "resuming") return false;
+  s.pause = "slowing"; s.pauseTime = 0;
+  return true;
+}
+export function requestResume(s: Simulation) {
+  if (s.pause !== "slowing" && s.pause !== "paused") return false;
+  s.pause = "resuming"; s.pauseTime = 0;
+  return true;
+}
+export function requestExit(s: Simulation) {
+  if (s.pause === "none" || s.pause === "exiting") return false;
+  s.pause = "exiting"; s.pauseTime = 0;
+  return true;
+}
+
+const ease = (x: number) => x * x * (3 - 2 * x);
+/** World time multiplier: 1 normal, 0 frozen. */
+export function timeScale(s: Simulation) {
+  const p = s.pauseTime;
+  switch (s.pause) {
+    case "slowing": return 1 - ease(Math.min(1, p / PAUSE_SLOW));
+    case "resuming": return Math.pow(Math.min(1, p / RESUME_TIME), 2);
+    case "none": return 1;
+    default: return 0;
+  }
+}
+
 export function stepSimulation(s: Simulation, steering: number, delta: number) {
-  const dt = Math.min(delta, 0.05);
+  const real = Math.min(delta, 0.05);
+  if (s.pause !== "none") {
+    s.pauseTime += real;
+    if (s.pause === "slowing" && s.pauseTime >= PAUSE_SLOW) { s.pause = "paused"; s.pauseTime = 0; }
+    else if (s.pause === "resuming" && s.pauseTime >= RESUME_TIME) { s.pause = "none"; s.pauseTime = 0; }
+    else if (s.pause === "exiting" && s.pauseTime >= EXIT_TIME) {
+      const { difficulty, elapsed } = s;
+      Object.assign(s, makeSimulation(), { difficulty, elapsed, phase: "menu" });
+      return;
+    }
+  }
+  const dt = real * timeScale(s);
   s.elapsed += dt;
   s.phaseTime += dt;
   s.impact = Math.max(0, s.impact - dt);

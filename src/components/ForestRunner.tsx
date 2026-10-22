@@ -1,10 +1,10 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import { ArrowLeft, Settings } from "lucide-react";
+import { ArrowLeft, LogOut, Pause, Settings } from "lucide-react";
 import * as THREE from "three";
 import { ForestEffects } from "./ForestEffects";
 import { ForestDrone } from "@/lib/forest/drone";
-import { beginRun, CELL, DIFFICULTIES, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, obstaclesAround, orientationValue, placeSpore, RADIUS, sporeOpacity, stepSimulation, treesAround, daylightFor, type Difficulty, type ForestMood, type Phase, type Simulation } from "@/lib/forest/simulation";
+import { beginRun, CELL, DIFFICULTIES, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, requestExit, requestPause, requestResume, obstaclesAround, orientationValue, placeSpore, RADIUS, sporeOpacity, stepSimulation, treesAround, daylightFor, type Difficulty, type ForestMood, type Phase, type Simulation } from "@/lib/forest/simulation";
 import { checkForUpdate, nativeUpdater, type UpdateInfo } from "@/lib/forest/updater";
 import barkUrl from "@/assets/wet-bark.jpg";
 import floorUrl from "@/assets/wet-ground.jpg";
@@ -426,7 +426,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       s.z + fall * .65 + stepZ);
     // Menu: slow, damped horizontal look-around on tilt or a finger drag;
     // during a run it settles back to the running heading.
-    const canLook = s.phase === "menu" || s.phase === "fallen";
+    const canLook = s.phase === "menu" || s.phase === "fallen" || s.pause !== "none";
     const lookTarget = canLook ? steering * .5 : 0;
     menuLook.current += (lookTarget - menuLook.current) * Math.min(1, raw * (canLook ? 1.4 : 6));
     const viewHeading = s.heading + menuLook.current;
@@ -614,6 +614,23 @@ export function ForestRunner() {
   const hapticsRef = useRef(true);
   const menuDrag = useRef<{ x: number; moved: boolean } | null>(null);
   const menu = phase === "menu" || phase === "fallen";
+  const [pauseUi, setPauseUi] = useState<"none" | "paused" | "exiting">("none");
+  const paused = pauseUi === "paused";
+  const lookMode = menu || paused;
+  const pauseRun = () => {
+    if (!requestPause(simulation.current)) return;
+    input.current.touch = 0;
+    setSettingsOpen(false);
+    setPauseUi("paused");
+  };
+  const pauseRef = useRef(pauseRun);
+  pauseRef.current = pauseRun;
+  const resumeRun = () => {
+    if (requestResume(simulation.current)) { setSettingsOpen(false); setPauseUi("none"); }
+  };
+  const exitRun = () => {
+    if (requestExit(simulation.current)) { setSettingsOpen(false); setPauseUi("exiting"); }
+  };
   const [pendingUpdate, setPendingUpdate] = useState<UpdateInfo | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
   const [updateDownloading, setUpdateDownloading] = useState(false);
@@ -689,7 +706,7 @@ export function ForestRunner() {
     };
     const visibility = () => {
       input.current.touch = 0;
-      if (document.hidden) audio.suspend();
+      if (document.hidden) { pauseRef.current(); audio.suspend(); }
       else {
         let enabled = true;
         try { enabled = localStorage.getItem("forest-sound") !== "off"; } catch { /* Keep default. */ }
@@ -704,10 +721,11 @@ export function ForestRunner() {
       audio.dispose();
     };
   }, []);
-  useEffect(() => { drone.current?.setMode(sound, phase === "awakening" || phase === "running"); }, [sound, phase]);
+  useEffect(() => { drone.current?.setMode(sound, (phase === "awakening" || phase === "running") && pauseUi === "none"); }, [sound, phase, pauseUi]);
 
   const onPhase = useCallback((next: Phase, score: number) => {
     setPhase(next);
+    if (next === "menu") setPauseUi("none");
     if (next === "falling") {
       setLast(score);
       setBest(old => Math.max(old, score));
@@ -789,64 +807,7 @@ export function ForestRunner() {
     try { localStorage.setItem("forest-orient", mode); } catch { /* Local storage may be disabled. */ }
     void lockOrientation(mode);
   };
-  return <main
-    className="forest-game dark"
-    data-phase={phase}
-    onPointerDown={e => {
-      drone.current?.unlock();
-      const inUi = (e.target as Element | null)?.closest("[data-forest-ui]");
-      // Entering fullscreen resizes the page mid-tap, which swallows the button press.
-      // The installed app is already fullscreen, and menu buttons must react on first touch.
-      const native = "AndroidOrientation" in window;
-      if (!native && !inUi && !document.fullscreenElement && document.documentElement.requestFullscreen) void document.documentElement.requestFullscreen().catch(() => undefined);
-      if (menu) {
-        if (inUi) return;
-        if (settingsOpen) { setSettingsOpen(false); return; }
-        // A tap starts the run; a horizontal drag looks around instead.
-        menuDrag.current = { x: e.clientX, moved: false };
-        e.currentTarget.setPointerCapture(e.pointerId);
-        return;
-      }
-      if (touchMode) {
-        e.currentTarget.setPointerCapture(e.pointerId);
-        input.current.touch = e.clientX < e.currentTarget.clientWidth / 2 ? -1 : 1;
-      }
-    }}
-    onPointerMove={e => {
-      if (menu && menuDrag.current && e.buttons) {
-        const dx = e.clientX - menuDrag.current.x;
-        if (Math.abs(dx) > 8) menuDrag.current.moved = true;
-        input.current.touch = THREE.MathUtils.clamp(-dx / 90, -1, 1);
-        return;
-      }
-      if (e.buttons && !menu && touchMode) input.current.touch = e.clientX < e.currentTarget.clientWidth / 2 ? -1 : 1;
-    }}
-    onPointerUp={() => {
-      if (menuDrag.current) {
-        const wasTap = !menuDrag.current.moved;
-        menuDrag.current = null;
-        input.current.touch = 0;
-        if (menu && wasTap) void start();
-        return;
-      }
-      input.current.touch = 0;
-    }}
-    onPointerCancel={() => { input.current.touch = 0; }}
-  >
-    {palette && <Canvas dpr={[1, 1.5]} camera={{ fov: 72, position: [0, 1.6, 0] }} gl={{ antialias: true, powerPreference: "high-performance" }}>
-      <color attach="background" args={[palette.fog]} />
-      <fog attach="fog" args={[palette.fog, 7, FOG_END]} />
-      <hemisphereLight args={[palette.moon, palette.fog, .85]} />
-      <directionalLight position={[0, 24, -20]} color={palette.moon} intensity={.7} />
-      <World simulation={simulation} input={input} palette={palette} onPhase={onPhase} onImpact={onImpact} onStumble={onStumble} />
-      <ForestEffects simulation={simulation} />
-      <DayCycle mood={moodRef} night={palette} />
-    </Canvas>}
-    {(phase === "running" || phase === "awakening" || phase === "falling") && <Hud simulation={simulation} />}
-    {menu && (
-      <div className="forest-menu">
-        <section className="forest-glass" aria-label="Run menu">
-          {settingsOpen ? (
+  const settingsPanel = (
             <div className="forest-settings-panel" data-forest-ui>
               <button className="forest-back" onClick={() => setSettingsOpen(false)} aria-label="Back"><ArrowLeft size={15} /></button>
               <h2>Settings</h2>
@@ -890,7 +851,83 @@ export function ForestRunner() {
               </div>
               <UpdateRow />
             </div>
-          ) : (
+  );
+  return <main
+    className="forest-game dark"
+    data-phase={phase}
+    onPointerDown={e => {
+      drone.current?.unlock();
+      const inUi = (e.target as Element | null)?.closest("[data-forest-ui]");
+      // Entering fullscreen resizes the page mid-tap, which swallows the button press.
+      // The installed app is already fullscreen, and menu buttons must react on first touch.
+      const native = "AndroidOrientation" in window;
+      if (!native && !inUi && !document.fullscreenElement && document.documentElement.requestFullscreen) void document.documentElement.requestFullscreen().catch(() => undefined);
+      if (inUi) return;
+      if (lookMode) {
+        if (settingsOpen) { setSettingsOpen(false); return; }
+        // A tap starts the run; a horizontal drag looks around instead.
+        menuDrag.current = { x: e.clientX, moved: false };
+        e.currentTarget.setPointerCapture(e.pointerId);
+        return;
+      }
+      if (touchMode && pauseUi === "none") {
+        e.currentTarget.setPointerCapture(e.pointerId);
+        input.current.touch = e.clientX < e.currentTarget.clientWidth / 2 ? -1 : 1;
+      }
+    }}
+    onPointerMove={e => {
+      if (lookMode && menuDrag.current && e.buttons) {
+        const dx = e.clientX - menuDrag.current.x;
+        if (Math.abs(dx) > 8) menuDrag.current.moved = true;
+        input.current.touch = THREE.MathUtils.clamp(-dx / 90, -1, 1);
+        return;
+      }
+      if (e.buttons && !lookMode && pauseUi === "none" && touchMode) input.current.touch = e.clientX < e.currentTarget.clientWidth / 2 ? -1 : 1;
+    }}
+    onPointerUp={() => {
+      if (menuDrag.current) {
+        const wasTap = !menuDrag.current.moved;
+        menuDrag.current = null;
+        input.current.touch = 0;
+        if (menu && wasTap) void start();
+        return;
+      }
+      input.current.touch = 0;
+    }}
+    onPointerCancel={() => { input.current.touch = 0; }}
+  >
+    {palette && <Canvas dpr={[1, 1.5]} camera={{ fov: 72, position: [0, 1.6, 0] }} gl={{ antialias: true, powerPreference: "high-performance" }}>
+      <color attach="background" args={[palette.fog]} />
+      <fog attach="fog" args={[palette.fog, 7, FOG_END]} />
+      <hemisphereLight args={[palette.moon, palette.fog, .85]} />
+      <directionalLight position={[0, 24, -20]} color={palette.moon} intensity={.7} />
+      <World simulation={simulation} input={input} palette={palette} onPhase={onPhase} onImpact={onImpact} onStumble={onStumble} />
+      <ForestEffects simulation={simulation} />
+      <DayCycle mood={moodRef} night={palette} />
+    </Canvas>}
+    {(phase === "running" || phase === "awakening" || phase === "falling") && <Hud simulation={simulation} />}
+    {(phase === "running" || phase === "awakening") && pauseUi === "none" && (
+      <button className="forest-pause" data-forest-ui onClick={pauseRun} aria-label="Pause"><Pause size={18} /></button>
+    )}
+    {paused && (
+      <div className="forest-menu">
+        <section className="forest-glass" aria-label="Paused">
+          {settingsOpen ? settingsPanel : (
+            <div className="forest-pause-row" data-forest-ui>
+              <button className="forest-resume" onClick={resumeRun}><span className="forest-title" data-text="resume">resume</span></button>
+              <div className="forest-pause-side">
+                <button className="forest-gear" onClick={() => setSettingsOpen(true)} aria-label="Settings"><Settings size={16} /></button>
+                <button className="forest-gear" onClick={exitRun} aria-label="Exit to menu"><LogOut size={16} /></button>
+              </div>
+            </div>
+          )}
+        </section>
+      </div>
+    )}
+    {menu && (
+      <div className="forest-menu">
+        <section className="forest-glass" aria-label="Run menu">
+          {settingsOpen ? settingsPanel : (
             <>
               <div className="forest-head">
                 <h1 className="forest-title" data-text="tap and run!">tap and run!</h1>
