@@ -10,6 +10,7 @@
 <!-- LOVABLE:END -->
 
 ## Game architecture
+- Disable the development DOM source-injection transform in Vite: `data-tsd-source` is interpreted as an invalid nested property by R3F and can crash scene updates.
 - Keep pure simulation and gameplay rules in src/lib/forest/simulation.ts with rule tests; the scene reads mutable refs and reports only phase transitions to React to avoid per-frame rerenders.
 - Keep the continuous browser-only drone in its own lifecycle-managed module and postprocessing in ForestEffects; this separates audio, camera presentation, and gameplay.
 - Use local device storage for this game's personal scores/settings only, not shared data; no account or cross-device persistence is implied.

@@ -413,11 +413,16 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     const leanTarget = lying ? Math.sin(t * .13) * .035 : steering;
     // Smooth half-wave step bob: rises and falls softly, no sharp bounce cusps.
     const bob = running ? (Math.sin(t * 11) * .5 + .5) * .03 : Math.sin(t * .4) * .012;
+    // A gentle lateral head translation carries the stride; keep the horizon
+    // almost level rather than swinging the whole forest around the viewer.
+    const lateralStep = running ? Math.sin(t * 5.5) * .09 : 0;
+    const stepX = Math.cos(s.heading) * lateralStep;
+    const stepZ = -Math.sin(s.heading) * lateralStep;
     lean.current += (leanTarget - lean.current) * Math.min(1, raw * (running ? 15 : 2));
     camera.position.set(
-      s.x + fall * .45 + leanAmount * .3,
+      s.x + fall * .45 + leanAmount * .3 + stepX,
       groundHeight(s.x, s.z) + 1.6 - fall * 1.28 + bob,
-      s.z + fall * .65);
+      s.z + fall * .65 + stepZ);
     // Menu: slow, damped horizontal look-around on tilt or a finger drag;
     // during a run it settles back to the running heading.
     const canLook = s.phase === "menu" || s.phase === "fallen";
@@ -425,13 +430,13 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     menuLook.current += (lookTarget - menuLook.current) * Math.min(1, raw * (canLook ? 1.4 : 6));
     const viewHeading = s.heading + menuLook.current;
     resources.target.set(
-      s.x - Math.sin(viewHeading) * 18,
+      s.x - Math.sin(viewHeading) * 18 + stepX,
       groundHeight(s.x, s.z) * .6 + groundHeight(s.x - Math.sin(viewHeading) * 18, s.z - Math.cos(viewHeading) * 18) * .4 + 1.62 + fall * 3,
-      s.z - Math.cos(viewHeading) * 18);
+      s.z - Math.cos(viewHeading) * 18 + stepZ);
     camera.lookAt(resources.target);
     camera.rotateX(bump * .085 + waking * Math.sin(t * 5) * .045 + fall * .065 * Math.sin(t * .32) + tripping * Math.sin(t * 17) * .085 + (running ? Math.sin(t * 11) * .006 : 0));
     camera.rotateY(-leanAmount * .06);
-    camera.rotateZ(-leanAmount * .065 + bump * .12 + fall * .72 + waking * Math.sin(t * 4) * .03 + (running ? Math.sin(t * 11) * .03 : Math.sin(t * .4) * .008) + tripping * Math.sin(t * 13) * .07);
+    camera.rotateZ(-leanAmount * .065 + bump * .12 + fall * .72 + waking * Math.sin(t * 4) * .03 + (running ? Math.sin(t * 5.5) * .007 : Math.sin(t * .4) * .008) + tripping * Math.sin(t * 13) * .07);
     if (lamp.current) {
       // Headlamp rides the step rhythm and leads gently into turns, like a
       // real lamp strapped to a turning head.

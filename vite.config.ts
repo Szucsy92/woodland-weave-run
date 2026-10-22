@@ -7,6 +7,16 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
 export default defineConfig({
+  plugins: [{
+    name: "forest-disable-dom-source-injection",
+    configResolved(config) {
+      // R3F interprets hyphenated DOM attributes as nested Three.js properties.
+      // The shared development preset injects these into every JSX element,
+      // including scene objects; disable that transform, not the other tools.
+      const sourceInjection = config.plugins.find(plugin => plugin.name === "@tanstack/devtools:inject-source");
+      if (sourceInjection) delete sourceInjection.transform;
+    },
+  }],
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this
