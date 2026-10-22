@@ -63,6 +63,9 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
   const lastImpact = useRef(0);
   const lastStumble = useRef(0);
   const lean = useRef(0);
+  const spores = useRef<THREE.Group>(null);
+  const menuLook = useRef(0);
+  const lampSway = useRef(0);
   const { camera } = useThree();
   const resources = useMemo(() => {
     const loader = new THREE.TextureLoader();
@@ -186,10 +189,26 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
           vec3 tint = mix(vec3(.18, .55, .35), vec3(.42, .26, .62), smoothstep(-.3, .3, sin(vTH * .35)));
           totalEmissiveRadiance += tint * rim * near * .22 * smoothstep(.6, 2., vTH);`);
     };
-    return { bark, barkN, barkR, floor, floorN, floorR, trunkGeometry, branchGeometry, crownGeometry, rockGeometry, plantGeometry, groundMaterial, trunkMaterial, shadowGeometry: new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), glowTexture: new THREE.CanvasTexture(canvas), dummy: new THREE.Object3D(), target: new THREE.Vector3() };
+    const crownMaterial = new THREE.MeshStandardMaterial({ color: palette.crown, roughness: .9, metalness: 0 });
+    crownMaterial.onBeforeCompile = shader => {
+      // Soft purple-green shards of light catching the leaf undersides — a
+      // constant, gentle glow that sketches the canopy vault from below.
+      shader.vertexShader = shader.vertexShader
+        .replace("#include <common>", `#include <common>\nvarying vec3 vCN;\nvarying vec3 vCW;`)
+        .replace("#include <defaultnormal_vertex>", `#include <defaultnormal_vertex>\nvCN = normalize(transformedNormal);`)
+        .replace("#include <project_vertex>", `#include <project_vertex>\nvCW = (modelMatrix * instanceMatrix * vec4(transformed, 1.)).xyz;`);
+      shader.fragmentShader = shader.fragmentShader
+        .replace("#include <common>", `#include <common>\nvarying vec3 vCN;\nvarying vec3 vCW;`)
+        .replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>
+          float under = smoothstep(.15, -.75, vCN.y);
+          float shard = .55 + .45 * sin(vCW.x * .8 + sin(vCW.z * .6) * 2.2) * sin(vCW.z * .7 - sin(vCW.x * .5) * 1.8);
+          vec3 glowTint = mix(vec3(.16, .5, .3), vec3(.42, .25, .62), .5 + .5 * sin(vCW.x * .23 + vCW.z * .31));
+          totalEmissiveRadiance += glowTint * under * shard * .3;`);
+    };
+    return { bark, barkN, barkR, floor, floorN, floorR, trunkGeometry, branchGeometry, crownGeometry, rockGeometry, plantGeometry, groundMaterial, trunkMaterial, crownMaterial, shadowGeometry: new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), glowTexture: new THREE.CanvasTexture(canvas), dummy: new THREE.Object3D(), target: new THREE.Vector3() };
   }, [palette]);
   useEffect(() => () => {
-    [resources.trunkGeometry, resources.branchGeometry, resources.crownGeometry, resources.rockGeometry, resources.plantGeometry, resources.glowTexture, resources.groundMaterial, resources.trunkMaterial, resources.shadowGeometry].forEach(g => g.dispose());
+    [resources.trunkGeometry, resources.branchGeometry, resources.crownGeometry, resources.rockGeometry, resources.plantGeometry, resources.glowTexture, resources.groundMaterial, resources.trunkMaterial, resources.crownMaterial, resources.shadowGeometry].forEach(g => g.dispose());
 
     [resources.bark, resources.barkN, resources.barkR, resources.floor, resources.floorN, resources.floorR].forEach(t => t.dispose());
   }, [resources]);
@@ -313,25 +332,53 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     const steering = getSteering(input.current.touchMode, input.current.touch, input.current.tilt);
     // Menu and lying phases: no step rhythm, only a barely noticeable breathing sway.
     const leanTarget = lying ? Math.sin(t * .13) * .035 : steering;
-    const bob = running ? Math.abs(Math.sin(t * 7.2)) * .02 : Math.sin(t * .4) * .012;
+    const bob = running ? Math.abs(Math.sin(t * 9.5)) * .026 : Math.sin(t * .4) * .012;
     lean.current += (leanTarget - lean.current) * Math.min(1, raw * (running ? 15 : 2));
     camera.position.set(
       s.x + fall * .45 + leanAmount * .3,
       groundHeight(s.x, s.z) + 1.6 - fall * 1.28 + bob,
       s.z + fall * .65);
+    // Menu: slow, damped horizontal look-around on tilt or a finger drag;
+    // during a run it settles back to the running heading.
+    const lookTarget = s.phase === "menu" ? steering * .5 : 0;
+    menuLook.current += (lookTarget - menuLook.current) * Math.min(1, raw * (s.phase === "menu" ? 1.4 : 6));
+    const viewHeading = s.heading + menuLook.current;
     resources.target.set(
-      s.x - Math.sin(s.heading) * 18,
-      groundHeight(s.x, s.z) * .6 + groundHeight(s.x - Math.sin(s.heading) * 18, s.z - Math.cos(s.heading) * 18) * .4 + 1.62 + fall * 3,
-      s.z - Math.cos(s.heading) * 18);
+      s.x - Math.sin(viewHeading) * 18,
+      groundHeight(s.x, s.z) * .6 + groundHeight(s.x - Math.sin(viewHeading) * 18, s.z - Math.cos(viewHeading) * 18) * .4 + 1.62 + fall * 3,
+      s.z - Math.cos(viewHeading) * 18);
     camera.lookAt(resources.target);
     camera.rotateX(bump * .085 + waking * Math.sin(t * 5) * .045 + fall * .065 * Math.sin(t * .32) + tripping * Math.sin(t * 17) * .085);
     camera.rotateY(-leanAmount * .06);
-    camera.rotateZ(-leanAmount * .065 + bump * .12 + fall * .72 + waking * Math.sin(t * 4) * .03 + (running ? Math.sin(t * 7.2) * .022 : Math.sin(t * .4) * .008) + tripping * Math.sin(t * 13) * .07);
+    camera.rotateZ(-leanAmount * .065 + bump * .12 + fall * .72 + waking * Math.sin(t * 4) * .03 + (running ? Math.sin(t * 9.5) * .028 : Math.sin(t * .4) * .008) + tripping * Math.sin(t * 13) * .07);
     if (lamp.current) {
-      lamp.current.position.copy(camera.position);
-      lamp.current.position.y += .35;
+      // Headlamp rides the step rhythm and leads gently into turns, like a
+      // real lamp strapped to a turning head.
+      const swayTarget = running ? -steering * .55 : 0;
+      lampSway.current += (swayTarget - lampSway.current) * Math.min(1, raw * 4);
+      const stepSway = running ? Math.sin(t * 9.5) * .1 : 0;
+      const rx = Math.cos(viewHeading), rz = -Math.sin(viewHeading);
+      lamp.current.position.set(
+        camera.position.x + rx * (lampSway.current + stepSway),
+        camera.position.y + .35 + (running ? Math.abs(Math.sin(t * 9.5)) * .05 : 0),
+        camera.position.z + rz * (lampSway.current + stepSway));
       const flicker = lying ? (Math.sin(t * 5.7) + Math.sin(t * 13.2) > .25 ? .14 : .035) : 1 - waking * .8;
       lamp.current.intensity = 65 * flicker;
+    }
+    if (spores.current) {
+      // A dozen drifting spores that twinkle as they cross the lamplight.
+      spores.current.children.forEach((child, i) => {
+        const sprite = child as THREE.Sprite;
+        const seed = i * 7.13;
+        const d = 2 + hash(i, 3, 5) * 10;
+        const a = viewHeading + (hash(i, 11, 6) - .5) * 1.6 + Math.sin(t * .11 + seed) * .3;
+        const mx = s.x - Math.sin(a) * d + Math.sin(t * .23 + seed * 2) * .6;
+        const mz = s.z - Math.cos(a) * d + Math.cos(t * .19 + seed) * .6;
+        sprite.position.set(mx, groundHeight(mx, mz) + .6 + hash(i, 5, 7) * 2.2 + Math.sin(t * .5 + seed) * .25, mz);
+        const twinkle = Math.max(0, Math.sin(t * (.9 + hash(i, 2, 8)) + seed * 3));
+        (sprite.material as THREE.SpriteMaterial).opacity = (.1 + twinkle * .5) * (1 - d / 15);
+        sprite.scale.setScalar(.09 + hash(i, 4, 9) * .1);
+      });
     }
     if (mist.current) {
       // Low layered mist drifting between the trunks ahead; a few large soft sprites only.
@@ -375,6 +422,13 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
         </sprite>
       ))}
     </group>
+    <group ref={spores}>
+      {Array.from({ length: 12 }, (_, i) => (
+        <sprite key={i}>
+          <spriteMaterial map={resources.glowTexture} color={i % 3 === 0 ? palette.purple : i % 3 === 1 ? palette.green : palette.lamp} transparent opacity={.2} blending={THREE.AdditiveBlending} depthWrite={false} />
+        </sprite>
+      ))}
+    </group>
     <instancedMesh ref={shadows} args={[resources.shadowGeometry, undefined, MAX_INSTANCES * 2]} frustumCulled={false} renderOrder={1}>
       <meshBasicMaterial map={resources.glowTexture} color="black" transparent opacity={.6} depthWrite={false} polygonOffset polygonOffsetFactor={-2} />
     </instancedMesh>
@@ -385,9 +439,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     <instancedMesh ref={branches} args={[resources.branchGeometry, undefined, MAX_INSTANCES * BRANCHES_PER_TREE]} frustumCulled={false}>
       <meshStandardMaterial map={resources.bark} normalMap={resources.barkN} roughnessMap={resources.barkR} normalScale={new THREE.Vector2(.7, .7)} color={palette.trunk} roughness={.95} metalness={0} />
     </instancedMesh>
-    <instancedMesh ref={crowns} args={[resources.crownGeometry, undefined, MAX_INSTANCES * CROWN_SLOTS]} frustumCulled={false}>
-      <meshStandardMaterial color={palette.crown} roughness={.9} metalness={0} />
-    </instancedMesh>
+    <instancedMesh ref={crowns} args={[resources.crownGeometry, undefined, MAX_INSTANCES * CROWN_SLOTS]} material={resources.crownMaterial} frustumCulled={false} />
     <instancedMesh ref={rocks} args={[resources.rockGeometry, undefined, MAX_INSTANCES]} frustumCulled={false}>
       <meshStandardMaterial color={palette.rock} roughness={.55} metalness={0} />
     </instancedMesh>
@@ -423,6 +475,7 @@ export function ForestRunner() {
   const [palette, setPalette] = useState<Palette | null>(null);
   const [notice, setNotice] = useState("");
   const hapticsRef = useRef(true);
+  const menuDrag = useRef<{ x: number; moved: boolean } | null>(null);
   const menu = phase === "menu" || phase === "fallen";
 
   useEffect(() => {
@@ -568,7 +621,9 @@ export function ForestRunner() {
       if (menu) {
         if (inUi) return;
         if (settingsOpen) { setSettingsOpen(false); return; }
-        void start();
+        // A tap starts the run; a horizontal drag looks around instead.
+        menuDrag.current = { x: e.clientX, moved: false };
+        e.currentTarget.setPointerCapture(e.pointerId);
         return;
       }
       if (touchMode) {
@@ -577,9 +632,24 @@ export function ForestRunner() {
       }
     }}
     onPointerMove={e => {
+      if (menu && menuDrag.current && e.buttons) {
+        const dx = e.clientX - menuDrag.current.x;
+        if (Math.abs(dx) > 8) menuDrag.current.moved = true;
+        input.current.touch = THREE.MathUtils.clamp(-dx / 90, -1, 1);
+        return;
+      }
       if (e.buttons && !menu && touchMode) input.current.touch = e.clientX < e.currentTarget.clientWidth / 2 ? -1 : 1;
     }}
-    onPointerUp={() => { input.current.touch = 0; }}
+    onPointerUp={() => {
+      if (menuDrag.current) {
+        const wasTap = !menuDrag.current.moved;
+        menuDrag.current = null;
+        input.current.touch = 0;
+        if (menu && wasTap) void start();
+        return;
+      }
+      input.current.touch = 0;
+    }}
     onPointerCancel={() => { input.current.touch = 0; }}
   >
     {palette && <Canvas dpr={[1, 1.5]} camera={{ fov: 72, position: [0, 1.6, 0] }} gl={{ antialias: true, powerPreference: "high-performance" }}>

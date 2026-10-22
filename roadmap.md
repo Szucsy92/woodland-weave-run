@@ -14,4 +14,5 @@
 - [x] Landscape default open + settings switch for all orientations
 - [x] Lower merged canopy (~15-17.5 m), leafy branch tips, canopy light bleed
 - [x] Verify full play/restart flow and both orientations in the browser (15/15 tests + live run)
+- [x] Faster running bob, swaying headlamp, 12 drifting spores, purple-green under-canopy glow, damped menu look-around (tilt or drag, tap still starts)
 - [ ] Phone trial by the user (tilt steering, haptics, menu hum audibility), then publish
