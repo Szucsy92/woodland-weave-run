@@ -6,7 +6,8 @@ describe("Spore palette", () => {
     const css = readFileSync("src/styles.css", "utf8");
     const match = css.match(/--forest-lemon:\s*(#[0-9a-fA-F]{6})/);
     expect(match).toBeTruthy();
-    const hex = match![1];
+    const hex = match ? match[1] : "";
+    if (!hex) throw new Error("missing --forest-lemon token");
     const r = parseInt(hex.slice(1, 3), 16) / 255;
     const g = parseInt(hex.slice(3, 5), 16) / 255;
     const b = parseInt(hex.slice(5, 7), 16) / 255;
