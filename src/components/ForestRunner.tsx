@@ -249,7 +249,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
         resources.dummy.rotation.order = "XYZ";
         // Four species: slender beech, V-forked, gnarled old oak, thin leaning sapling.
         const species = Math.floor(hash(seedX, seedZ, 200) * 4);
-        const girth = [.8, .9, 1.15, .68][species] * tree.scale;
+        const girth = ([.8, .9, 1.15, .68][species] ?? 1) * tree.scale;
         const leanAmt = species === 3 ? .07 : species === 2 ? .03 : .015;
         const leanDir = hash(seedX, seedZ, 201) * Math.PI * 2;
         const lx = Math.cos(leanDir) * leanAmt, lz = Math.sin(leanDir) * leanAmt;
