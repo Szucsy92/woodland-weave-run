@@ -811,6 +811,7 @@ export function ForestRunner() {
             <div className="forest-settings-panel" data-forest-ui>
               <button className="forest-back" onClick={() => setSettingsOpen(false)} aria-label="Back"><ArrowLeft size={15} /></button>
               <h2>Settings</h2>
+              <div className="forest-settings-scroll">
               <div className="forest-row">
                 <span>Difficulty</span>
                 <div className="forest-seg forest-seg-three">
