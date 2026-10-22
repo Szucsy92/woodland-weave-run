@@ -15,4 +15,8 @@
 - [x] Lower merged canopy (~15-17.5 m), leafy branch tips, canopy light bleed
 - [x] Verify full play/restart flow and both orientations in the browser (15/15 tests + live run)
 - [x] Faster running bob, swaying headlamp, 12 drifting spores, purple-green under-canopy glow, damped menu look-around (tilt or drag, tap still starts)
+- [x] World-anchored spores scattered in depth (runner approaches and passes them)
+- [x] Look-around (tilt/drag) after a fall, same damped feel as the menu
+- [x] Capacitor Android app: static prerendered bundle (no server on-device), GitHub Actions APK build with optional signed release
+- [ ] User connects GitHub (Settings → Git) and adds keystore secrets for updatable signed APKs
 - [ ] Phone trial by the user (tilt steering, haptics, menu hum audibility), then publish
