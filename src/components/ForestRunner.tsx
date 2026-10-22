@@ -411,7 +411,8 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     const steering = getSteering(input.current.touchMode, input.current.touch, input.current.tilt);
     // Menu and lying phases: no step rhythm, only a barely noticeable breathing sway.
     const leanTarget = lying ? Math.sin(t * .13) * .035 : steering;
-    const bob = running ? Math.abs(Math.sin(t * 12.5)) * .018 : Math.sin(t * .4) * .012;
+    // Smooth half-wave step bob: rises and falls softly, no sharp bounce cusps.
+    const bob = running ? (Math.sin(t * 11) * .5 + .5) * .03 : Math.sin(t * .4) * .012;
     lean.current += (leanTarget - lean.current) * Math.min(1, raw * (running ? 15 : 2));
     camera.position.set(
       s.x + fall * .45 + leanAmount * .3,
