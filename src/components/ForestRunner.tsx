@@ -614,6 +614,24 @@ export function ForestRunner() {
   const hapticsRef = useRef(true);
   const menuDrag = useRef<{ x: number; moved: boolean } | null>(null);
   const menu = phase === "menu" || phase === "fallen";
+  const [pendingUpdate, setPendingUpdate] = useState<UpdateInfo | null>(null);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
+  const [updateDownloading, setUpdateDownloading] = useState(false);
+
+  // Quietly look for a newer release on launch and each time the app returns to the foreground.
+  useEffect(() => {
+    const native = nativeUpdater();
+    if (!native) return;
+    let last = 0;
+    const look = () => {
+      if (document.visibilityState !== "visible" || Date.now() - last < 10 * 60 * 1000) return;
+      last = Date.now();
+      checkForUpdate(native.versionCode()).then(u => { if (u) setPendingUpdate(u); }).catch(() => undefined);
+    };
+    look();
+    document.addEventListener("visibilitychange", look);
+    return () => document.removeEventListener("visibilitychange", look);
+  }, []);
 
   useEffect(() => {
     const audio = new ForestDrone();
@@ -882,6 +900,15 @@ export function ForestRunner() {
                 <div><span>Last</span><strong>{last}<small>m</small></strong></div>
                 <div><span>Best</span><strong>{best}<small>m</small></strong></div>
               </div>
+              {pendingUpdate && !updateDismissed && (
+                <div className="forest-row" data-forest-ui role="status" style={{ flexWrap: "wrap", marginTop: 10 }}>
+                  <span>{updateDownloading ? "Downloading… then confirm the install." : "New update available!"}</span>
+                  {!updateDownloading && <>
+                    <button className="forest-switch" aria-pressed onClick={() => { nativeUpdater()?.download(pendingUpdate.apkUrl); setUpdateDownloading(true); }}>Update</button>
+                    <button className="forest-switch" aria-pressed={false} onClick={() => setUpdateDismissed(true)}>Later</button>
+                  </>}
+                </div>
+              )}
             </>
           )}
           {notice && <p role="status" className="forest-notice">{notice}</p>}
