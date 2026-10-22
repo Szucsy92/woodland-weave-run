@@ -161,3 +161,16 @@ describe("Stride rhythm follows the pace", () => {
     expect((s.stride - before) / (STRIDE_RATE * 0.1)).toBeLessThan(0.9);
   });
 });
+
+describe("Trunks are solid", () => {
+  it("never lets the runner pass through a trunk, even right after a hit", () => {
+    const s = makeSimulation(); s.phase = "running"; s.x = 0.05; s.z = 3;
+    const tree = { x: 0, z: 0, scale: 1, id: "solid" };
+    s.trees = [tree];
+    for (let i = 0; i < 240; i++) {
+      stepSimulation(s, 0, 1 / 60);
+      expect(Math.hypot(s.x - tree.x, s.z - tree.z)).toBeGreaterThanOrEqual(0.45 + 0.22 - 0.05);
+    }
+    expect(s.z).toBeLessThan(-1);
+  });
+});

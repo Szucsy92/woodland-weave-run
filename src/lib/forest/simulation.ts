@@ -116,11 +116,16 @@ export function collide(s: Simulation, tree: Tree) {
   const distance = Math.hypot(dx, dz);
   if (distance >= radius) return false;
   const side = dx === 0 ? (hash(Math.floor(tree.x), Math.floor(tree.z), 7) > 0.5 ? 1 : -1) : Math.sign(dx);
-  const nx = distance > 0.001 ? dx / distance : side;
   const nz = distance > 0.001 ? dz / distance : 0;
-  s.x += nx * (radius - distance + 0.01);
-  // Never push the runner backwards, even when contacting the front of a trunk.
-  s.z += Math.min(0, nz * (radius - distance + 0.01));
+  if (nz > 0) {
+    // Front contact: never push backwards, so throw the runner fully aside
+    // to the trunk's edge at the current depth — it can never pass through.
+    s.x = tree.x + side * (Math.sqrt(Math.max(0, radius * radius - dz * dz)) + 0.01);
+  } else {
+    const nx = distance > 0.001 ? dx / distance : side;
+    s.x += nx * (radius - distance + 0.01);
+    s.z += nz * (radius - distance + 0.01);
+  }
   s.pushX = side * 3.5;
   s.heading = Math.max(-MAX_HEADING, Math.min(MAX_HEADING, s.heading - side * 0.14));
   if (s.cooldown > 0 || s.lastTree === tree.id) return false;
