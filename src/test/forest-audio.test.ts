@@ -41,7 +41,7 @@ describe("Continuous forest soundtrack", () => {
   it("plays a 100 ms shorter, crossfaded loop so the seam has no silence gap", async () => {
     let made: { length: number; getChannelData: (c: number) => Float32Array } | null = null;
     audio.unlock();
-    const live = ctx as unknown as Record<string, any>;
+    const live = ctx as unknown as { decodeAudioData: unknown; createBuffer: (...a: [number, number, number]) => never };
     live.decodeAudioData = async () => {
       const d = new Float32Array(44100).fill(0.5);
       return { sampleRate: 44100, length: 44100, numberOfChannels: 1, getChannelData: () => d };
