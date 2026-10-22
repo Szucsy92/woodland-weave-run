@@ -11,6 +11,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -19,12 +21,12 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
 
       - uses: android-actions/setup-android@v3
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: bun install
 
       - name: Build the static web bundle
         run: bun run build
@@ -33,29 +35,32 @@ jobs:
         run: bunx cap sync android
 
       - name: Decode release keystore (optional)
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        if: env.HAS_KEYSTORE == 'true'
         run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/release.keystore
 
       - name: Read version from package.json
         id: version
-        run: echo "name=$(bun -e 'console.log(require("./package.json").version)')" >> "$GITHUB_OUTPUT"
+        run: echo "name=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
 
       - name: Build signed release APK
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        if: env.HAS_KEYSTORE == 'true'
         working-directory: android
         run: |
+          chmod +x ./gradlew
           ./gradlew assembleRelease \
             -PciVersionCode=${{ github.run_number }} \
             -PciVersionName=${{ steps.version.outputs.name }} \
-            -PRELEASE_STORE_FILE=app/release.keystore \
-            -PRELEASE_STORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD }} \
-            -PRELEASE_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }} \
-            -PRELEASE_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}
+            -PRELEASE_STORE_FILE=release.keystore \
+            -PRELEASE_STORE_PASSWORD='${{ secrets.ANDROID_KEYSTORE_PASSWORD }}' \
+            -PRELEASE_KEY_ALIAS='${{ secrets.ANDROID_KEY_ALIAS }}' \
+            -PRELEASE_KEY_PASSWORD='${{ secrets.ANDROID_KEY_PASSWORD }}'
 
       - name: Build debug APK (fallback when no keystore is configured)
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 == '' }}
+        if: env.HAS_KEYSTORE != 'true'
         working-directory: android
-        run: ./gradlew assembleDebug -PciVersionCode=${{ github.run_number }} -PciVersionName=${{ steps.version.outputs.name }}
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleDebug -PciVersionCode=${{ github.run_number }} -PciVersionName=${{ steps.version.outputs.name }}
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
