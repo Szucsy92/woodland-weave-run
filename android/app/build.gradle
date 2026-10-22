@@ -7,8 +7,10 @@ android {
         applicationId "com.woodlandweave.run"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // CI passes -PciVersionCode (GitHub run number) so every build can
+        // install over the previous one; local builds fall back to 1.
+        versionCode (project.hasProperty('ciVersionCode') ? ciVersionCode.toInteger() : 1)
+        versionName (project.hasProperty('ciVersionName') ? ciVersionName : "1.0")
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,10 +18,26 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // Optional release signing: active only when the CI provides the keystore
+    // properties (GitHub secrets). Without them the release build stays unsigned
+    // and the workflow falls back to the debug APK.
+    signingConfigs {
+        release {
+            if (project.hasProperty('RELEASE_STORE_FILE')) {
+                storeFile file(RELEASE_STORE_FILE)
+                storePassword RELEASE_STORE_PASSWORD
+                keyAlias RELEASE_KEY_ALIAS
+                keyPassword RELEASE_KEY_PASSWORD
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (project.hasProperty('RELEASE_STORE_FILE')) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }
