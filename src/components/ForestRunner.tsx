@@ -24,6 +24,8 @@ const CROWN_SLOTS = CROWNS_PER_TREE + BRANCHES_PER_TREE;
 // Installed apps lock to landscape where the OS allows it; browsers get the
 // request after fullscreen and simply ignore it when unsupported.
 async function lockOrientation(mode: "landscape" | "any") {
+  const native = (window as unknown as { AndroidOrientation?: { set: (m: string) => void } }).AndroidOrientation;
+  if (native) { native.set(mode); return; }
   const so = screen.orientation as (ScreenOrientation & { lock?: (o: string) => Promise<void>; unlock?: () => void }) | undefined;
   try {
     if (mode === "landscape") {
@@ -561,7 +563,10 @@ export function ForestRunner() {
       const vib = localStorage.getItem("forest-haptics") !== "off";
       setHaptics(vib);
       hapticsRef.current = vib;
-      if (localStorage.getItem("forest-orient") === "any") setOrient("any");
+      if (localStorage.getItem("forest-orient") === "any") { setOrient("any"); void lockOrientation("any"); }
+      // Start the menu drone at once; the app allows sound before any tap,
+      // browsers simply keep it waiting for the first touch.
+      if (localStorage.getItem("forest-sound") !== "off") audio.unlock();
     } catch { /* Local storage may be disabled. */ }
     const canvas = document.createElement("canvas");
     canvas.width = canvas.height = 1;
