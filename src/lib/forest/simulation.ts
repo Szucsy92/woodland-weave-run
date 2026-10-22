@@ -19,6 +19,16 @@ export const DIFFICULTIES = {
   hard: { treeGap: 0.75, accel: 46, maxSpeed: 23.5, obstacleGap: 0.66 },
 } satisfies Record<Difficulty, { treeGap: number; accel: number; maxSpeed: number; obstacleGap: number }>;
 
+// Every run starts at this pace, and the head movement covers one stride per
+// fixed distance: quicken and the rhythm quickens with you. The cap keeps the
+// fastest pace calm rather than frantic.
+export const BASE_SPEED = 8.4;
+export const STRIDE_RATE = 11;
+export const STRIDE_MAX_MUL = 1.4;
+export function strideMultiplier(speed: number) {
+  return Math.min(STRIDE_MAX_MUL, Math.max(0.5, speed / BASE_SPEED));
+}
+
 export function hash(x: number, z: number, salt = 0) {
   let h = (x * 374761393 + z * 668265263 + salt * 982451653) | 0;
   h = Math.imul(h ^ (h >>> 13), 1274126177);
@@ -90,7 +100,7 @@ export function makeSimulation() {
   return { x: 0, z: 0, heading: 0, distance: 0, elapsed: 0, phaseTime: 0,
     phase: "menu" as Phase, hits: 0, cooldown: 0, impact: 0, impactSide: 1,
     pushX: 0, lastTree: "", cell: "", trees: [] as Tree[], obstacles: [] as Obstacle[],
-    difficulty: "easy" as Difficulty, stumble: 0, speedMul: 1, lastObstacle: "" };
+    difficulty: "easy" as Difficulty, stumble: 0, speedMul: 1, lastObstacle: "", stride: 0 };
 }
 
 export function beginRun(s: Simulation) {
@@ -154,12 +164,13 @@ export function stepSimulation(s: Simulation, steering: number, delta: number) {
   const sub = dt / count;
   for (let i = 0; i < count; i++) {
     if (s.phase !== "running") break;
-    const speed = Math.min(level.maxSpeed, 8.4 + s.distance / level.accel) * (s.stumble > 0 ? s.speedMul : 1);
+    const speed = Math.min(level.maxSpeed, BASE_SPEED + s.distance / level.accel) * (s.stumble > 0 ? s.speedMul : 1);
     s.heading = Math.max(-MAX_HEADING, Math.min(MAX_HEADING, s.heading - steering * 1.7 * sub));
     s.pushX *= Math.exp(-7 * sub);
     s.x += (-Math.sin(s.heading) * speed + s.pushX) * sub;
     s.z -= Math.cos(s.heading) * speed * sub;
     s.distance += speed * sub;
+    s.stride += strideMultiplier(speed) * STRIDE_RATE * sub;
     for (const tree of s.trees) collide(s, tree);
     for (const obstacle of s.obstacles) collideObstacle(s, obstacle);
   }
