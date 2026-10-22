@@ -64,6 +64,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
   const lastStumble = useRef(0);
   const lean = useRef(0);
   const spores = useRef<THREE.Group>(null);
+  const sporeWorld = useRef<{ x: number; z: number; h: number }[]>([]);
   const menuLook = useRef(0);
   const lampSway = useRef(0);
   const { camera } = useThree();
