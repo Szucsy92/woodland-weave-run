@@ -644,17 +644,17 @@ export function ForestRunner() {
     await lockOrientation(orient);
     if (!touchMode) {
       if (typeof DeviceOrientationEvent === "undefined") {
-        setNotice("Döntés nem elérhető. Kapcsold be az érintéses irányítást.");
+        setNotice("Tilt is not available. Switch to touch controls.");
         return;
       }
       const D = DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> };
       try {
         if (D.requestPermission && await D.requestPermission() !== "granted") {
-          setNotice("Döntés nem engedélyezett. Kapcsold be az érintéses irányítást.");
+          setNotice("Tilt permission denied. Switch to touch controls.");
           return;
         }
       } catch {
-        setNotice("Kapcsold be az érintéses irányítást.");
+        setNotice("Switch to touch controls.");
         return;
       }
       input.current.neutral = null;
@@ -747,40 +747,40 @@ export function ForestRunner() {
     {(phase === "running" || phase === "awakening" || phase === "falling") && <Hud simulation={simulation} />}
     {menu && (
       <div className="forest-menu">
-        <section className="forest-glass" aria-label="Futás menü">
+        <section className="forest-glass" aria-label="Run menu">
           {settingsOpen ? (
             <div className="forest-settings-panel" data-forest-ui>
-              <button className="forest-back" onClick={() => setSettingsOpen(false)} aria-label="Vissza"><ArrowLeft size={15} /></button>
-              <h2>Beállítások</h2>
+              <button className="forest-back" onClick={() => setSettingsOpen(false)} aria-label="Back"><ArrowLeft size={15} /></button>
+              <h2>Settings</h2>
               <div className="forest-row">
-                <span>Nehézség</span>
+                <span>Difficulty</span>
                 <div className="forest-seg forest-seg-three">
-                  <button className={difficulty === "easy" ? "on" : ""} onClick={() => changeDifficulty("easy")}>Könnyű</button>
-                  <button className={difficulty === "normal" ? "on" : ""} onClick={() => changeDifficulty("normal")}>Közép</button>
-                  <button className={difficulty === "hard" ? "on" : ""} onClick={() => changeDifficulty("hard")}>Nehéz</button>
+                  <button className={difficulty === "easy" ? "on" : ""} onClick={() => changeDifficulty("easy")}>Easy</button>
+                  <button className={difficulty === "normal" ? "on" : ""} onClick={() => changeDifficulty("normal")}>Normal</button>
+                  <button className={difficulty === "hard" ? "on" : ""} onClick={() => changeDifficulty("hard")}>Hard</button>
                 </div>
               </div>
               <div className="forest-row">
-                <span>Irányítás</span>
+                <span>Controls</span>
                 <div className="forest-seg">
-                  <button className={touchMode ? "" : "on"} onClick={() => changeTouch(false)}>Döntés</button>
-                  <button className={touchMode ? "on" : ""} onClick={() => changeTouch(true)}>Érintés</button>
+                  <button className={touchMode ? "" : "on"} onClick={() => changeTouch(false)}>Tilt</button>
+                  <button className={touchMode ? "on" : ""} onClick={() => changeTouch(true)}>Touch</button>
                 </div>
               </div>
               <div className="forest-row">
-                <span>Képernyő</span>
+                <span>Orientation</span>
                 <div className="forest-seg">
-                  <button className={orient === "landscape" ? "on" : ""} onClick={() => changeOrient("landscape")}>Fekvő</button>
-                  <button className={orient === "any" ? "on" : ""} onClick={() => changeOrient("any")}>Bármely</button>
+                  <button className={orient === "landscape" ? "on" : ""} onClick={() => changeOrient("landscape")}>Landscape</button>
+                  <button className={orient === "any" ? "on" : ""} onClick={() => changeOrient("any")}>Any</button>
                 </div>
               </div>
               <div className="forest-row">
-                <span>Audió</span>
-                <button className="forest-switch" aria-pressed={sound} onClick={toggleSound}>{sound ? "Be" : "Ki"}</button>
+                <span>Audio</span>
+                <button className="forest-switch" aria-pressed={sound} onClick={toggleSound}>{sound ? "On" : "Off"}</button>
               </div>
               <div className="forest-row">
-                <span>Rezgés</span>
-                <button className="forest-switch" aria-pressed={haptics} onClick={toggleHaptics}>{haptics ? "Be" : "Ki"}</button>
+                <span>Haptics</span>
+                <button className="forest-switch" aria-pressed={haptics} onClick={toggleHaptics}>{haptics ? "On" : "Off"}</button>
               </div>
               <UpdateRow />
             </div>
@@ -788,11 +788,11 @@ export function ForestRunner() {
             <>
               <div className="forest-head">
                 <h1 className="forest-title" data-text="tap and run!">tap and run!</h1>
-                <button className="forest-gear" data-forest-ui onClick={() => setSettingsOpen(true)} aria-label="Beállítások"><Settings size={16} /></button>
+                <button className="forest-gear" data-forest-ui onClick={() => setSettingsOpen(true)} aria-label="Settings"><Settings size={16} /></button>
               </div>
               <div className="forest-scores">
-                <div><span>Előző</span><strong>{last}<small>m</small></strong></div>
-                <div><span>Rekord</span><strong>{best}<small>m</small></strong></div>
+                <div><span>Last</span><strong>{last}<small>m</small></strong></div>
+                <div><span>Best</span><strong>{best}<small>m</small></strong></div>
               </div>
             </>
           )}
@@ -822,17 +822,17 @@ function UpdateRow() {
     setState("downloading");
   };
   const label = {
-    idle: "", checking: "Keresés…", latest: "A legfrissebb változatot használod.",
-    error: "Nem sikerült elérni a frissítéseket.", web: "Csak a telefonos alkalmazásban érhető el.",
-    downloading: "Letöltés… utána jóváhagyhatod a telepítést.",
+    idle: "", checking: "Checking…", latest: "Latest version installed.",
+    error: "Could not reach updates.", web: "Only available in the phone app.",
+    downloading: "Downloading… then confirm the install.",
   }[state];
   return (
     <div className="forest-row" style={{ flexWrap: "wrap" }}>
-      <span>Frissítés</span>
+      <span>Update</span>
       {update && state !== "downloading"
-        ? <button className="forest-switch" aria-pressed onClick={download}>Letöltés</button>
-        : <button className="forest-switch" aria-pressed={false} disabled={state === "checking" || state === "downloading"} onClick={check}>Keresés</button>}
-      {(update && state !== "downloading") && <small style={{ width: "100%", opacity: .75 }}>Új frissítés érhető el (build {update.build}).</small>}
+        ? <button className="forest-switch" aria-pressed onClick={download}>Download</button>
+        : <button className="forest-switch" aria-pressed={false} disabled={state === "checking" || state === "downloading"} onClick={check}>Check</button>}
+      {(update && state !== "downloading") && <small style={{ width: "100%", opacity: .75 }}>New update available (build {update.build}).</small>}
       {label && <small style={{ width: "100%", opacity: .75 }}>{label}</small>}
     </div>
   );
