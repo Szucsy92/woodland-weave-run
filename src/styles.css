@@ -72,6 +72,7 @@
   --forest-trunk: #b8a58c;
   --forest-ground: #9aa896; --forest-crown: #17251c; --forest-rock: #3a4048; --forest-plant: #22301f;
   --forest-launch: #282828;
+  --forest-day-fog: #8f9b98; --forest-day-moon: #dfe6e2;
   --forest-glass: oklch(0.36 0.009 290 / 0.3);
   --forest-edge: oklch(0.87 0.01 290 / 0.2);
   --forest-text: oklch(0.94 0.004 290);
