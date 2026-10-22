@@ -710,8 +710,11 @@ export function ForestRunner() {
     data-phase={phase}
     onPointerDown={e => {
       drone.current?.unlock();
-      if (!document.fullscreenElement && document.documentElement.requestFullscreen) void document.documentElement.requestFullscreen().catch(() => undefined);
       const inUi = (e.target as Element | null)?.closest("[data-forest-ui]");
+      // Entering fullscreen resizes the page mid-tap, which swallows the button press.
+      // The installed app is already fullscreen, and menu buttons must react on first touch.
+      const native = "AndroidOrientation" in window;
+      if (!native && !inUi && !document.fullscreenElement && document.documentElement.requestFullscreen) void document.documentElement.requestFullscreen().catch(() => undefined);
       if (menu) {
         if (inUi) return;
         if (settingsOpen) { setSettingsOpen(false); return; }
