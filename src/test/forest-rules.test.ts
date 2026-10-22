@@ -134,3 +134,30 @@ describe("Forest mood", () => {
     expect(daylightFor("auto", 18.5)).toBeCloseTo(.5);
   });
 });
+
+import { BASE_SPEED, strideMultiplier, STRIDE_MAX_MUL, STRIDE_RATE } from "@/lib/forest/simulation";
+describe("Stride rhythm follows the pace", () => {
+  it("keeps the agreed rhythm at the start of a run", () => {
+    const s = makeSimulation(); s.phase = "running";
+    for (let i = 0; i < 60; i++) stepSimulation(s, 0, 1 / 60);
+    expect(s.stride).toBeGreaterThan(STRIDE_RATE * 0.99);
+    expect(s.stride).toBeLessThan(STRIDE_RATE * 1.05);
+  });
+  it("quickens the movement as the runner speeds up, never past the cap", () => {
+    const early = makeSimulation(); early.phase = "running";
+    const late = makeSimulation(); late.phase = "running"; late.distance = 1200;
+    for (let i = 0; i < 60; i++) { stepSimulation(early, 0, 1 / 60); stepSimulation(late, 0, 1 / 60); }
+    const ratio = late.stride / early.stride;
+    expect(ratio).toBeGreaterThan(1.2);
+    expect(ratio).toBeLessThanOrEqual(STRIDE_MAX_MUL + 0.02);
+    expect(strideMultiplier(BASE_SPEED)).toBe(1);
+    expect(strideMultiplier(30)).toBe(STRIDE_MAX_MUL);
+  });
+  it("slows the stride while stumbling over a rock", () => {
+    const s = makeSimulation(); s.phase = "running";
+    collideObstacle(s, { x: 0, z: -0.05, big: true, radius: 0.7, id: "r1" });
+    const before = s.stride;
+    stepSimulation(s, 0, 0.1);
+    expect((s.stride - before) / (STRIDE_RATE * 0.1)).toBeLessThan(0.9);
+  });
+});
