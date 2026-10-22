@@ -35,6 +35,23 @@ export function groundHeight(x: number, z: number) {
   return (w1 * 1.15 + w2 * 0.55 + w3 * 0.35) * 0.3;
 }
 
+// Fixed world positions on both sides and across depth, including beside the
+// runner. Only particles well behind or outside the local forest are recycled.
+export function placeSpore(x: number, z: number, index: number, generation = 0, initial = false) {
+  return {
+    x: x + (hash(index, generation, 6) - .5) * 48,
+    z: z - (initial ? -12 + hash(index, generation, 5) * 70 : 8 + hash(index, generation, 5) * 50),
+    h: .7 + hash(index, generation, 7) * 3.5,
+  };
+}
+
+export function sporeOpacity(distance: number, twinkle: number) {
+  const depth = Math.max(0, 1 - distance / 70);
+  const lamp = Math.max(0, 1 - distance / 18);
+  // No near-face disappearance: passing particles retain their soft glow.
+  return (.32 + twinkle * .1 + lamp * .12) * depth;
+}
+
 export function treesAround(cx: number, cz: number, keep = 0.57): Tree[] {
   const trees: Tree[] = [];
   for (let i = -RADIUS; i <= RADIUS; i++) {

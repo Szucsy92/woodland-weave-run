@@ -1,5 +1,5 @@
 # Roadmap
-- [x] Denser, more visible world-anchored spores with soft glow and near-face fading
+- [x] Denser world-anchored spores across left/right and depth, visible while passing without near-face fading
 - [x] First-person view, trunk-only trees, night forest
 - [x] Tilt (phone tilt) steering
 - [x] Own generated textures (bark, forest floor) — original game's graphics can't be copied
