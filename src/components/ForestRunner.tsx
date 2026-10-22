@@ -341,8 +341,9 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       s.z + fall * .65);
     // Menu: slow, damped horizontal look-around on tilt or a finger drag;
     // during a run it settles back to the running heading.
-    const lookTarget = s.phase === "menu" ? steering * .5 : 0;
-    menuLook.current += (lookTarget - menuLook.current) * Math.min(1, raw * (s.phase === "menu" ? 1.4 : 6));
+    const canLook = s.phase === "menu" || s.phase === "fallen";
+    const lookTarget = canLook ? steering * .5 : 0;
+    menuLook.current += (lookTarget - menuLook.current) * Math.min(1, raw * (canLook ? 1.4 : 6));
     const viewHeading = s.heading + menuLook.current;
     resources.target.set(
       s.x - Math.sin(viewHeading) * 18,
