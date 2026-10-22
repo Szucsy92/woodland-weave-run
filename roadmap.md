@@ -24,4 +24,5 @@
 - [x] Create permanent Android signing key, validate signing with it, and encrypt upload to GitHub Actions secrets
 - [x] Require permanent release signing in GitHub builds; verify APK certificate before publication
 - [x] Configure all four GitHub signing secrets
-- [ ] Verify first permanently signed GitHub APK and in-place device update (requires synced workflow run and installed APK trial)
+- [ ] Verify first permanently signed GitHub APK publication (GitHub signed the APK successfully; certificate comparison failed, corrected diagnostic/parser awaits Lovable Git sync and a new workflow run)
+- [ ] Verify in-place device update (requires installing the first permanently signed APK, then a newer signed APK)
