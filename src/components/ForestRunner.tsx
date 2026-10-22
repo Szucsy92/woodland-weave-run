@@ -227,6 +227,23 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
           vec3 tint = mix(vec3(.18, .55, .35), vec3(.42, .26, .62), smoothstep(-.3, .3, sin(vTH * .35)));
           totalEmissiveRadiance += tint * rim * near * .22 * smoothstep(.6, 2., vTH);`);
     };
+    // Bushes: a soft purple-green silhouette rim, as if caught by the canopy
+    // glow and the headlamp, so undergrowth reads against the dark floor.
+    const plantMaterial = new THREE.MeshStandardMaterial({ color: palette.plant, roughness: .9, metalness: 0 });
+    plantMaterial.onBeforeCompile = shader => {
+      shader.vertexShader = shader.vertexShader
+        .replace("#include <common>", `#include <common>\nvarying vec3 vPN;\nvarying vec3 vPV;\nvarying vec3 vPW;`)
+        .replace("#include <defaultnormal_vertex>", `#include <defaultnormal_vertex>\nvPN = normalize(transformedNormal);`)
+        .replace("#include <project_vertex>", `#include <project_vertex>\nvPV = -mvPosition.xyz;\nvPW = (modelMatrix * instanceMatrix * vec4(transformed, 1.)).xyz;`);
+      shader.fragmentShader = shader.fragmentShader
+        .replace("#include <common>", `#include <common>\nvarying vec3 vPN;\nvarying vec3 vPV;\nvarying vec3 vPW;`)
+        .replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>
+          float pd = length(vPV);
+          float prim = pow(1. - abs(dot(normalize(vPN), normalize(vPV))), 2.4);
+          float pfar = smoothstep(3., 9., pd) * (1. - smoothstep(26., 40., pd));
+          vec3 pTint = mix(vec3(.2, .55, .34), vec3(.5, .32, .7), .5 + .5 * sin(vPW.x * .27 + vPW.z * .19));
+          totalEmissiveRadiance += pTint * prim * (.18 + .3 * pfar);`);
+    };
     const crownMaterial = new THREE.MeshStandardMaterial({ color: palette.crown, roughness: .9, metalness: 0 });
     crownMaterial.onBeforeCompile = shader => {
       // Soft purple-green shards of light catching the leaf undersides — a
@@ -243,10 +260,10 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
           vec3 glowTint = mix(vec3(.16, .5, .3), vec3(.42, .25, .62), .5 + .5 * sin(vCW.x * .23 + vCW.z * .31));
           totalEmissiveRadiance += glowTint * under * shard * .3;`);
     };
-    return { bark, barkN, barkR, floor, floorN, floorR, trunkGeometry, rootGeometry, branchGeometry, crownGeometry, rockGeometry, plantGeometry, groundMaterial, trunkMaterial, crownMaterial, shadowGeometry: new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), glowTexture: new THREE.CanvasTexture(canvas), sporeTexture: new THREE.CanvasTexture(sporeCanvas), dummy: new THREE.Object3D(), target: new THREE.Vector3() };
+    return { bark, barkN, barkR, floor, floorN, floorR, trunkGeometry, rootGeometry, branchGeometry, crownGeometry, rockGeometry, plantGeometry, groundMaterial, trunkMaterial, crownMaterial, plantMaterial, shadowGeometry: new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), glowTexture: new THREE.CanvasTexture(canvas), sporeTexture: new THREE.CanvasTexture(sporeCanvas), dummy: new THREE.Object3D(), target: new THREE.Vector3() };
   }, [palette]);
   useEffect(() => () => {
-    [resources.trunkGeometry, resources.rootGeometry, resources.branchGeometry, resources.crownGeometry, resources.rockGeometry, resources.plantGeometry, resources.glowTexture, resources.sporeTexture, resources.groundMaterial, resources.trunkMaterial, resources.crownMaterial, resources.shadowGeometry].forEach(g => g.dispose());
+    [resources.trunkGeometry, resources.rootGeometry, resources.branchGeometry, resources.crownGeometry, resources.rockGeometry, resources.plantGeometry, resources.glowTexture, resources.sporeTexture, resources.groundMaterial, resources.trunkMaterial, resources.crownMaterial, resources.plantMaterial, resources.shadowGeometry].forEach(g => g.dispose());
 
     [resources.bark, resources.barkN, resources.barkR, resources.floor, resources.floorN, resources.floorR].forEach(t => t.dispose());
   }, [resources]);
@@ -360,7 +377,8 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
           rockCount++;
         } else {
           resources.dummy.position.set(o.x, gy - .05, o.z);
-          resources.dummy.scale.set(.75, .35 + hash(Math.floor(o.x), Math.floor(o.z), 81) * .3, .75);
+          const bs = .85 + hash(Math.floor(o.x), Math.floor(o.z), 83) * .55;
+          resources.dummy.scale.set(.8 * bs, (.4 + hash(Math.floor(o.x), Math.floor(o.z), 81) * .35) * bs, .8 * bs);
           resources.dummy.updateMatrix();
           plantMesh?.setMatrixAt(plantCount++, resources.dummy.matrix);
         }
@@ -521,9 +539,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     <instancedMesh ref={rocks} args={[resources.rockGeometry, undefined, MAX_INSTANCES]} frustumCulled={false}>
       <meshStandardMaterial color={palette.rock} roughness={.55} metalness={0} />
     </instancedMesh>
-    <instancedMesh ref={plants} args={[resources.plantGeometry, undefined, MAX_INSTANCES]} frustumCulled={false}>
-      <meshStandardMaterial color={palette.plant} roughness={.9} metalness={0} />
-    </instancedMesh>
+    <instancedMesh ref={plants} args={[resources.plantGeometry, undefined, MAX_INSTANCES]} material={resources.plantMaterial} frustumCulled={false} />
   </>;
 }
 
