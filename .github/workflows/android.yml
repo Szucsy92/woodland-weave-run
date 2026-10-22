@@ -54,7 +54,7 @@ jobs:
           fi
 
       - name: Verify the bundle has an index.html
-        run: test -f dist/client/index.html || (echo "dist/client/index.html missing" && ls -R dist .output 2>/dev/null | head -50 && exit 1)
+        run: test -f dist/client/index.html || (echo "dist/client/index.html missing" && exit 1)
 
       - name: Sync the bundle into the Android app
         run: npx --no-install cap sync android
@@ -78,11 +78,14 @@ jobs:
 
       - name: Verify APK signature matches the permanent key
         run: |
-          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          APKSIGNER=$(printf '%s\n' "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
           test -n "$APKSIGNER"
           APK=android/app/build/outputs/apk/release/app-release.apk
           "$APKSIGNER" verify --verbose "$APK"
-          ACTUAL=$("$APKSIGNER" verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          "$APKSIGNER" verify --print-certs "$APK" > /tmp/apk-certificates.txt
+          cat /tmp/apk-certificates.txt
+          ACTUAL=$(sed -n 's/^.*certificate SHA-256 digest: //p' /tmp/apk-certificates.txt | head -1 | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')
+          test -n "$ACTUAL"
           test "$ACTUAL" = "$ANDROID_SIGNING_SHA256"
 
       # Give every APK a unique, dated name so downloads never overwrite each other.

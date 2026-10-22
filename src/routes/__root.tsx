@@ -12,7 +12,7 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
-import { STALE_BUNDLE_RECOVERY_SCRIPT } from "../lib/stale-bundle-recovery";
+import { recoverCaughtStaleLoad, STALE_BUNDLE_RECOVERY_SCRIPT } from "../lib/stale-bundle-recovery";
 
 function NotFoundComponent() {
   return (
@@ -40,6 +40,7 @@ function ErrorComponent({ error, reset }: ErrorComponentProps) {
   console.error(error);
   const router = useRouter();
   useEffect(() => {
+    recoverCaughtStaleLoad(error);
     reportLovableError(error, { boundary: "tanstack_root_error_component" });
   }, [error]);
 
