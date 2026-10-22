@@ -45,6 +45,35 @@ public class MainActivity extends BridgeActivity {
         }, "AndroidOrientation");
         web.addJavascriptInterface(new Object() {
             @JavascriptInterface
+            public void pulse(String pattern) {
+                try {
+                    String[] parts = pattern.split(",");
+                    long[] timings = new long[parts.length + 1];
+                    int[] amps = new int[parts.length + 1];
+                    for (int i = 0; i < parts.length; i++) {
+                        timings[i + 1] = Math.max(0, Math.min(400, Long.parseLong(parts[i].trim())));
+                        amps[i + 1] = i % 2 == 0 ? 110 : 0;
+                    }
+                    android.os.Vibrator v;
+                    if (android.os.Build.VERSION.SDK_INT >= 31) {
+                        v = ((android.os.VibratorManager) getSystemService(VIBRATOR_MANAGER_SERVICE)).getDefaultVibrator();
+                    } else {
+                        v = (android.os.Vibrator) getSystemService(VIBRATOR_SERVICE);
+                    }
+                    if (v == null || !v.hasVibrator()) return;
+                    if (android.os.Build.VERSION.SDK_INT >= 26) {
+                        boolean amp = v.hasAmplitudeControl();
+                        v.vibrate(amp
+                            ? android.os.VibrationEffect.createWaveform(timings, amps, -1)
+                            : android.os.VibrationEffect.createWaveform(timings, -1));
+                    } else {
+                        v.vibrate(timings, -1);
+                    }
+                } catch (Exception ignored) { }
+            }
+        }, "AndroidHaptics");
+        web.addJavascriptInterface(new Object() {
+            @JavascriptInterface
             public int versionCode() {
                 try {
                     return (int) androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(
