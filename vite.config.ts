@@ -14,7 +14,7 @@ export default defineConfig({
       // The shared development preset injects these into every JSX element,
       // including scene objects; disable that transform, not the other tools.
       const sourceInjection = config.plugins.find(plugin => plugin.name === "@tanstack/devtools:inject-source");
-      if (sourceInjection) sourceInjection.transform = undefined;
+      if (sourceInjection) delete sourceInjection.transform;
     },
   }],
   tanstackStart: {
