@@ -217,6 +217,9 @@ export function stepSimulation(s: Simulation, steering: number, delta: number) {
     if (s.phase !== "running") break;
     const speed = Math.min(level.maxSpeed, BASE_SPEED + s.distance / level.accel) * (s.stumble > 0 ? s.speedMul : 1);
     s.heading = Math.max(-MAX_HEADING, Math.min(MAX_HEADING, s.heading - steering * 1.7 * sub));
+    // Without input the runner drifts back toward straight ahead, so the turn
+    // limit (e.g. after a collision shove) never leaves steering stuck.
+    if (steering === 0 || Math.sign(-steering) !== Math.sign(s.heading)) s.heading *= Math.exp(-1.6 * sub);
     s.pushX *= Math.exp(-7 * sub);
     s.x += (-Math.sin(s.heading) * speed + s.pushX) * sub;
     s.z -= Math.cos(s.heading) * speed * sub;
