@@ -1,7 +1,7 @@
 {
-  "name": "Erdei futás",
-  "short_name": "Erdei futás",
-  "lang": "hu",
+  "name": "Woodland Weave Run",
+  "short_name": "Woodland Weave Run",
+  "lang": "en",
   "start_url": "/",
   "display": "fullscreen",
   "display_override": ["fullscreen", "standalone"],
