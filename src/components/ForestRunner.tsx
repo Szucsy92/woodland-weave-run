@@ -585,6 +585,15 @@ function DayCycle({ mood, night }: { mood: MutableRefObject<ForestMood>; night: 
   return null;
 }
 
+function buzz(pattern: number | number[]) {
+  const list = Array.isArray(pattern) ? pattern : [pattern];
+  const native = (globalThis as { AndroidHaptics?: { pulse(p: string): void } }).AndroidHaptics;
+  try {
+    if (native) native.pulse(list.join(","));
+    else navigator.vibrate?.(list);
+  } catch { /* Vibration unavailable. */ }
+}
+
 export function ForestRunner() {
   const simulation = useRef(makeSimulation());
   const input = useRef<Input>({ tilt: 0, touch: 0, touchMode: false, neutral: null, angle: 0 });
@@ -684,7 +693,7 @@ export function ForestRunner() {
     if (next === "falling") {
       setLast(score);
       setBest(old => Math.max(old, score));
-      if (hapticsRef.current) navigator.vibrate?.([70, 60, 110, 60, 150]);
+      if (hapticsRef.current) buzz([70, 60, 110, 60, 150]);
       try {
         localStorage.setItem("forest-last", String(score));
         localStorage.setItem("forest-best", String(Math.max(Number(localStorage.getItem("forest-best")) || 0, score)));
@@ -692,11 +701,11 @@ export function ForestRunner() {
     }
   }, []);
   const onImpact = useCallback(() => {
-    if (hapticsRef.current) navigator.vibrate?.(65);
+    if (hapticsRef.current) buzz(65);
     drone.current?.impactDip();
   }, []);
   const onStumble = useCallback(() => {
-    if (hapticsRef.current) navigator.vibrate?.(22);
+    if (hapticsRef.current) buzz(22);
   }, []);
 
   const start = async () => {
@@ -736,7 +745,7 @@ export function ForestRunner() {
     const next = !haptics;
     setHaptics(next);
     hapticsRef.current = next;
-    if (next) navigator.vibrate?.(30);
+    if (next) buzz(30);
     try { localStorage.setItem("forest-haptics", next ? "on" : "off"); } catch { /* Local storage may be disabled. */ }
   };
   const changeTouch = (checked: boolean) => {
