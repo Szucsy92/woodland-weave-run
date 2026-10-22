@@ -176,6 +176,9 @@ html, body { margin: 0; min-height: 100%; overscroll-behavior: none; }
 .forest-scores strong { font-weight: 300; font-size: 26px; line-height: 1.05; font-variant-numeric: tabular-nums; }
 .forest-scores small { margin-left: 4px; font-size: 11px; color: var(--forest-muted); }
 .forest-settings-panel { pointer-events: auto; position: relative; text-align: left; }
+.forest-settings-scroll { max-height: min(52dvh, 340px); overflow-y: auto; overscroll-behavior: contain; scroll-behavior: smooth; -webkit-overflow-scrolling: touch; scrollbar-width: none; mask-image: linear-gradient(to bottom, transparent, oklch(0 0 0) 26px, oklch(0 0 0) calc(100% - 26px), transparent); -webkit-mask-image: linear-gradient(to bottom, transparent, black 26px, black calc(100% - 26px), transparent); }
+.forest-settings-scroll::-webkit-scrollbar { display: none; }
+.forest-settings-scroll .forest-row:first-child { border-top: 0; }
 .forest-settings-panel h2 { font-size: 11px; font-weight: 500; letter-spacing: .08em; color: var(--forest-muted); margin: 0 0 10px; text-align: center; }
 .forest-back { position: absolute; left: 0; top: -3px; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border: 0; border-radius: 8px; background: transparent; color: var(--forest-muted); cursor: pointer; }
 .forest-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--forest-edge); font-size: 13px; color: var(--forest-text); }
