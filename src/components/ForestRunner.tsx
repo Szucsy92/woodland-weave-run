@@ -382,7 +382,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       spores.current.children.forEach((child, i) => {
         const sprite = child as THREE.Sprite;
         const seed = i * 7.13;
-        const spore = world[i];
+        const spore = world[i]!;
         if (spore.z > s.z + 4) {
           // Passed by — drift back into the distant depths ahead.
           spore.z = s.z - (35 + hash(i, Math.floor(s.distance), 5) * 45);
