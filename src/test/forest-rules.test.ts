@@ -123,3 +123,14 @@ describe("Terrain and obstacles", () => {
     expect(s.stumble).toBeCloseTo(0.5); expect(s.speedMul).toBeCloseTo(0.85);
   });
 });
+
+import { daylightFor } from "@/lib/forest/simulation";
+describe("Forest mood", () => {
+  it("night and day are fixed", () => { expect(daylightFor("night", 12)).toBe(0); expect(daylightFor("day", 0)).toBe(1); });
+  it("auto is dark at night, bright at noon, gradual at dawn and dusk", () => {
+    expect(daylightFor("auto", 2)).toBe(0);
+    expect(daylightFor("auto", 12)).toBe(1);
+    expect(daylightFor("auto", 6.5)).toBeCloseTo(.5);
+    expect(daylightFor("auto", 18.5)).toBeCloseTo(.5);
+  });
+});

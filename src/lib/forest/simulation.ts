@@ -174,3 +174,14 @@ export function orientationValue(gamma: number, beta: number, angle: number) {
   const raw = Math.abs(angle) === 90 ? beta * Math.sign(angle) : gamma;
   return Math.max(-1, Math.min(1, raw / 25));
 }
+
+export type ForestMood = "night" | "day" | "auto";
+/** Daylight amount 0 (night) .. 1 (misty day). Auto follows local time with slow dawn 5-8h and dusk 17-20h. */
+export function daylightFor(mood: ForestMood, hours: number) {
+  if (mood === "night") return 0;
+  if (mood === "day") return 1;
+  const h = ((hours % 24) + 24) % 24;
+  const ramp = (a: number, b: number) => Math.min(1, Math.max(0, (h - a) / (b - a)));
+  const s = (x: number) => x * x * (3 - 2 * x);
+  return s(ramp(5, 8)) * (1 - s(ramp(17, 20)));
+}

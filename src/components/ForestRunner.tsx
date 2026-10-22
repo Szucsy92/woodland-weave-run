@@ -4,7 +4,7 @@ import { ArrowLeft, Settings } from "lucide-react";
 import * as THREE from "three";
 import { ForestEffects } from "./ForestEffects";
 import { ForestDrone } from "@/lib/forest/drone";
-import { beginRun, CELL, DIFFICULTIES, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, obstaclesAround, orientationValue, placeSpore, RADIUS, sporeOpacity, stepSimulation, treesAround, type Difficulty, type Phase, type Simulation } from "@/lib/forest/simulation";
+import { beginRun, CELL, DIFFICULTIES, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, obstaclesAround, orientationValue, placeSpore, RADIUS, sporeOpacity, stepSimulation, treesAround, daylightFor, type Difficulty, type ForestMood, type Phase, type Simulation } from "@/lib/forest/simulation";
 import { checkForUpdate, nativeUpdater, type UpdateInfo } from "@/lib/forest/updater";
 import barkUrl from "@/assets/wet-bark.jpg";
 import floorUrl from "@/assets/wet-ground.jpg";
@@ -411,7 +411,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     const steering = getSteering(input.current.touchMode, input.current.touch, input.current.tilt);
     // Menu and lying phases: no step rhythm, only a barely noticeable breathing sway.
     const leanTarget = lying ? Math.sin(t * .13) * .035 : steering;
-    const bob = running ? Math.abs(Math.sin(t * 9.5)) * .026 : Math.sin(t * .4) * .012;
+    const bob = running ? Math.abs(Math.sin(t * 12.5)) * .018 : Math.sin(t * .4) * .012;
     lean.current += (leanTarget - lean.current) * Math.min(1, raw * (running ? 15 : 2));
     camera.position.set(
       s.x + fall * .45 + leanAmount * .3,
@@ -428,19 +428,19 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       groundHeight(s.x, s.z) * .6 + groundHeight(s.x - Math.sin(viewHeading) * 18, s.z - Math.cos(viewHeading) * 18) * .4 + 1.62 + fall * 3,
       s.z - Math.cos(viewHeading) * 18);
     camera.lookAt(resources.target);
-    camera.rotateX(bump * .085 + waking * Math.sin(t * 5) * .045 + fall * .065 * Math.sin(t * .32) + tripping * Math.sin(t * 17) * .085);
+    camera.rotateX(bump * .085 + waking * Math.sin(t * 5) * .045 + fall * .065 * Math.sin(t * .32) + tripping * Math.sin(t * 17) * .085 + (running ? Math.sin(t * 25) * .008 : 0));
     camera.rotateY(-leanAmount * .06);
-    camera.rotateZ(-leanAmount * .065 + bump * .12 + fall * .72 + waking * Math.sin(t * 4) * .03 + (running ? Math.sin(t * 9.5) * .028 : Math.sin(t * .4) * .008) + tripping * Math.sin(t * 13) * .07);
+    camera.rotateZ(-leanAmount * .065 + bump * .12 + fall * .72 + waking * Math.sin(t * 4) * .03 + (running ? Math.sin(t * 12.5) * .017 : Math.sin(t * .4) * .008) + tripping * Math.sin(t * 13) * .07);
     if (lamp.current) {
       // Headlamp rides the step rhythm and leads gently into turns, like a
       // real lamp strapped to a turning head.
       const swayTarget = running ? -steering * .55 : 0;
       lampSway.current += (swayTarget - lampSway.current) * Math.min(1, raw * 4);
-      const stepSway = running ? Math.sin(t * 9.5) * .1 : 0;
+      const stepSway = running ? Math.sin(t * 12.5) * .06 : 0;
       const rx = Math.cos(viewHeading), rz = -Math.sin(viewHeading);
       lamp.current.position.set(
         camera.position.x + rx * (lampSway.current + stepSway),
-        camera.position.y + .35 + (running ? Math.abs(Math.sin(t * 9.5)) * .05 : 0),
+        camera.position.y + .35 + (running ? Math.abs(Math.sin(t * 12.5)) * .035 : 0),
         camera.position.z + rz * (lampSway.current + stepSway));
       const flicker = lying ? (Math.sin(t * 5.7) + Math.sin(t * 13.2) > .25 ? .14 : .035) : 1 - waking * .8;
       lamp.current.intensity = 65 * flicker;
@@ -553,6 +553,31 @@ function Hud({ simulation }: { simulation: MutableRefObject<Simulation> }) {
 }
 
 
+function DayCycle({ mood, night }: { mood: MutableRefObject<ForestMood>; night: Palette }) {
+  const { scene } = useThree();
+  const day = useMemo(() => {
+    const st = getComputedStyle(document.documentElement);
+    return { fog: new THREE.Color(st.getPropertyValue("--forest-day-fog").trim() || "#8f9b98"), moon: new THREE.Color(st.getPropertyValue("--forest-day-moon").trim() || "#dfe6e2") };
+  }, []);
+  const level = useRef(-1);
+  const tmp = useMemo(() => new THREE.Color(), []);
+  useFrame((_, raw) => {
+    const d = new Date();
+    const target = daylightFor(mood.current, d.getHours() + d.getMinutes() / 60);
+    // Manual switches glide over ~2 s; auto follows the clock continuously.
+    level.current = level.current < 0 ? target : level.current + (target - level.current) * Math.min(1, raw * 1.5);
+    const k = level.current;
+    tmp.copy(night.fog).lerp(day.fog, k);
+    if (scene.background instanceof THREE.Color) scene.background.copy(tmp);
+    if (scene.fog instanceof THREE.Fog) { scene.fog.color.copy(tmp); scene.fog.near = 7 - k * 3; }
+    scene.traverse(o => {
+      if (o instanceof THREE.HemisphereLight) { o.color.copy(night.moon).lerp(day.moon, k); o.groundColor.copy(tmp); o.intensity = .85 + k * 1.6; }
+      else if (o instanceof THREE.DirectionalLight) { o.color.copy(night.moon).lerp(day.moon, k); o.intensity = .7 + k * 1.3; }
+    });
+  });
+  return null;
+}
+
 export function ForestRunner() {
   const simulation = useRef(makeSimulation());
   const input = useRef<Input>({ tilt: 0, touch: 0, touchMode: false, neutral: null, angle: 0 });
@@ -565,6 +590,8 @@ export function ForestRunner() {
   const [haptics, setHaptics] = useState(true);
   const [orient, setOrient] = useState<"landscape" | "any">("landscape");
   const [difficulty, setDifficulty] = useState<Difficulty>("easy");
+  const [mood, setMood] = useState<ForestMood>("night");
+  const moodRef = useRef<ForestMood>("night");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [palette, setPalette] = useState<Palette | null>(null);
   const [notice, setNotice] = useState("");
@@ -593,6 +620,8 @@ export function ForestRunner() {
       const vib = localStorage.getItem("forest-haptics") !== "off";
       setHaptics(vib);
       hapticsRef.current = vib;
+      const m = localStorage.getItem("forest-mood");
+      if (m === "day" || m === "auto") { setMood(m); moodRef.current = m; }
       if (localStorage.getItem("forest-orient") === "any") launchOrientation = "any";
     } catch { /* Local storage may be disabled. */ }
     setOrient(launchOrientation);
@@ -716,6 +745,11 @@ export function ForestRunner() {
     simulation.current.cell = "";
     try { localStorage.setItem("forest-difficulty", level); } catch { /* Local storage may be disabled. */ }
   };
+  const changeMood = (m: ForestMood) => {
+    setMood(m);
+    moodRef.current = m;
+    try { localStorage.setItem("forest-mood", m); } catch { /* Local storage may be disabled. */ }
+  };
   const changeOrient = (mode: "landscape" | "any") => {
     setOrient(mode);
     try { localStorage.setItem("forest-orient", mode); } catch { /* Local storage may be disabled. */ }
@@ -772,6 +806,7 @@ export function ForestRunner() {
       <directionalLight position={[0, 24, -20]} color={palette.moon} intensity={.7} />
       <World simulation={simulation} input={input} palette={palette} onPhase={onPhase} onImpact={onImpact} onStumble={onStumble} />
       <ForestEffects simulation={simulation} />
+      <DayCycle mood={moodRef} night={palette} />
     </Canvas>}
     {(phase === "running" || phase === "awakening" || phase === "falling") && <Hud simulation={simulation} />}
     {menu && (
@@ -787,6 +822,14 @@ export function ForestRunner() {
                   <button className={difficulty === "easy" ? "on" : ""} onClick={() => changeDifficulty("easy")}>Easy</button>
                   <button className={difficulty === "normal" ? "on" : ""} onClick={() => changeDifficulty("normal")}>Normal</button>
                   <button className={difficulty === "hard" ? "on" : ""} onClick={() => changeDifficulty("hard")}>Hard</button>
+                </div>
+              </div>
+              <div className="forest-row">
+                <span>Forest</span>
+                <div className="forest-seg forest-seg-three">
+                  <button className={mood === "night" ? "on" : ""} onClick={() => changeMood("night")}>Night</button>
+                  <button className={mood === "day" ? "on" : ""} onClick={() => changeMood("day")}>Day</button>
+                  <button className={mood === "auto" ? "on" : ""} onClick={() => changeMood("auto")}>Auto</button>
                 </div>
               </div>
               <div className="forest-row">
