@@ -20,3 +20,4 @@
 - Native launch policy lives in MainActivity: install JS interfaces before Bridge loads, apply initial orientation before document startup, and restore immersive system-bar hiding on resume, focus and configuration changes; browser fullscreen alone cannot control Android bars.
 - Generate native launcher density assets from public/icon-512.png, with the web manifest background and adaptive safe-zone scaling, so installed and web identities cannot diverge.
 - Audio startup and foreground return must not depend on storage availability or a tap in the native app; retry suspended native audio while visible/enabled, and clear lifecycle handlers on disposal.
+- In-app update check: settings button reads the latest GitHub Release; native AndroidUpdater downloads the APK and opens the system installer (release tag build number = versionCode).

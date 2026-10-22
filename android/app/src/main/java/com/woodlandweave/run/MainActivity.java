@@ -1,6 +1,14 @@
 package com.woodlandweave.run;
 
+import android.content.Intent;
 import android.content.pm.ActivityInfo;
+import android.net.Uri;
+import androidx.core.content.FileProvider;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import android.content.res.Configuration;
 import android.os.Bundle;
 import android.webkit.JavascriptInterface;
@@ -35,7 +43,41 @@ public class MainActivity extends BridgeActivity {
                 });
             }
         }, "AndroidOrientation");
+        web.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public int versionCode() {
+                try {
+                    return (int) androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(
+                        getPackageManager().getPackageInfo(getPackageName(), 0));
+                } catch (Exception e) { return 0; }
+            }
+            @JavascriptInterface
+            public void download(String url) {
+                if (url == null || !url.startsWith("https://github.com/")) return;
+                new Thread(() -> downloadAndInstall(url)).start();
+            }
+        }, "AndroidUpdater");
         super.load();
+    }
+
+    private void downloadAndInstall(String url) {
+        try {
+            File dir = new File(getCacheDir(), "updates");
+            dir.mkdirs();
+            File apk = new File(dir, "update.apk");
+            HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+            conn.setInstanceFollowRedirects(true);
+            try (InputStream in = conn.getInputStream(); FileOutputStream out = new FileOutputStream(apk)) {
+                byte[] buf = new byte[65536];
+                int n;
+                while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            }
+            Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", apk);
+            Intent install = new Intent(Intent.ACTION_VIEW);
+            install.setDataAndType(uri, "application/vnd.android.package-archive");
+            install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            runOnUiThread(() -> startActivity(install));
+        } catch (Exception ignored) { }
     }
 
     private void hideSystemBars() {
