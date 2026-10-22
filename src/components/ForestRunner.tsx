@@ -412,10 +412,11 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     // Menu and lying phases: no step rhythm, only a barely noticeable breathing sway.
     const leanTarget = lying ? Math.sin(t * .13) * .035 : steering;
     // Smooth half-wave step bob: rises and falls softly, no sharp bounce cusps.
-    const bob = running ? (Math.sin(t * 11) * .5 + .5) * .03 : Math.sin(t * .4) * .012;
+    // s.stride advances with the pace, so the rhythm speeds up as the run does.
+    const bob = running ? (Math.sin(s.stride) * .5 + .5) * .03 : Math.sin(t * .4) * .012;
     // A gentle lateral head translation carries the stride; keep the horizon
     // almost level rather than swinging the whole forest around the viewer.
-    const lateralStep = running ? Math.sin(t * 5.5) * .09 : 0;
+    const lateralStep = running ? Math.sin(s.stride * .5) * .09 : 0;
     const stepX = Math.cos(s.heading) * lateralStep;
     const stepZ = -Math.sin(s.heading) * lateralStep;
     lean.current += (leanTarget - lean.current) * Math.min(1, raw * (running ? 15 : 2));
@@ -434,19 +435,19 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       groundHeight(s.x, s.z) * .6 + groundHeight(s.x - Math.sin(viewHeading) * 18, s.z - Math.cos(viewHeading) * 18) * .4 + 1.62 + fall * 3,
       s.z - Math.cos(viewHeading) * 18 + stepZ);
     camera.lookAt(resources.target);
-    camera.rotateX(bump * .085 + waking * Math.sin(t * 5) * .045 + fall * .065 * Math.sin(t * .32) + tripping * Math.sin(t * 17) * .085 + (running ? Math.sin(t * 11) * .006 : 0));
+    camera.rotateX(bump * .085 + waking * Math.sin(t * 5) * .045 + fall * .065 * Math.sin(t * .32) + tripping * Math.sin(t * 17) * .085 + (running ? Math.sin(s.stride) * .006 : 0));
     camera.rotateY(-leanAmount * .06);
-    camera.rotateZ(-leanAmount * .065 + bump * .12 + fall * .72 + waking * Math.sin(t * 4) * .03 + (running ? Math.sin(t * 5.5) * .007 : Math.sin(t * .4) * .008) + tripping * Math.sin(t * 13) * .07);
+    camera.rotateZ(-leanAmount * .065 + bump * .12 + fall * .72 + waking * Math.sin(t * 4) * .03 + (running ? Math.sin(s.stride * .5) * .007 : Math.sin(t * .4) * .008) + tripping * Math.sin(t * 13) * .07);
     if (lamp.current) {
       // Headlamp rides the step rhythm and leads gently into turns, like a
       // real lamp strapped to a turning head.
       const swayTarget = running ? -steering * .55 : 0;
       lampSway.current += (swayTarget - lampSway.current) * Math.min(1, raw * 4);
-      const stepSway = running ? Math.sin(t * 11) * .09 : 0;
+      const stepSway = running ? Math.sin(s.stride) * .09 : 0;
       const rx = Math.cos(viewHeading), rz = -Math.sin(viewHeading);
       lamp.current.position.set(
         camera.position.x + rx * (lampSway.current + stepSway),
-        camera.position.y + .35 + (running ? (Math.sin(t * 11) * .5 + .5) * .05 : 0),
+        camera.position.y + .35 + (running ? (Math.sin(s.stride) * .5 + .5) * .05 : 0),
         camera.position.z + rz * (lampSway.current + stepSway));
       const flicker = lying ? (Math.sin(t * 5.7) + Math.sin(t * 13.2) > .25 ? .14 : .035) : 1 - waking * .8;
       lamp.current.intensity = 65 * flicker;
