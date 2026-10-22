@@ -51,11 +51,10 @@ describe("Agreed forest rules", () => {
       expect(s.z).toBeLessThan(z); expect(Math.abs(s.heading)).toBeLessThanOrEqual(MAX_HEADING);
     }
   });
-  it("recovers from the turn limit: releasing or counter-steering turns back", () => {
+  it("never auto-centres, and counter-steering at the turn limit turns back at once", () => {
     const s = makeSimulation(); s.phase = "running"; s.heading = MAX_HEADING;
     for (let i = 0; i < 60; i++) stepSimulation(s, 0, 1 / 60);
-    expect(s.heading).toBeLessThan(MAX_HEADING * 0.4);
-    s.heading = MAX_HEADING;
+    expect(s.heading).toBeCloseTo(MAX_HEADING, 6);
     for (let i = 0; i < 30; i++) stepSimulation(s, 1, 1 / 60);
     expect(s.heading).toBeLessThan(MAX_HEADING * 0.3);
   });
@@ -65,9 +64,20 @@ describe("Agreed forest rules", () => {
     expect(getSteering(true, -1, 0.5)).toBe(-1);
   });
   it("supports both landscape directions and portrait tilt", () => {
-    expect(orientationValue(12.5, 0, 0)).toBe(0.5);
-    expect(orientationValue(0, 12.5, 90)).toBe(0.5);
-    expect(orientationValue(0, 12.5, -90)).toBe(-0.5);
+    expect(orientationValue(12.5, 0, 0)).toBeCloseTo(0.5, 2);
+    expect(orientationValue(0, 12.5, 90)).toBeCloseTo(0.5, 2);
+    expect(orientationValue(0, 12.5, -90)).toBeCloseTo(-0.5, 2);
+  });
+  it("keeps tilt steady when the phone passes upright (no jump or flip)", () => {
+    // Same physical pose reported both sides of the sensor's 90° flip.
+    expect(orientationValue(88, 10, 90)).toBeCloseTo(orientationValue(88, 170, 90), 6);
+    expect(orientationValue(88, 10, 90)).toBeGreaterThan(0.3);
+    let prev = orientationValue(60, -40, 90);
+    for (let beta = -40; beta <= 40; beta += 2) {
+      const v = orientationValue(80, beta, 90);
+      expect(Math.abs(v - prev)).toBeLessThan(0.2);
+      prev = v;
+    }
   });
   it("keeps entering generation rows beyond the fully opaque fog", () => {
     expect((RADIUS - 1) * CELL).toBeGreaterThan(FOG_END + 20);

@@ -217,9 +217,6 @@ export function stepSimulation(s: Simulation, steering: number, delta: number) {
     if (s.phase !== "running") break;
     const speed = Math.min(level.maxSpeed, BASE_SPEED + s.distance / level.accel) * (s.stumble > 0 ? s.speedMul : 1);
     s.heading = Math.max(-MAX_HEADING, Math.min(MAX_HEADING, s.heading - steering * 1.7 * sub));
-    // Without input the runner drifts back toward straight ahead, so the turn
-    // limit (e.g. after a collision shove) never leaves steering stuck.
-    if (steering === 0 || Math.sign(-steering) !== Math.sign(s.heading)) s.heading *= Math.exp(-1.6 * sub);
     s.pushX *= Math.exp(-7 * sub);
     s.x += (-Math.sin(s.heading) * speed + s.pushX) * sub;
     s.z -= Math.cos(s.heading) * speed * sub;
@@ -235,9 +232,16 @@ export function getSteering(touchMode: boolean, touch: number, tilt: number) {
   return Math.abs(input) < 0.06 ? 0 : Math.max(-1, Math.min(1, input));
 }
 
+// Tilt is read from the gravity component along the screen's horizontal axis.
+// Raw beta/gamma flip by 180° when the phone passes upright (gimbal flip), which
+// made steering jump to the opposite side or stick; this value stays continuous.
 export function orientationValue(gamma: number, beta: number, angle: number) {
-  const raw = Math.abs(angle) === 90 ? beta * Math.sign(angle) : gamma;
-  return Math.max(-1, Math.min(1, raw / 25));
+  const b = (beta * Math.PI) / 180, g = (gamma * Math.PI) / 180;
+  const gx = Math.cos(b) * Math.sin(g), gy = Math.sin(b);
+  const a = ((Math.round(angle / 90) * 90) % 360 + 360) % 360;
+  const sx = a === 90 ? gy : a === 270 ? -gy : a === 180 ? -gx : gx;
+  const deg = (Math.asin(Math.max(-1, Math.min(1, sx))) * 180) / Math.PI;
+  return Math.max(-1, Math.min(1, deg / 25));
 }
 
 export type ForestMood = "night" | "day" | "auto";
