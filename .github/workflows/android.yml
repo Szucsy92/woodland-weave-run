@@ -36,8 +36,18 @@ jobs:
       - name: Build the static web bundle
         run: bun run build
 
+      # Outside the Lovable sandbox nitro writes the static site to .output/public;
+      # Capacitor reads dist/client, so normalise the location.
+      - name: Move the static bundle to dist/client
+        run: |
+          if [ ! -f dist/client/index.html ] && [ -f .output/public/index.html ]; then
+            rm -rf dist/client
+            mkdir -p dist
+            cp -r .output/public dist/client
+          fi
+
       - name: Verify the bundle has an index.html
-        run: test -f dist/client/index.html || (echo "dist/client/index.html missing" && ls -R dist | head -50 && exit 1)
+        run: test -f dist/client/index.html || (echo "dist/client/index.html missing" && ls -R dist .output 2>/dev/null | head -50 && exit 1)
 
       - name: Sync the bundle into the Android app
         run: npx --no-install cap sync android
