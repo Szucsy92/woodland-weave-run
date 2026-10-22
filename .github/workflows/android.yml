@@ -85,20 +85,25 @@ jobs:
           chmod +x ./gradlew
           ./gradlew assembleDebug -PciVersionCode=${{ github.run_number }} -PciVersionName=${{ steps.version.outputs.name }}
 
+      # Give every APK a unique, dated name so downloads never overwrite each other.
+      - name: Rename APK with the build timestamp
+        run: |
+          mkdir -p apk-out
+          for f in android/app/build/outputs/apk/release/*.apk android/app/build/outputs/apk/debug/*.apk; do
+            [ -f "$f" ] && cp "$f" "apk-out/woodland-weave-run-${{ steps.stamp.outputs.ts }}.apk"
+          done
+          ls apk-out
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: woodland-weave-run-apk
-          path: |
-            android/app/build/outputs/apk/release/*.apk
-            android/app/build/outputs/apk/debug/*.apk
+          path: apk-out/*.apk
 
       - name: Publish GitHub Release with the APK
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.version.outputs.name }}-build${{ github.run_number }}
-          name: Woodland Weave Run v${{ steps.version.outputs.name }} (build ${{ github.run_number }})
-          files: |
-            android/app/build/outputs/apk/release/*.apk
-            android/app/build/outputs/apk/debug/*.apk
+          tag_name: v${{ steps.version.outputs.name }}-${{ steps.stamp.outputs.ts }}-build${{ github.run_number }}
+          name: Woodland Weave Run – ${{ steps.stamp.outputs.ts }} (build ${{ github.run_number }})
+          files: apk-out/*.apk
           generate_release_notes: true
