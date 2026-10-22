@@ -781,6 +781,7 @@ export function ForestRunner() {
                 <span>Rezgés</span>
                 <button className="forest-switch" aria-pressed={haptics} onClick={toggleHaptics}>{haptics ? "Be" : "Ki"}</button>
               </div>
+              <UpdateRow />
             </div>
           ) : (
             <>
