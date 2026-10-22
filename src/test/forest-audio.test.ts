@@ -38,6 +38,20 @@ describe("Continuous forest soundtrack", () => {
   });
   afterEach(() => { audio.dispose(); vi.useRealTimers(); vi.unstubAllGlobals(); delete (window as unknown as Record<string, unknown>)["AndroidOrientation"]; });
 
+  it("plays a 100 ms shorter, crossfaded loop so the seam has no silence gap", async () => {
+    let made: { length: number; getChannelData: (c: number) => Float32Array } | null = null;
+    ctx.decodeAudioData = async () => {
+      const d = new Float32Array(44100).fill(0.5);
+      return { sampleRate: 44100, length: 44100, numberOfChannels: 1, getChannelData: () => d };
+    };
+    const original = ctx.createBuffer;
+    ctx.createBuffer = (...a: [number, number, number]) => (made = original(...a));
+    audio.unlock();
+    await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+    expect(made!.length).toBe(44100 - 4410);
+    expect(made!.getChannelData(0)[0]).toBeCloseTo(0.5);
+  });
+
   it("starts the menu loop without a tap at 220 Hz", async () => {
     audio.unlock();
     await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
