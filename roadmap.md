@@ -1,4 +1,5 @@
 # Roadmap
+- [ ] Publish GitHub repository with a project-owned description and an attribution/rights notice
 - [x] Denser world-anchored spores across left/right and depth, visible while passing without near-face fading
 - [x] First-person view, trunk-only trees, night forest
 - [x] Tilt (phone tilt) steering
