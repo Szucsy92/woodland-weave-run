@@ -553,6 +553,31 @@ function Hud({ simulation }: { simulation: MutableRefObject<Simulation> }) {
 }
 
 
+function DayCycle({ mood, night }: { mood: MutableRefObject<ForestMood>; night: Palette }) {
+  const { scene } = useThree();
+  const day = useMemo(() => {
+    const st = getComputedStyle(document.documentElement);
+    return { fog: new THREE.Color(st.getPropertyValue("--forest-day-fog").trim() || "#8f9b98"), moon: new THREE.Color(st.getPropertyValue("--forest-day-moon").trim() || "#dfe6e2") };
+  }, []);
+  const level = useRef(-1);
+  const tmp = useMemo(() => new THREE.Color(), []);
+  useFrame((_, raw) => {
+    const d = new Date();
+    const target = daylightFor(mood.current, d.getHours() + d.getMinutes() / 60);
+    // Manual switches glide over ~2 s; auto follows the clock continuously.
+    level.current = level.current < 0 ? target : level.current + (target - level.current) * Math.min(1, raw * 1.5);
+    const k = level.current;
+    tmp.copy(night.fog).lerp(day.fog, k);
+    if (scene.background instanceof THREE.Color) scene.background.copy(tmp);
+    if (scene.fog instanceof THREE.Fog) { scene.fog.color.copy(tmp); scene.fog.near = 7 - k * 3; }
+    scene.traverse(o => {
+      if (o instanceof THREE.HemisphereLight) { o.color.copy(night.moon).lerp(day.moon, k); o.groundColor.copy(tmp); o.intensity = .85 + k * 1.6; }
+      else if (o instanceof THREE.DirectionalLight) { o.color.copy(night.moon).lerp(day.moon, k); o.intensity = .7 + k * 1.3; }
+    });
+  });
+  return null;
+}
+
 export function ForestRunner() {
   const simulation = useRef(makeSimulation());
   const input = useRef<Input>({ tilt: 0, touch: 0, touchMode: false, neutral: null, angle: 0 });
