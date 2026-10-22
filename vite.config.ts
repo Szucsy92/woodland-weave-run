@@ -12,4 +12,9 @@ export default defineConfig({
     // nitro/vite builds from this
     server: { entry: "server" },
   },
+  nitro: {
+    // Prerender "/" so the build also works as a fully static bundle
+    // (used by the Capacitor Android app — no server needed on-device).
+    prerender: { routes: ["/"], crawlLinks: false },
+  },
 });
