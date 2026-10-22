@@ -27,6 +27,10 @@ describe("Continuous forest soundtrack", () => {
         createBiquadFilter: () => ({ frequency, Q: { value: 0 }, connect: vi.fn() }),
         createGain: () => ({ gain, connect: vi.fn() }),
         decodeAudioData: async () => ({ sampleRate: 44100, length: 4410, numberOfChannels: 1, getChannelData: () => new Float32Array(4410) }),
+        createBuffer: (channels: number, length: number, sampleRate: number) => {
+          const data = Array.from({ length: channels }, () => new Float32Array(length));
+          return { numberOfChannels: channels, length, sampleRate, getChannelData: (c: number) => data[c] };
+        },
       }); }
     });
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(4) })));
