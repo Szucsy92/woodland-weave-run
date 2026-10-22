@@ -4,7 +4,7 @@ import { ArrowLeft, Settings } from "lucide-react";
 import * as THREE from "three";
 import { ForestEffects } from "./ForestEffects";
 import { ForestDrone } from "@/lib/forest/drone";
-import { beginRun, CELL, DIFFICULTIES, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, obstaclesAround, orientationValue, RADIUS, stepSimulation, treesAround, type Difficulty, type Phase, type Simulation } from "@/lib/forest/simulation";
+import { beginRun, CELL, DIFFICULTIES, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, obstaclesAround, orientationValue, placeSpore, RADIUS, sporeOpacity, stepSimulation, treesAround, type Difficulty, type Phase, type Simulation } from "@/lib/forest/simulation";
 import { checkForUpdate, nativeUpdater, type UpdateInfo } from "@/lib/forest/updater";
 import barkUrl from "@/assets/wet-bark.jpg";
 import floorUrl from "@/assets/wet-ground.jpg";
@@ -419,11 +419,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       const world = sporeWorld.current;
       if (world.length === 0) {
         for (let i = 0; i < SPORE_COUNT; i++) {
-          world.push({
-            x: s.x + (hash(i, 11, 6) - .5) * 18,
-            z: s.z - (5 + hash(i, 3, 5) * 65),
-            h: .6 + hash(i, 5, 7) * 2.4,
-          });
+          world.push(placeSpore(s.x, s.z, i, 0, true));
         }
       }
       spores.current.children.forEach((child, i) => {
@@ -431,23 +427,15 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
         const seed = i * 7.13;
         const spore = world[i];
         if (!spore) return;
-        if (spore.z > s.z + 4) {
-          // Passed by — drift back into the distant depths ahead.
-          spore.z = s.z - (35 + hash(i, Math.floor(s.distance), 5) * 45);
-          spore.x = s.x + (hash(i, Math.floor(s.distance), 6) - .5) * 18;
-          spore.h = .6 + hash(i, Math.floor(s.distance), 7) * 2.4;
+        if (spore.z > s.z + 18 || Math.abs(spore.x - s.x) > 55) {
+          Object.assign(spore, placeSpore(s.x, s.z, i, Math.floor(s.distance)));
         }
         const mx = spore.x + Math.sin(t * .23 + seed * 2) * .6;
         const mz = spore.z + Math.cos(t * .19 + seed) * .6;
         sprite.position.set(mx, groundHeight(mx, mz) + spore.h + Math.sin(t * .5 + seed) * .25, mz);
         const dist = Math.hypot(mx - s.x, mz - s.z);
         const twinkle = .5 + .5 * Math.sin(t * (.35 + hash(i, 2, 8) * .35) + seed * 3);
-        // A steady soft glow remains visible beyond the lamp. Fade away close
-        // to the face so passing spores never obscure the running path.
-        const near = Math.max(0, 1 - dist / 40);
-        const lit = Math.max(0, 1 - dist / 14);
-        const closeFade = THREE.MathUtils.smoothstep(dist, 1.2, 3.5);
-        (sprite.material as THREE.SpriteMaterial).opacity = (.24 + twinkle * .12 + .2 * lit) * near * closeFade;
+        (sprite.material as THREE.SpriteMaterial).opacity = sporeOpacity(dist, twinkle);
         sprite.scale.setScalar(.14 + hash(i, 4, 9) * .12);
       });
     }
@@ -496,7 +484,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     <group ref={spores}>
       {Array.from({ length: SPORE_COUNT }, (_, i) => (
         <sprite key={i}>
-          <spriteMaterial map={resources.glowTexture} color={i % 3 === 0 ? palette.purple : i % 3 === 1 ? palette.green : palette.lamp} transparent opacity={.2} blending={THREE.AdditiveBlending} depthWrite={false} />
+          <spriteMaterial map={resources.glowTexture} color={i % 3 === 0 ? palette.purple : i % 3 === 1 ? palette.green : palette.lamp} transparent opacity={.2} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} />
         </sprite>
       ))}
     </group>

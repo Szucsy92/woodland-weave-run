@@ -1,5 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { beginRun, CELL, collide, collideObstacle, DIFFICULTIES, FOG_END, getSteering, groundHeight, IMPACT_DURATION, makeSimulation, MAX_HEADING, orientationValue, RADIUS, stepSimulation, treesAround } from "@/lib/forest/simulation";
+import { beginRun, CELL, collide, collideObstacle, DIFFICULTIES, FOG_END, getSteering, groundHeight, IMPACT_DURATION, makeSimulation, MAX_HEADING, orientationValue, placeSpore, RADIUS, sporeOpacity, stepSimulation, treesAround } from "@/lib/forest/simulation";
+
+describe("World-depth spores", () => {
+  it("scatters visible spores to both sides and multiple depths, including beside the runner", () => {
+    const spores = Array.from({ length: 72 }, (_, i) => placeSpore(0, 0, i, 0, true));
+    expect(spores.filter(p => p.x < -5).length).toBeGreaterThan(10);
+    expect(spores.filter(p => p.x > 5).length).toBeGreaterThan(10);
+    expect(spores.some(p => Math.abs(p.z) < 5)).toBe(true);
+    expect(spores.some(p => p.z < -35)).toBe(true);
+    expect(sporeOpacity(40, 0)).toBeGreaterThan(.1);
+  });
+  it("does not disappear while the runner passes nearby", () => {
+    for (const distance of [0, .5, 1.2, 3.5, 10]) {
+      expect(sporeOpacity(distance, 0)).toBeGreaterThan(.2);
+    }
+  });
+});
 
 describe("Agreed forest rules", () => {
   it("allows two soft collisions and falls on the third", () => {
