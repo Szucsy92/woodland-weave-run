@@ -18,6 +18,7 @@ type Input = { tilt: number; touch: number; touchMode: boolean; neutral: number 
 const MAX_INSTANCES = (RADIUS * 2 + 1) ** 2;
 const BRANCHES_PER_TREE = 11;
 const ROOTS_PER_TREE = 5;
+const SPORE_COUNT = 72;
 // Five core leaf masses per tree plus a leaf clump on every branch tip.
 const CROWNS_PER_TREE = 5;
 const CROWN_SLOTS = CROWNS_PER_TREE + BRANCHES_PER_TREE;
@@ -417,7 +418,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       // approaches and passes them, and any left behind respawn far ahead.
       const world = sporeWorld.current;
       if (world.length === 0) {
-        for (let i = 0; i < 12; i++) {
+        for (let i = 0; i < SPORE_COUNT; i++) {
           world.push({
             x: s.x + (hash(i, 11, 6) - .5) * 18,
             z: s.z - (5 + hash(i, 3, 5) * 65),
@@ -428,7 +429,8 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       spores.current.children.forEach((child, i) => {
         const sprite = child as THREE.Sprite;
         const seed = i * 7.13;
-        const spore = world[i]!;
+        const spore = world[i];
+        if (!spore) return;
         if (spore.z > s.z + 4) {
           // Passed by — drift back into the distant depths ahead.
           spore.z = s.z - (35 + hash(i, Math.floor(s.distance), 5) * 45);
@@ -439,12 +441,14 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
         const mz = spore.z + Math.cos(t * .19 + seed) * .6;
         sprite.position.set(mx, groundHeight(mx, mz) + spore.h + Math.sin(t * .5 + seed) * .25, mz);
         const dist = Math.hypot(mx - s.x, mz - s.z);
-        const twinkle = Math.max(0, Math.sin(t * (.9 + hash(i, 2, 8)) + seed * 3));
-        // Fade in from the depths, glow brightest inside the lamplight.
+        const twinkle = .5 + .5 * Math.sin(t * (.35 + hash(i, 2, 8) * .35) + seed * 3);
+        // A steady soft glow remains visible beyond the lamp. Fade away close
+        // to the face so passing spores never obscure the running path.
         const near = Math.max(0, 1 - dist / 40);
         const lit = Math.max(0, 1 - dist / 14);
-        (sprite.material as THREE.SpriteMaterial).opacity = (.06 + twinkle * .45 * lit + .12 * lit) * near;
-        sprite.scale.setScalar(.09 + hash(i, 4, 9) * .1);
+        const closeFade = THREE.MathUtils.smoothstep(dist, 1.2, 3.5);
+        (sprite.material as THREE.SpriteMaterial).opacity = (.24 + twinkle * .12 + .2 * lit) * near * closeFade;
+        sprite.scale.setScalar(.14 + hash(i, 4, 9) * .12);
       });
     }
     if (mist.current) {
@@ -490,7 +494,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
       ))}
     </group>
     <group ref={spores}>
-      {Array.from({ length: 12 }, (_, i) => (
+      {Array.from({ length: SPORE_COUNT }, (_, i) => (
         <sprite key={i}>
           <spriteMaterial map={resources.glowTexture} color={i % 3 === 0 ? palette.purple : i % 3 === 1 ? palette.green : palette.lamp} transparent opacity={.2} blending={THREE.AdditiveBlending} depthWrite={false} />
         </sprite>
