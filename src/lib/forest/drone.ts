@@ -24,12 +24,15 @@ export class ForestDrone {
   private source: AudioBufferSourceNode | null = null;
   private enabled = true;
   private running = false;
+  private resumeTimer: ReturnType<typeof setTimeout> | null = null;
 
   unlock() {
     try {
       if (!this.context) {
         const ctx = new AudioContext();
         this.context = ctx;
+        // Native startup can briefly suspend audio while the window gains focus.
+        ctx.onstatechange = () => this.retryNativeResume();
         this.filter = ctx.createBiquadFilter();
         this.filter.type = "lowpass";
         this.filter.frequency.value = MENU_HZ;
@@ -41,8 +44,21 @@ export class ForestDrone {
         void this.loadLoop();
       }
       void this.context.resume().catch(() => undefined);
+      this.retryNativeResume();
       this.apply();
     } catch { /* Devices without Web Audio stay silent. */ }
+  }
+
+  private retryNativeResume() {
+    if (this.resumeTimer) clearTimeout(this.resumeTimer);
+    this.resumeTimer = null;
+    const native = typeof window !== "undefined" && "AndroidOrientation" in window;
+    if (!native || !this.enabled || document.hidden || this.context?.state !== "suspended") return;
+    this.resumeTimer = setTimeout(() => {
+      this.resumeTimer = null;
+      if (!this.enabled || document.hidden || !this.context) return;
+      void this.context.resume().catch(() => undefined).finally(() => this.retryNativeResume());
+    }, 250);
   }
 
   private async loadLoop() {
@@ -57,7 +73,8 @@ export class ForestDrone {
         const source = ctx.createBufferSource();
         source.buffer = buffer;
         source.loop = true;
-        source.connect(this.filter as BiquadFilterNode);
+        if (!this.filter) return;
+        source.connect(this.filter);
         source.start();
         this.source = source;
         this.apply();
@@ -70,6 +87,7 @@ export class ForestDrone {
     this.enabled = enabled;
     this.running = running;
     this.apply();
+    if (enabled) this.retryNativeResume();
   }
 
   // 500 ms dip matching the impact glitch: instantly muffled, then back.
@@ -92,9 +110,14 @@ export class ForestDrone {
 
   suspend() { void this.context?.suspend().catch(() => undefined); }
   dispose() {
+    if (this.resumeTimer) clearTimeout(this.resumeTimer);
+    this.resumeTimer = null;
+    if (this.context) this.context.onstatechange = null;
     this.source?.stop();
     this.source = null;
     void this.context?.close().catch(() => undefined);
     this.context = null;
+    this.filter = null;
+    this.master = null;
   }
 }

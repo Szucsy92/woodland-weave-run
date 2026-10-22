@@ -18,5 +18,7 @@
 - [x] World-anchored spores scattered in depth (runner approaches and passes them)
 - [x] Look-around (tilt/drag) after a fall, same damped feel as the menu
 - [x] Capacitor Android app: static prerendered bundle (no server on-device), GitHub Actions APK build with optional signed release
-- [ ] User connects GitHub (Settings → Git) and adds keystore secrets for updatable signed APKs
-- [ ] Phone trial by the user (tilt steering, haptics, menu hum audibility), then publish
+- [x] User connects GitHub; automatic APK build and Release succeeded
+- [x] Repair native launch audio and foreground resume, force default landscape, match web launcher identity/background, and hide both system bars (including built-in startup bar policy); 23 tests pass
+- [ ] Device-only verification of launch audio, orientation and immersive bars (requires installed APK trial)
+- [ ] Release signing (deferred by user)

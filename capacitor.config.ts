@@ -9,6 +9,15 @@ const config: CapacitorConfig = {
   android: {
     allowMixedContent: false,
   },
+  plugins: {
+    // The built-in Capacitor plugin otherwise queues a show() on startup,
+    // undoing the activity's immersive policy after its first frame.
+    SystemBars: {
+      hidden: true,
+      insetsHandling: "css",
+      initialViewportFitValueHint: "cover",
+    },
+  },
 };
 
 export default config;
