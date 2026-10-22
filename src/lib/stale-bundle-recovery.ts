@@ -25,6 +25,12 @@ export function isStaleLoadMessage(message: string): boolean {
   return new RegExp(STALE_LOAD_PATTERN, "i").test(message || "");
 }
 
+/** Router boundaries catch import errors before global rejection handlers see them. */
+export function recoverCaughtStaleLoad(error: Error): void {
+  if (typeof window === "undefined" || !isStaleLoadMessage(error.message)) return;
+  window.dispatchEvent(new Event("woodland-stale-module"));
+}
+
 export const STALE_BUNDLE_RECOVERY_SCRIPT = [
   "(function () {",
   "  var KEY = " + JSON.stringify(RELOAD_GUARD_KEY) + ";",
@@ -43,6 +49,7 @@ export const STALE_BUNDLE_RECOVERY_SCRIPT = [
   "  function revive() {",
   "    if (once()) window.location.reload();",
   "  }",
+  "  window.addEventListener('woodland-stale-module', revive);",
   "  window.addEventListener('error', function (ev) {",
   "    var msg = (ev && (ev.message || (ev.error && ev.error.message))) || '';",
   "    if (PATTERN.test(msg)) revive();",
