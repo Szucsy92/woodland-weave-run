@@ -26,8 +26,8 @@ export function isStaleLoadMessage(message: string): boolean {
 }
 
 /** Router boundaries catch import errors before global rejection handlers see them. */
-export function recoverCaughtStaleLoad(error: Error): void {
-  if (typeof window === "undefined" || !isStaleLoadMessage(error.message)) return;
+export function recoverCaughtStaleLoad(error: unknown): void {
+  if (typeof window === "undefined" || !(error instanceof Error) || !isStaleLoadMessage(error.message)) return;
   window.dispatchEvent(new Event("woodland-stale-module"));
 }
 
