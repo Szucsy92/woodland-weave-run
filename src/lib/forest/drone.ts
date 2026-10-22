@@ -3,18 +3,23 @@ const SOURCES = ["/audio/forest-loop.wav", "/audio/forest-loop.mp3"];
 const MENU_HZ = 220;
 const RUN_HZ = 4000;
 
-// Removes the click at the loop point: fade both ends to silence (30 ms).
-function softenLoopEnds(buffer: AudioBuffer) {
-  const edge = Math.min(Math.floor(buffer.sampleRate * 0.03), (buffer.length - 1) >> 1);
+// Seamless loop: blend the last 100 ms into the first 100 ms (equal power) and
+// drop the tail, so the wrap continues the waveform without a volume dip.
+function softenLoopEnds(buffer: AudioBuffer, ctx: BaseAudioContext) {
+  const fade = Math.min(Math.floor(buffer.sampleRate * 0.1), buffer.length >> 2);
+  if (fade < 2 || typeof ctx.createBuffer !== "function") return buffer;
+  const length = buffer.length - fade;
+  const out = ctx.createBuffer(buffer.numberOfChannels, length, buffer.sampleRate);
   for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
-    const data = buffer.getChannelData(channel);
-    for (let k = 0; k < edge; k++) {
-      const g = k / edge;
-      data[k] = (data[k] ?? 0) * g;
-      data[data.length - 1 - k] = (data[data.length - 1 - k] ?? 0) * g;
+    const src = buffer.getChannelData(channel);
+    const dst = out.getChannelData(channel);
+    dst.set(src.subarray(0, length));
+    for (let k = 0; k < fade; k++) {
+      const t = (k / fade) * Math.PI / 2;
+      dst[k] = (src[k] ?? 0) * Math.sin(t) + (src[length + k] ?? 0) * Math.cos(t);
     }
   }
-  return buffer;
+  return out;
 }
 
 export class ForestDrone {
@@ -68,7 +73,7 @@ export class ForestDrone {
       try {
         const response = await fetch(url);
         if (!response.ok) continue;
-        const buffer = softenLoopEnds(await ctx.decodeAudioData(await response.arrayBuffer()));
+        const buffer = softenLoopEnds(await ctx.decodeAudioData(await response.arrayBuffer()), ctx);
         if (ctx !== this.context) return;
         const source = ctx.createBufferSource();
         source.buffer = buffer;

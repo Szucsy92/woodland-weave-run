@@ -27,12 +27,31 @@ describe("Continuous forest soundtrack", () => {
         createBiquadFilter: () => ({ frequency, Q: { value: 0 }, connect: vi.fn() }),
         createGain: () => ({ gain, connect: vi.fn() }),
         decodeAudioData: async () => ({ sampleRate: 44100, length: 4410, numberOfChannels: 1, getChannelData: () => new Float32Array(4410) }),
+        createBuffer: (channels: number, length: number, sampleRate: number) => {
+          const data = Array.from({ length: channels }, () => new Float32Array(length));
+          return { numberOfChannels: channels, length, sampleRate, getChannelData: (c: number) => data[c] };
+        },
       }); }
     });
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(4) })));
     audio = new ForestDrone();
   });
   afterEach(() => { audio.dispose(); vi.useRealTimers(); vi.unstubAllGlobals(); delete (window as unknown as Record<string, unknown>)["AndroidOrientation"]; });
+
+  it("plays a 100 ms shorter, crossfaded loop so the seam has no silence gap", async () => {
+    let made: { length: number; getChannelData: (c: number) => Float32Array } | null = null;
+    audio.unlock();
+    const live = ctx as unknown as { decodeAudioData: unknown; createBuffer: (...a: [number, number, number]) => never };
+    live.decodeAudioData = async () => {
+      const d = new Float32Array(44100).fill(0.5);
+      return { sampleRate: 44100, length: 44100, numberOfChannels: 1, getChannelData: () => d };
+    };
+    const original = live.createBuffer;
+    live.createBuffer = (...a: [number, number, number]) => (made = original(...a));
+    await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+    expect(made!.length).toBe(44100 - 4410);
+    expect(made!.getChannelData(0)[0]).toBeCloseTo(0.5);
+  });
 
   it("starts the menu loop without a tap at 220 Hz", async () => {
     audio.unlock();

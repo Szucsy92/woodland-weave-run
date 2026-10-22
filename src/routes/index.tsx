@@ -5,10 +5,10 @@ export const Route = createFileRoute("/")({
   ssr: false,
   head: () => ({
     meta: [
-      { title: "Erdei futás – 3D végtelen futójáték" },
-      { name: "description", content: "Fuss a végtelen erdőben, kanyarodj és kerüld ki a fákat." },
-      { property: "og:title", content: "Erdei futás – 3D végtelen futójáték" },
-      { property: "og:description", content: "Fuss a végtelen erdőben, kanyarodj és kerüld ki a fákat." },
+      { title: "Woodland Weave Run – endless 3D forest runner" },
+      { name: "description", content: "Run through an endless night forest, turn and dodge the trees." },
+      { property: "og:title", content: "Woodland Weave Run – endless 3D forest runner" },
+      { property: "og:description", content: "Run through an endless night forest, turn and dodge the trees." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
