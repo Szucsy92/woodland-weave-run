@@ -81,17 +81,34 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     [bark, barkN, barkR].forEach(t => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(1.5, 7); t.anisotropy = 8; });
     [floor, floorN, floorR].forEach(t => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(64, 64); t.anisotropy = 8; });
     // Trunks with low crowns (~15-17.5 m) that neighbours' foliage merges into overhead.
-    const trunkGeometry = new THREE.CylinderGeometry(.36, .46, 22, 14, 24);
+    // Slimmer, gnarled trunk: knots, irregular cross-section, gentle wander and a
+    // buttressed root flare whose lobes run into the separate surface roots.
+    const trunkGeometry = new THREE.CylinderGeometry(.27, .4, 22, 16, 32);
     const pos = trunkGeometry.getAttribute("position") as THREE.BufferAttribute;
     for (let i = 0; i < pos.count; i++) {
       const y = pos.getY(i);
       const a = Math.atan2(pos.getZ(i), pos.getX(i));
-      const swell = 1 + Math.sin(a * 5 + y * .9) * .065 + Math.sin(a * 9 - y * .4) * .025;
-      const root = 1 + Math.pow(Math.max(0, (1 - (y + 11) / 2)), 2) * .65;
-      pos.setXYZ(i, pos.getX(i) * swell * root + Math.sin(y * .3) * .065, y, pos.getZ(i) * swell * root);
+      const knot = Math.max(0, Math.sin(a * 3 + y * 1.7) * Math.sin(y * 2.3 + a)) ** 4 * .16;
+      const swell = 1 + Math.sin(a * 5 + y * .9) * .07 + Math.sin(a * 9 - y * .4) * .035 + Math.sin(a * 2 + y * .23) * .06 + knot;
+      const foot = Math.max(0, 1 - (y + 11) / 2.6);
+      const root = 1 + foot * foot * (.75 + Math.max(0, Math.cos(a * 5 + .4)) * 1.3);
+      const wx = Math.sin(y * .3) * .09 + Math.sin(y * .71 + 1.3) * .05;
+      const wz = Math.cos(y * .26 + .7) * .08;
+      pos.setXYZ(i, pos.getX(i) * swell * root + wx, y, pos.getZ(i) * swell * root + wz);
     }
     trunkGeometry.computeVertexNormals();
     trunkGeometry.translate(0, 11, 0);
+    // Surface root: lies along +x, tapers and dives into the soil at its tip.
+    const rootGeometry = new THREE.CylinderGeometry(.025, .16, 2.4, 7, 10);
+    {
+      const p = rootGeometry.getAttribute("position") as THREE.BufferAttribute;
+      for (let i = 0; i < p.count; i++) {
+        const y = p.getY(i) + 1.2, t = y / 2.4;
+        const flat = 1 - t * .35;
+        p.setXYZ(i, y, p.getX(i) * .75 * flat - t * t * .45 + Math.sin(t * 6) * .04, p.getZ(i) + Math.sin(t * 5.3) * .12 * t);
+      }
+      rootGeometry.computeVertexNormals();
+    }
     const branchGeometry = new THREE.CylinderGeometry(.03, .07, 2.2, 6, 8);
     branchGeometry.translate(0, 1.1, 0);
     {
