@@ -73,7 +73,7 @@ export class ForestDrone {
       try {
         const response = await fetch(url);
         if (!response.ok) continue;
-        const buffer = softenLoopEnds(await ctx.decodeAudioData(await response.arrayBuffer()));
+        const buffer = softenLoopEnds(await ctx.decodeAudioData(await response.arrayBuffer()), ctx);
         if (ctx !== this.context) return;
         const source = ctx.createBufferSource();
         source.buffer = buffer;
