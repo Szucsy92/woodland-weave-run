@@ -174,3 +174,22 @@ describe("Trunks are solid", () => {
     expect(s.z).toBeLessThan(-1);
   });
 });
+
+import { requestPause as rp, requestResume as rr, requestExit as re, timeScale as ts, PAUSE_SLOW as PS, RESUME_TIME as RT, EXIT_TIME as ET, makeSimulation as mk, stepSimulation as step } from "@/lib/forest/simulation";
+describe("pause time warp", () => {
+  it("slows to a full freeze, then accelerates back to normal speed", () => {
+    const s = mk(); s.phase = "running";
+    expect(rp(s)).toBe(true);
+    step(s, 0, PS / 2); expect(ts(s)).toBeGreaterThan(0); expect(ts(s)).toBeLessThan(1);
+    for (let i = 0; i < 40; i++) step(s, 0, 0.05);
+    expect(s.pause).toBe("paused"); const d = s.distance;
+    step(s, 0, 0.05); expect(s.distance).toBe(d);
+    rr(s); for (let i = 0; i < Math.ceil(RT / 0.05) + 1; i++) step(s, 0, 0.05);
+    expect(s.pause).toBe("none"); expect(ts(s)).toBe(1);
+  });
+  it("exit returns to the menu", () => {
+    const s = mk(); s.phase = "running"; rp(s); re(s);
+    for (let i = 0; i < Math.ceil(ET / 0.05) + 1; i++) step(s, 0, 0.05);
+    expect(s.phase).toBe("menu");
+  });
+});
