@@ -21,6 +21,7 @@
 - [x] User connects GitHub; automatic APK build and Release succeeded
 - [x] Repair native launch audio and foreground resume, force default landscape, match web launcher identity/background, and hide both system bars (including built-in startup bar policy); 23 tests pass
 - [ ] Device-only verification of launch audio, orientation and immersive bars (requires installed APK trial)
-- [ ] Create and validate permanent Android signing key and secure handoff
-- [ ] Require permanent release signing in GitHub builds
-- [ ] Configure GitHub signing secrets and verify signed APK (requires repository secrets access)
+- [x] Create permanent Android signing key, validate signing with it, and encrypt upload to GitHub Actions secrets
+- [x] Require permanent release signing in GitHub builds; verify APK certificate before publication
+- [x] Configure all four GitHub signing secrets
+- [ ] Verify first permanently signed GitHub APK and in-place device update (requires synced workflow run and installed APK trial)
