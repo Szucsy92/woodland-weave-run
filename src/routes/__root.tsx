@@ -79,12 +79,12 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" },
-      { title: "Erdei futás" },
+      { title: "Woodland Weave Run" },
       { name: "description", content: "Végtelen éjszakai futás a ködben derengő fények felé." },
       { name: "theme-color", content: "#282828" },
       { name: "apple-mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
-      { property: "og:title", content: "Erdei futás" },
+      { property: "og:title", content: "Woodland Weave Run" },
       { property: "og:description", content: "Végtelen éjszakai futás a ködben derengő fények felé." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -109,7 +109,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="hu">
+    <html lang="en">
       <head>
         {/* Registered before the app's own bootstrap: if a cached start-up
             module goes stale, the page would otherwise stay blank forever. */}
