@@ -84,12 +84,15 @@ export function treesAround(cx: number, cz: number, keep = 0.57): Tree[] {
 
 // Rocks are big enough to trip over (a real stumble, not damage); undergrowth
 // only drags the pace for a moment.
+export const OBSTACLE_DENSITY = 0.5;
 export function obstaclesAround(cx: number, cz: number, keep = 0.84): Obstacle[] {
   const obstacles: Obstacle[] = [];
   for (let i = -RADIUS; i <= RADIUS; i++) {
     for (let j = -RADIUS; j <= RADIUS; j++) {
       const gx = cx + i, gz = cz + j;
       if (hash(gx, gz, 9) <= keep) continue;
+      // Independent thinning preserves the positions and bush/rock balance.
+      if (hash(gx, gz, 15) >= OBSTACLE_DENSITY) continue;
       const x = gx * CELL + hash(gx, gz, 11) * CELL;
       const z = gz * CELL + hash(gx, gz, 12) * CELL;
       if (x * x + z * z < 12 * 12) continue;

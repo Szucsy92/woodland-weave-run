@@ -13,6 +13,8 @@ import android.content.res.Configuration;
 import android.os.Bundle;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
+import android.media.AudioManager;
+import android.view.WindowManager;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
@@ -24,6 +26,7 @@ public class MainActivity extends BridgeActivity {
         // Apply before the game or its saved settings can load.
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
         super.onCreate(savedInstanceState);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         hideSystemBars();
     }
 
@@ -32,6 +35,14 @@ public class MainActivity extends BridgeActivity {
         // Install the interface BEFORE Bridge loads the first document.
         WebView web = findViewById(com.getcapacitor.android.R.id.webview);
         web.getSettings().setMediaPlaybackRequiresUserGesture(false);
+        web.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public boolean isMuted() {
+                AudioManager audio = (AudioManager) getSystemService(AUDIO_SERVICE);
+                return audio != null && (audio.getStreamVolume(AudioManager.STREAM_MUSIC) == 0
+                    || audio.isStreamMute(AudioManager.STREAM_MUSIC));
+            }
+        }, "AndroidAudio");
         web.addJavascriptInterface(new Object() {
             @JavascriptInterface
             public void set(String mode) {
