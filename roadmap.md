@@ -1,4 +1,7 @@
 # Roadmap
+- [ ] Silence audio output at zero device volume and when sound is off; verify automated lifecycle tests
+- [ ] Keep native foreground screen awake
+- [ ] Halve bush/rock density across all difficulties and verify rule tests
 - [x] Publish GitHub repository with a project-owned description and an attribution/rights notice; latest release and APK are publicly reachable
 - [x] Denser world-anchored spores across left/right and depth, visible while passing without near-face fading
 - [x] First-person view, trunk-only trees, night forest
