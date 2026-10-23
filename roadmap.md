@@ -1,4 +1,6 @@
 # Roadmap
+- [ ] Make hardware volume keys control game media and stop output in silent/vibrate mode; verify mute lifecycle tests
+- [ ] Verify speaker noise is absent on the installed update (requires physical phone)
 - [x] Silence audio output at zero device volume and when sound is off; verify automated lifecycle tests
 - [x] Keep native foreground screen awake (installed-device check pending)
 - [x] Halve bush/rock density across all difficulties and verify rule tests
