@@ -134,6 +134,7 @@ describe("Terrain and obstacles", () => {
         for (const o of actual) {
           if (o.big) rocks++; else bushes++;
           const [x, z] = o.id.slice(1).split(":").map(Number);
+          if (x === undefined || z === undefined) throw new Error("Invalid obstacle coordinates");
           expect(o.x).toBe(x * CELL + hash(x, z, 11) * CELL);
           expect(o.z).toBe(z * CELL + hash(x, z, 12) * CELL);
         }
