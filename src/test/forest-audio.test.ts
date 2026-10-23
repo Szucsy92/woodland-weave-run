@@ -9,12 +9,12 @@ describe("Continuous forest soundtrack", () => {
     createBufferSource: ReturnType<typeof vi.fn>;
   };
   let frequency: { value: number; setTargetAtTime: ReturnType<typeof vi.fn>; cancelScheduledValues: ReturnType<typeof vi.fn>; setValueAtTime: ReturnType<typeof vi.fn>; linearRampToValueAtTime: ReturnType<typeof vi.fn> };
-  let gain: { value: number; setTargetAtTime: ReturnType<typeof vi.fn> };
+  let gain: { value: number; setTargetAtTime: ReturnType<typeof vi.fn>; cancelScheduledValues: ReturnType<typeof vi.fn>; setValueAtTime: ReturnType<typeof vi.fn> };
   let start: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     frequency = { value: 0, setTargetAtTime: vi.fn(), cancelScheduledValues: vi.fn(), setValueAtTime: vi.fn(), linearRampToValueAtTime: vi.fn() };
-    gain = { value: 0, setTargetAtTime: vi.fn() };
+    gain = { value: 0, setTargetAtTime: vi.fn(), cancelScheduledValues: vi.fn(), setValueAtTime: vi.fn() };
     start = vi.fn();
     ctx = {
       state: "suspended", currentTime: 0, onstatechange: null,
@@ -36,7 +36,7 @@ describe("Continuous forest soundtrack", () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(4) })));
     audio = new ForestDrone();
   });
-  afterEach(() => { audio.dispose(); vi.useRealTimers(); vi.unstubAllGlobals(); delete (window as unknown as Record<string, unknown>)["AndroidOrientation"]; });
+  afterEach(() => { audio.dispose(); vi.useRealTimers(); vi.unstubAllGlobals(); delete (window as unknown as Record<string, unknown>)["AndroidOrientation"]; delete (window as unknown as Record<string, unknown>)["AndroidAudio"]; });
 
   it("plays a 100 ms shorter, crossfaded loop so the seam has no silence gap", async () => {
     let made: { length: number; getChannelData: (c: number) => Float32Array } | null = null;
@@ -49,8 +49,10 @@ describe("Continuous forest soundtrack", () => {
     const original = live.createBuffer;
     live.createBuffer = (...a: [number, number, number]) => (made = original(...a));
     await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
-    expect(made!.length).toBe(44100 - 4410);
-    expect(made!.getChannelData(0)[0]).toBeCloseTo(0.5);
+    if (!made) throw new Error("Loop buffer was not created");
+    const loop = made as { length: number; getChannelData: (c: number) => Float32Array };
+    expect(loop.length).toBe(44100 - 4410);
+    expect(loop.getChannelData(0)[0]).toBeCloseTo(0.5);
   });
 
   it("starts the menu loop without a tap at 220 Hz", async () => {
@@ -79,7 +81,45 @@ describe("Continuous forest soundtrack", () => {
 
   it("honours the saved sound-off setting", () => {
     audio.setMode(false, false); audio.unlock();
-    expect(gain.setTargetAtTime).toHaveBeenLastCalledWith(0, 0, 0.05);
+    expect(gain.setValueAtTime).toHaveBeenLastCalledWith(0, 0);
+    expect(ctx.resume).not.toHaveBeenCalled();
+  });
+
+  it("suspends all audio at zero native media volume and restores it above zero", async () => {
+    vi.useFakeTimers();
+    let muted = true;
+    vi.stubGlobal("AndroidAudio", { isMuted: () => muted });
+    audio.unlock();
+    expect(ctx.resume).not.toHaveBeenCalled();
+    expect(gain.setValueAtTime).toHaveBeenLastCalledWith(0, 0);
+    muted = false;
+    await vi.advanceTimersByTimeAsync(200);
+    expect(ctx.state).toBe("running");
+    muted = true;
+    await vi.advanceTimersByTimeAsync(200);
+    expect(ctx.suspend).toHaveBeenCalledOnce();
+    expect(ctx.state).toBe("suspended");
+    muted = false;
+    audio.setMode(false, false);
+    await vi.advanceTimersByTimeAsync(400);
+    expect(ctx.state).toBe("suspended");
+    audio.setMode(true, false);
+    expect(ctx.state).toBe("running");
+    audio.suspend();
+    await vi.advanceTimersByTimeAsync(400);
+    expect(ctx.state).toBe("suspended");
+    audio.dispose();
+    const attempts = ctx.resume.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(400);
+    expect(ctx.resume).toHaveBeenCalledTimes(attempts);
+  });
+
+  it("stops active output exactly when the sound switch is turned off", () => {
+    audio.unlock();
+    audio.setMode(false, false);
+    expect(gain.cancelScheduledValues).toHaveBeenCalledWith(0);
+    expect(gain.setValueAtTime).toHaveBeenLastCalledWith(0, 0);
+    expect(ctx.state).toBe("suspended");
   });
 
   it("retries suspended native startup and stops retrying after disposal", async () => {

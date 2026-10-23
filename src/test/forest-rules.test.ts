@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { hash, obstaclesAround, OBSTACLE_DENSITY } from "@/lib/forest/simulation";
 import { beginRun, CELL, collide, collideObstacle, DIFFICULTIES, FOG_END, getSteering, groundHeight, IMPACT_DURATION, makeSimulation, MAX_HEADING, orientationValue, placeSpore, RADIUS, sporeOpacity, stepSimulation, treesAround } from "@/lib/forest/simulation";
 
 describe("World-depth spores", () => {
@@ -115,6 +116,34 @@ describe("Difficulty levels", () => {
 });
 
 describe("Terrain and obstacles", () => {
+  it("halves both bushes and rocks on every difficulty without moving retained obstacles", () => {
+    expect(OBSTACLE_DENSITY).toBe(0.5);
+    for (const level of Object.values(DIFFICULTIES)) {
+      let oldBushes = 0, oldRocks = 0, bushes = 0, rocks = 0;
+      for (const cx of [-60, 0, 60]) {
+        const cz = -60;
+        const actual = obstaclesAround(cx, cz, level.obstacleGap);
+        const expected: string[] = [];
+        for (let i = -RADIUS; i <= RADIUS; i++) for (let j = -RADIUS; j <= RADIUS; j++) {
+          const x = cx + i, z = cz + j;
+          if (hash(x, z, 9) <= level.obstacleGap) continue;
+          if (hash(x, z, 13) > 0.86) oldRocks++; else oldBushes++;
+          if (hash(x, z, 15) < 0.5) expected.push(`o${x}:${z}`);
+        }
+        expect(actual.map(o => o.id)).toEqual(expected);
+        for (const o of actual) {
+          if (o.big) rocks++; else bushes++;
+          const [x, z] = o.id.slice(1).split(":").map(Number);
+          expect(o.x).toBe(x * CELL + hash(x, z, 11) * CELL);
+          expect(o.z).toBe(z * CELL + hash(x, z, 12) * CELL);
+        }
+      }
+      expect(bushes / oldBushes).toBeGreaterThan(0.4);
+      expect(bushes / oldBushes).toBeLessThan(0.6);
+      expect(rocks / oldRocks).toBeGreaterThan(0.35);
+      expect(rocks / oldRocks).toBeLessThan(0.65);
+    }
+  });
   it("rolls in every direction without repeating or jumping", () => {
     for (let i = 0; i < 500; i++) {
       const x = i * 7.3, z = -i * 5.1;

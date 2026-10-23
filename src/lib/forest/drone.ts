@@ -30,14 +30,44 @@ export class ForestDrone {
   private enabled = true;
   private running = false;
   private resumeTimer: ReturnType<typeof setTimeout> | null = null;
+  private volumeTimer: ReturnType<typeof setInterval> | null = null;
+  private foreground = true;
+
+  private canPlay() {
+    const native = (globalThis as { AndroidAudio?: { isMuted(): boolean } }).AndroidAudio;
+    let muted = false;
+    try { muted = native?.isMuted() ?? false; } catch { /* Older native builds. */ }
+    return this.enabled && this.foreground && !document.hidden && !muted;
+  }
+
+  private syncOutput() {
+    const ctx = this.context;
+    if (!ctx) return;
+    if (!this.canPlay()) {
+      if (this.resumeTimer) clearTimeout(this.resumeTimer);
+      this.resumeTimer = null;
+      // An exponential fade never reaches exact zero. Stop output entirely.
+      this.master?.gain.cancelScheduledValues(ctx.currentTime);
+      this.master?.gain.setValueAtTime(0, ctx.currentTime);
+      if (ctx.state === "running") void ctx.suspend().catch(() => undefined);
+      return;
+    }
+    this.apply();
+    if (ctx.state === "suspended") void ctx.resume().catch(() => undefined);
+    this.retryNativeResume();
+  }
 
   unlock() {
+    this.foreground = true;
     try {
       if (!this.context) {
         const ctx = new AudioContext();
         this.context = ctx;
         // Native startup can briefly suspend audio while the window gains focus.
-        ctx.onstatechange = () => this.retryNativeResume();
+        ctx.onstatechange = () => {
+          if (!this.canPlay()) this.syncOutput();
+          else this.retryNativeResume();
+        };
         this.filter = ctx.createBiquadFilter();
         this.filter.type = "lowpass";
         this.filter.frequency.value = MENU_HZ;
@@ -48,9 +78,10 @@ export class ForestDrone {
         this.master.connect(ctx.destination);
         void this.loadLoop();
       }
-      void this.context.resume().catch(() => undefined);
-      this.retryNativeResume();
-      this.apply();
+      if (!this.volumeTimer && "AndroidAudio" in globalThis) {
+        this.volumeTimer = setInterval(() => this.syncOutput(), 200);
+      }
+      this.syncOutput();
     } catch { /* Devices without Web Audio stay silent. */ }
   }
 
@@ -58,10 +89,10 @@ export class ForestDrone {
     if (this.resumeTimer) clearTimeout(this.resumeTimer);
     this.resumeTimer = null;
     const native = typeof window !== "undefined" && "AndroidOrientation" in window;
-    if (!native || !this.enabled || document.hidden || this.context?.state !== "suspended") return;
+    if (!native || !this.canPlay() || this.context?.state !== "suspended") return;
     this.resumeTimer = setTimeout(() => {
       this.resumeTimer = null;
-      if (!this.enabled || document.hidden || !this.context) return;
+      if (!this.canPlay() || !this.context) return;
       void this.context.resume().catch(() => undefined).finally(() => this.retryNativeResume());
     }, 250);
   }
@@ -82,7 +113,7 @@ export class ForestDrone {
         source.connect(this.filter);
         source.start();
         this.source = source;
-        this.apply();
+        this.syncOutput();
         return;
       } catch { /* Try the next format. */ }
     }
@@ -91,8 +122,7 @@ export class ForestDrone {
   setMode(enabled: boolean, running: boolean) {
     this.enabled = enabled;
     this.running = running;
-    this.apply();
-    if (enabled) this.retryNativeResume();
+    this.syncOutput();
   }
 
   // 500 ms dip matching the impact glitch: instantly muffled, then back.
@@ -108,13 +138,16 @@ export class ForestDrone {
   private apply() {
     const now = this.context?.currentTime;
     if (now == null || !this.master || !this.filter) return;
-    const target = this.enabled ? (this.running ? 0.45 : 0.3) : 0;
-    this.master.gain.setTargetAtTime(target, now, this.enabled ? 0.8 : 0.05);
+    if (!this.canPlay()) return;
+    const target = this.running ? 0.45 : 0.3;
+    this.master.gain.setTargetAtTime(target, now, 0.8);
     this.filter.frequency.setTargetAtTime(this.running ? RUN_HZ : MENU_HZ, now, 0.65);
   }
 
-  suspend() { void this.context?.suspend().catch(() => undefined); }
+  suspend() { this.foreground = false; this.syncOutput(); }
   dispose() {
+    if (this.volumeTimer) clearInterval(this.volumeTimer);
+    this.volumeTimer = null;
     if (this.resumeTimer) clearTimeout(this.resumeTimer);
     this.resumeTimer = null;
     if (this.context) this.context.onstatechange = null;
