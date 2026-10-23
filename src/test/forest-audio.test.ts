@@ -122,6 +122,25 @@ describe("Continuous forest soundtrack", () => {
     expect(ctx.state).toBe("suspended");
   });
 
+  it.each(["silent", "vibrate"])("stops output when native %s mode is enabled and restores it without a tap", async () => {
+    vi.useFakeTimers();
+    let muted = false;
+    vi.stubGlobal("AndroidAudio", { isMuted: () => muted });
+    audio.unlock();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(ctx.state).toBe("running");
+    muted = true;
+    await vi.advanceTimersByTimeAsync(200);
+    expect(gain.setValueAtTime).toHaveBeenLastCalledWith(0, 0);
+    expect(ctx.state).toBe("suspended");
+    const attempts = ctx.resume.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(600);
+    expect(ctx.resume).toHaveBeenCalledTimes(attempts);
+    muted = false;
+    await vi.advanceTimersByTimeAsync(200);
+    expect(ctx.state).toBe("running");
+  });
+
   it("retries suspended native startup and stops retrying after disposal", async () => {
     vi.useFakeTimers();
     (window as unknown as Record<string, unknown>)["AndroidOrientation"] = { set: vi.fn() };

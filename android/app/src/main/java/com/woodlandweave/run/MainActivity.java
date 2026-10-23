@@ -26,6 +26,8 @@ public class MainActivity extends BridgeActivity {
         // Apply before the game or its saved settings can load.
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
         super.onCreate(savedInstanceState);
+        // Hardware volume keys must adjust this game's media, not ringtone volume.
+        setVolumeControlStream(AudioManager.STREAM_MUSIC);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         hideSystemBars();
     }
@@ -39,8 +41,10 @@ public class MainActivity extends BridgeActivity {
             @JavascriptInterface
             public boolean isMuted() {
                 AudioManager audio = (AudioManager) getSystemService(AUDIO_SERVICE);
-                return audio != null && (audio.getStreamVolume(AudioManager.STREAM_MUSIC) == 0
-                    || audio.isStreamMute(AudioManager.STREAM_MUSIC));
+                return audio == null || AudioOutputPolicy.shouldMute(
+                    audio.getStreamVolume(AudioManager.STREAM_MUSIC),
+                    audio.isStreamMute(AudioManager.STREAM_MUSIC),
+                    audio.getRingerMode());
             }
         }, "AndroidAudio");
         web.addJavascriptInterface(new Object() {
