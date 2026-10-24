@@ -128,17 +128,21 @@ export function makeSimulation() {
     phase: "menu" as Phase, hits: 0, cooldown: 0, impact: 0, impactSide: 1,
     pushX: 0, lastTree: "", cell: "", trees: [] as Tree[], obstacles: [] as Obstacle[],
     difficulty: "easy" as Difficulty, stumble: 0, speedMul: 1, lastObstacle: "", stride: 0,
-    pause: "none" as PauseState, pauseTime: 0 };
+    pause: "none" as PauseState, pauseTime: 0,
+    mode: "classic" as GameMode, powerUp: null as PowerUpType | null, powerUpTime: 0,
+    threat: 0, cleared: [] as string[] };
 }
 
 export function beginRun(s: Simulation) {
-  const { difficulty } = s;
-  Object.assign(s, makeSimulation(), { phase: "awakening", difficulty });
+  const { difficulty, mode } = s;
+  Object.assign(s, makeSimulation(), { phase: "awakening", difficulty, mode });
 }
 
 // Physical circle separation, with a small tangential impulse instead of a hard stop.
 export function collide(s: Simulation, tree: Tree) {
   if (s.phase !== "running") return false;
+  // Ghost wisps let the runner pass straight through the trunks unharmed.
+  if (s.powerUp === "ghost") return false;
   const dx = s.x - tree.x, dz = s.z - tree.z;
   const radius = 0.45 * tree.scale + 0.22;
   const distance = Math.hypot(dx, dz);
