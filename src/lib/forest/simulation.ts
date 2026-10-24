@@ -167,6 +167,8 @@ export function collide(s: Simulation, tree: Tree) {
   s.impact = IMPACT_DURATION;
   s.impactSide = side;
   if (s.hits >= MAX_IMPACTS) { s.phase = "falling"; s.phaseTime = 0; }
+  // In survive mode every impact means the pursuer crept closer.
+  if (s.mode === "survive") s.threat = 1;
   return true;
 }
 
@@ -174,11 +176,31 @@ export function collide(s: Simulation, tree: Tree) {
 // speed) for big rocks, a brief drag (0.5 s at 85%) for undergrowth.
 export function collideObstacle(s: Simulation, obstacle: Obstacle) {
   if (s.phase !== "running" || s.stumble > 0) return false;
+  // The shockwave flattened this patch of undergrowth earlier in the run.
+  if (s.cleared.includes(obstacle.id)) return false;
   const distance = Math.hypot(s.x - obstacle.x, s.z - obstacle.z);
   if (distance >= obstacle.radius + 0.24) return false;
   s.stumble = obstacle.big ? 1 : 0.5;
   s.speedMul = obstacle.big ? 0.65 : 0.85;
   s.lastObstacle = obstacle.id;
+  if (s.mode === "survive") s.threat = 1;
+  return true;
+}
+
+// Running into a wisp binds its power — never while another power is active.
+export function collectPowerUp(s: Simulation, p: PowerUp) {
+  if (s.phase !== "running" || s.powerUp) return false;
+  if (Math.hypot(s.x - p.x, s.z - p.z) > 1.1) return false;
+  s.powerUp = p.type;
+  s.powerUpTime = 0;
+  if (p.type === "shockwave") {
+    // The purple wave flattens every obstacle in the stretch just ahead.
+    for (const o of s.obstacles) {
+      if (o.z < s.z + 1 && o.z > s.z - 12 && Math.abs(o.x - s.x) < 6 && !s.cleared.includes(o.id)) {
+        s.cleared.push(o.id);
+      }
+    }
+  }
   return true;
 }
 
