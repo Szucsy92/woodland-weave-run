@@ -77,6 +77,14 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
   const lean = useRef(0);
   const spores = useRef<THREE.Group>(null);
   const sporeWorld = useRef<{ x: number; z: number; h: number }[]>([]);
+  const orbs = useRef<THREE.Group>(null);
+  const orbWorld = useRef<(PowerUp & { taken?: number })[]>([]);
+  const lastOrbSpawn = useRef(0);
+  const lastPowerUp = useRef<PowerUpType | null>(null);
+  const redLight = useRef<THREE.PointLight>(null);
+  const threatStarted = useRef(false);
+  const lightsOut = useRef(-1);
+  const branchMat = useRef<THREE.MeshStandardMaterial>(null);
   const menuLook = useRef(0);
   const lampSway = useRef(0);
   const { camera } = useThree();
