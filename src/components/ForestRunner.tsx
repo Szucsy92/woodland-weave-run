@@ -596,6 +596,20 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
   });
   return <>
     <pointLight ref={lamp} color={palette.lamp} intensity={65} distance={27} decay={1.6} />
+    <pointLight ref={redLight} color="#ff2418" intensity={0} distance={34} decay={1.4} />
+    <group ref={orbs}>
+      {Array.from({ length: ORB_SLOTS }, (_, i) => (
+        <group key={i} visible={false}>
+          <mesh>
+            <icosahedronGeometry args={[1, 1]} />
+            <meshStandardMaterial color="#ffffff" emissive="#ffffff" emissiveIntensity={1.6} roughness={.2} />
+          </mesh>
+          <sprite>
+            <spriteMaterial map={resources.glowTexture} color="#ffffff" transparent opacity={.5} depthWrite={false} blending={THREE.AdditiveBlending} />
+          </sprite>
+        </group>
+      ))}
+    </group>
     <group ref={glow}>
         {[palette.green, palette.purple, palette.lavender, palette.purple, palette.lavender].map((color, i) => (
           <sprite key={i} renderOrder={-1}>
