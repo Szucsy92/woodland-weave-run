@@ -14,7 +14,26 @@ export type Phase = "menu" | "awakening" | "running" | "falling" | "fallen";
 export type Tree = { x: number; z: number; scale: number; id: string };
 export type Obstacle = { x: number; z: number; big: boolean; radius: number; id: string };
 export type Difficulty = "easy" | "normal" | "hard";
+export type GameMode = "classic" | "survive";
+export type PowerUpType = "freezer" | "ghost" | "shockwave";
+export type PowerUp = { x: number; z: number; type: PowerUpType; id: string };
 export type Simulation = ReturnType<typeof makeSimulation>;
+
+// Lone wisps appear only deep into the run, rare and one at a time.
+export const POWERUP_START = 550;
+export const POWERUP_DURATION = 3;
+export const POWERUP_GAP = 120;
+export const POWERUP_TYPES: PowerUpType[] = ["freezer", "ghost", "shockwave"];
+export function placePowerUp(x: number, z: number, index: number, generation: number): PowerUp | null {
+  if (hash(index, generation, 31) > 0.4) return null;
+  const type = POWERUP_TYPES[Math.floor(hash(index, generation, 32) * 3)] ?? "freezer";
+  return {
+    x: x + (hash(index, generation, 33) - .5) * 14,
+    z: z - (28 + hash(index, generation, 34) * 22),
+    type,
+    id: `p${index}:${generation}`,
+  };
+}
 
 // Speed comes from a gentler base with a stronger ramp; density decides how
 // much room the runner has to weave through. Easy is the original balance.
