@@ -14,7 +14,26 @@ export type Phase = "menu" | "awakening" | "running" | "falling" | "fallen";
 export type Tree = { x: number; z: number; scale: number; id: string };
 export type Obstacle = { x: number; z: number; big: boolean; radius: number; id: string };
 export type Difficulty = "easy" | "normal" | "hard";
+export type GameMode = "classic" | "survive";
+export type PowerUpType = "freezer" | "ghost" | "shockwave";
+export type PowerUp = { x: number; z: number; type: PowerUpType; id: string };
 export type Simulation = ReturnType<typeof makeSimulation>;
+
+// Lone wisps appear only deep into the run, rare and one at a time.
+export const POWERUP_START = 550;
+export const POWERUP_DURATION = 3;
+export const POWERUP_GAP = 120;
+export const POWERUP_TYPES: PowerUpType[] = ["freezer", "ghost", "shockwave"];
+export function placePowerUp(x: number, z: number, index: number, generation: number): PowerUp | null {
+  if (hash(index, generation, 31) > 0.4) return null;
+  const type = POWERUP_TYPES[Math.floor(hash(index, generation, 32) * 3)] ?? "freezer";
+  return {
+    x: x + (hash(index, generation, 33) - .5) * 14,
+    z: z - (28 + hash(index, generation, 34) * 22),
+    type,
+    id: `p${index}:${generation}`,
+  };
+}
 
 // Speed comes from a gentler base with a stronger ramp; density decides how
 // much room the runner has to weave through. Easy is the original balance.
@@ -109,17 +128,21 @@ export function makeSimulation() {
     phase: "menu" as Phase, hits: 0, cooldown: 0, impact: 0, impactSide: 1,
     pushX: 0, lastTree: "", cell: "", trees: [] as Tree[], obstacles: [] as Obstacle[],
     difficulty: "easy" as Difficulty, stumble: 0, speedMul: 1, lastObstacle: "", stride: 0,
-    pause: "none" as PauseState, pauseTime: 0 };
+    pause: "none" as PauseState, pauseTime: 0,
+    mode: "classic" as GameMode, powerUp: null as PowerUpType | null, powerUpTime: 0,
+    threat: 0, cleared: [] as string[] };
 }
 
 export function beginRun(s: Simulation) {
-  const { difficulty } = s;
-  Object.assign(s, makeSimulation(), { phase: "awakening", difficulty });
+  const { difficulty, mode } = s;
+  Object.assign(s, makeSimulation(), { phase: "awakening", difficulty, mode });
 }
 
 // Physical circle separation, with a small tangential impulse instead of a hard stop.
 export function collide(s: Simulation, tree: Tree) {
   if (s.phase !== "running") return false;
+  // Ghost wisps let the runner pass straight through the trunks unharmed.
+  if (s.powerUp === "ghost") return false;
   const dx = s.x - tree.x, dz = s.z - tree.z;
   const radius = 0.45 * tree.scale + 0.22;
   const distance = Math.hypot(dx, dz);
@@ -144,6 +167,8 @@ export function collide(s: Simulation, tree: Tree) {
   s.impact = IMPACT_DURATION;
   s.impactSide = side;
   if (s.hits >= MAX_IMPACTS) { s.phase = "falling"; s.phaseTime = 0; }
+  // In survive mode every impact means the pursuer crept closer.
+  if (s.mode === "survive") s.threat = 1;
   return true;
 }
 
@@ -151,11 +176,31 @@ export function collide(s: Simulation, tree: Tree) {
 // speed) for big rocks, a brief drag (0.5 s at 85%) for undergrowth.
 export function collideObstacle(s: Simulation, obstacle: Obstacle) {
   if (s.phase !== "running" || s.stumble > 0) return false;
+  // The shockwave flattened this patch of undergrowth earlier in the run.
+  if (s.cleared.includes(obstacle.id)) return false;
   const distance = Math.hypot(s.x - obstacle.x, s.z - obstacle.z);
   if (distance >= obstacle.radius + 0.24) return false;
   s.stumble = obstacle.big ? 1 : 0.5;
   s.speedMul = obstacle.big ? 0.65 : 0.85;
   s.lastObstacle = obstacle.id;
+  if (s.mode === "survive") s.threat = 1;
+  return true;
+}
+
+// Running into a wisp binds its power — never while another power is active.
+export function collectPowerUp(s: Simulation, p: PowerUp) {
+  if (s.phase !== "running" || s.powerUp) return false;
+  if (Math.hypot(s.x - p.x, s.z - p.z) > 1.1) return false;
+  s.powerUp = p.type;
+  s.powerUpTime = 0;
+  if (p.type === "shockwave") {
+    // The purple wave flattens every obstacle in the stretch just ahead.
+    for (const o of s.obstacles) {
+      if (o.z < s.z + 1 && o.z > s.z - 12 && Math.abs(o.x - s.x) < 6 && !s.cleared.includes(o.id)) {
+        s.cleared.push(o.id);
+      }
+    }
+  }
   return true;
 }
 
@@ -195,8 +240,8 @@ export function stepSimulation(s: Simulation, steering: number, delta: number) {
     if (s.pause === "slowing" && s.pauseTime >= PAUSE_SLOW) { s.pause = "paused"; s.pauseTime = 0; }
     else if (s.pause === "resuming" && s.pauseTime >= RESUME_TIME) { s.pause = "none"; s.pauseTime = 0; }
     else if (s.pause === "exiting" && s.pauseTime >= EXIT_TIME) {
-      const { difficulty, elapsed } = s;
-      Object.assign(s, makeSimulation(), { difficulty, elapsed, phase: "menu" });
+      const { difficulty, elapsed, mode } = s;
+      Object.assign(s, makeSimulation(), { difficulty, elapsed, mode, phase: "menu" });
       return;
     }
   }
@@ -206,6 +251,14 @@ export function stepSimulation(s: Simulation, steering: number, delta: number) {
   s.impact = Math.max(0, s.impact - dt);
   s.cooldown = Math.max(0, s.cooldown - dt);
   s.stumble = Math.max(0, s.stumble - dt);
+  if (s.powerUp) {
+    s.powerUpTime += dt;
+    if (s.powerUpTime >= POWERUP_DURATION) { s.powerUp = null; s.powerUpTime = 0; }
+  }
+  // The pursuer's glow flares for about a second after every mistake, and
+  // burns constantly once the runner is down.
+  if (s.mode === "survive" && (s.phase === "falling" || s.phase === "fallen")) s.threat = 1;
+  else s.threat = Math.max(0, s.threat - dt);
   if (s.phase === "awakening" && s.phaseTime >= 1.15) {
     s.phase = "running"; s.phaseTime = 0;
   }
@@ -218,7 +271,9 @@ export function stepSimulation(s: Simulation, steering: number, delta: number) {
   const sub = dt / count;
   for (let i = 0; i < count; i++) {
     if (s.phase !== "running") break;
-    const speed = Math.min(level.maxSpeed, BASE_SPEED + s.distance / level.accel) * (s.stumble > 0 ? s.speedMul : 1);
+    // The freezer slows the world's rush while steering stays fully responsive.
+    const speed = Math.min(level.maxSpeed, BASE_SPEED + s.distance / level.accel)
+      * (s.stumble > 0 ? s.speedMul : 1) * (s.powerUp === "freezer" ? 0.55 : 1);
     s.heading = Math.max(-MAX_HEADING, Math.min(MAX_HEADING, s.heading - steering * 1.7 * sub));
     s.pushX *= Math.exp(-7 * sub);
     s.x += (-Math.sin(s.heading) * speed + s.pushX) * sub;

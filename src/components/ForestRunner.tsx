@@ -4,7 +4,7 @@ import { ArrowLeft, LogOut, Pause, Settings } from "lucide-react";
 import * as THREE from "three";
 import { ForestEffects } from "./ForestEffects";
 import { ForestDrone } from "@/lib/forest/drone";
-import { beginRun, CELL, DIFFICULTIES, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, requestExit, requestPause, requestResume, obstaclesAround, orientationValue, placeSpore, RADIUS, sporeOpacity, stepSimulation, treesAround, daylightFor, type Difficulty, type ForestMood, type Phase, type Simulation } from "@/lib/forest/simulation";
+import { beginRun, CELL, collectPowerUp, DIFFICULTIES, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, requestExit, requestPause, requestResume, obstaclesAround, orientationValue, placePowerUp, placeSpore, POWERUP_GAP, POWERUP_START, RADIUS, sporeOpacity, stepSimulation, treesAround, daylightFor, type Difficulty, type ForestMood, type GameMode, type Phase, type PowerUp, type PowerUpType, type Simulation } from "@/lib/forest/simulation";
 import { checkForUpdate, nativeUpdater, type UpdateInfo } from "@/lib/forest/updater";
 import barkUrl from "@/assets/wet-bark.jpg";
 import floorUrl from "@/assets/wet-ground.jpg";
@@ -47,13 +47,20 @@ float groundHeight(float x, float z) {
   return (w1 * 1.15 + w2 * 0.55 + w3 * 0.35) * 0.3;
 }`;
 
-function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
+const ORB_SLOTS = 2;
+const ORB_COLORS: Record<PowerUpType, string> = { freezer: "#cfe8ff", ghost: "#7dffa8", shockwave: "#b46bff" };
+const RED = new THREE.Color("#ff3524");
+
+function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPowerUp, onPowerUpEnd, onThreat }: {
   simulation: MutableRefObject<Simulation>;
   input: MutableRefObject<Input>;
   palette: Palette;
   onPhase: (phase: Phase, score: number) => void;
   onImpact: (side: number) => void;
   onStumble: () => void;
+  onPowerUp: (type: PowerUpType) => void;
+  onPowerUpEnd: () => void;
+  onThreat: () => void;
 }) {
   const trunks = useRef<THREE.InstancedMesh>(null);
   const branches = useRef<THREE.InstancedMesh>(null);
@@ -71,6 +78,15 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
   const lean = useRef(0);
   const spores = useRef<THREE.Group>(null);
   const sporeWorld = useRef<{ x: number; z: number; h: number }[]>([]);
+  const orbs = useRef<THREE.Group>(null);
+  const orbWorld = useRef<(PowerUp & { taken?: number })[]>([]);
+  const lastOrbSpawn = useRef(0);
+  const lastPowerUp = useRef<PowerUpType | null>(null);
+  const redLight = useRef<THREE.PointLight>(null);
+  const threatStarted = useRef(false);
+  const lightsOut = useRef(-1);
+  const redMix = useRef(0);
+  const branchMat = useRef<THREE.MeshStandardMaterial>(null);
   const menuLook = useRef(0);
   const lampSway = useRef(0);
   const { camera } = useThree();
@@ -476,7 +492,77 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
         const twinkle = .5 + .5 * Math.sin(t * (.35 + hash(i, 2, 8) * .35) + seed * 3);
         (sprite.material as THREE.SpriteMaterial).opacity = sporeOpacity(dist, twinkle);
         sprite.scale.setScalar(.14 + hash(i, 4, 9) * .12);
+        // Survive mode: once the red glow floods the forest, every mote turns ember-red.
+        const mat = sprite.material as THREE.SpriteMaterial;
+        if (!sprite.userData.baseColor) sprite.userData.baseColor = mat.color.clone();
+        mat.color.copy(sprite.userData.baseColor as THREE.Color).lerp(RED, redMix.current);
       });
+    }
+    // Survive mode lighting: the distant lights die shortly after the start,
+    // then a red glow rises behind the runner and flares with every mistake.
+    const survive = s.mode === "survive" && (s.phase === "running" || s.phase === "awakening" || lying);
+    const darkPhase = survive && (s.distance > 10 || lying);
+    if (darkPhase && lightsOut.current < 0) lightsOut.current = s.elapsed;
+    if (!survive) { lightsOut.current = -1; threatStarted.current = false; }
+    if (darkPhase && !threatStarted.current) { threatStarted.current = true; onThreat(); }
+    const redTarget = darkPhase ? (lying ? 1 : .55 + s.threat * .45) : 0;
+    redMix.current += (redTarget - redMix.current) * Math.min(1, raw * 2.5);
+    if (redLight.current) {
+      redLight.current.position.set(s.x + Math.sin(s.heading) * 7, groundHeight(s.x, s.z) + 3.2, s.z + Math.cos(s.heading) * 7);
+      redLight.current.intensity = redMix.current * (lying ? 60 : 26 + s.threat * 40);
+    }
+    if (orbs.current) {
+      const world = orbWorld.current;
+      // Wisps appear only deep into the run, rare and alone — never while one
+      // is still drifting ahead or a power is active.
+      const live = world.filter(o => o.taken == null);
+      if (s.phase === "running" && s.distance > POWERUP_START && live.length === 0
+          && s.distance - lastOrbSpawn.current > POWERUP_GAP && !s.powerUp) {
+        const index = Math.floor(s.distance / POWERUP_GAP);
+        const p = placePowerUp(s.x, s.z, index, Math.floor(s.distance));
+        if (p) { world.push(p); lastOrbSpawn.current = s.distance; }
+      }
+      orbs.current.children.forEach((slot, i) => {
+        const orb = world[i];
+        const core = slot.children[0] as THREE.Mesh | undefined;
+        const aura = slot.children[1] as THREE.Sprite | undefined;
+        if (!core || !aura) return;
+        if (!orb) { slot.visible = false; return; }
+        slot.visible = true;
+        const gy = groundHeight(orb.x, orb.z) + 1.15;
+        if (orb.taken != null) {
+          // Pickup: the wisp flows into the runner's chest and dissolves.
+          const k = Math.min(1, (s.elapsed - orb.taken) / .25);
+          core.position.lerp(camera.position, k * .6);
+          core.position.y = THREE.MathUtils.lerp(core.position.y, camera.position.y - .35, k);
+          core.scale.setScalar(Math.max(.001, .14 * (1 - k)));
+          aura.position.copy(core.position);
+          aura.scale.setScalar(Math.max(.001, .9 * (1 - k)));
+          (aura.material as THREE.SpriteMaterial).opacity = .5 * (1 - k);
+          if (k >= 1) { world.splice(world.indexOf(orb), 1); slot.visible = false; }
+          return;
+        }
+        core.position.set(orb.x, gy + Math.sin(t * 1.3 + i * 2) * .08, orb.z);
+        core.rotation.y = t * .8;
+        core.scale.setScalar(.14 + Math.sin(t * 2.1 + i) * .015);
+        aura.position.copy(core.position);
+        aura.scale.setScalar(.9 + Math.sin(t * 1.7 + i) * .12);
+        (aura.material as THREE.SpriteMaterial).opacity = .45 + Math.sin(t * 1.7 + i) * .1;
+        // Left behind or collected by the simulation.
+        if (orb.z > s.z + 6) { world.splice(world.indexOf(orb), 1); slot.visible = false; return; }
+        if (collectPowerUp(s, orb)) { orb.taken = s.elapsed; onPowerUp(orb.type); }
+      });
+      // The moment a power fades, the frame glow and the haptic follow.
+      if (lastPowerUp.current && !s.powerUp) onPowerUpEnd();
+      lastPowerUp.current = s.powerUp;
+      // Ghost wisp: the trunks turn translucent while the power lasts.
+      const ghost = s.powerUp === "ghost";
+      const trunkMat = resources.trunkMaterial;
+      trunkMat.transparent = ghost;
+      trunkMat.opacity = ghost ? .3 : 1;
+      trunkMat.needsUpdate = false;
+      const bMat = branchMat.current;
+      if (bMat) { bMat.transparent = ghost; bMat.opacity = ghost ? .3 : 1; }
     }
     if (mist.current) {
       // Low layered mist drifting between the trunks ahead; a few large soft sprites only.
@@ -491,8 +577,12 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
     if (glow.current) {
       // Behind the fog wall, past every visible trunk. Constant distance keeps the lights unreachable.
       glow.current.position.set(s.x, groundHeight(s.x, s.z - 42) + 4.2, s.z - 42);
+      // Survive mode: the distant lights stutter and die shortly after the start.
+      const die = lightsOut.current >= 0 ? Math.min(1, (s.elapsed - lightsOut.current) / 1.2) : 0;
+      const flicker = die > 0 && die < 1 ? (Math.sin(s.elapsed * 30) > 0 ? 1 : .15) : 1;
       glow.current.children.forEach((child, i) => {
         const sprite = child as THREE.Sprite;
+        (sprite.material as THREE.SpriteMaterial).opacity = 1 * (1 - die) * flicker;
         const high = i > 2;
         sprite.scale.setScalar((high ? 30 : i === 0 ? 24 : 20) * (1 + Math.sin(t * .4 + i) * .08));
         if (high) {
@@ -506,6 +596,20 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble }: {
   });
   return <>
     <pointLight ref={lamp} color={palette.lamp} intensity={65} distance={27} decay={1.6} />
+    <pointLight ref={redLight} color="#ff2418" intensity={0} distance={34} decay={1.4} />
+    <group ref={orbs}>
+      {Array.from({ length: ORB_SLOTS }, (_, i) => (
+        <group key={i} visible={false}>
+          <mesh>
+            <icosahedronGeometry args={[1, 1]} />
+            <meshStandardMaterial color="#ffffff" emissive="#ffffff" emissiveIntensity={1.6} roughness={.2} />
+          </mesh>
+          <sprite>
+            <spriteMaterial map={resources.glowTexture} color="#ffffff" transparent opacity={.5} depthWrite={false} blending={THREE.AdditiveBlending} />
+          </sprite>
+        </group>
+      ))}
+    </group>
     <group ref={glow}>
         {[palette.green, palette.purple, palette.lavender, palette.purple, palette.lavender].map((color, i) => (
           <sprite key={i} renderOrder={-1}>

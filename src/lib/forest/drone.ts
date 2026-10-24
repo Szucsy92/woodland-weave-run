@@ -1,5 +1,6 @@
 // Continuous background loop served from /audio/, filtered per game state.
 const SOURCES = ["/audio/forest-loop.wav", "/audio/forest-loop.mp3"];
+const THREAT_URL = "/audio/threat.mp3";
 const MENU_HZ = 220;
 const RUN_HZ = 4000;
 
@@ -27,6 +28,7 @@ export class ForestDrone {
   private filter: BiquadFilterNode | null = null;
   private master: GainNode | null = null;
   private source: AudioBufferSourceNode | null = null;
+  private threatBuffer: AudioBuffer | null = null;
   private enabled = true;
   private running = false;
   private resumeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -40,25 +42,34 @@ export class ForestDrone {
     return this.enabled && this.foreground && !document.hidden && !muted;
   }
 
-  private syncOutput() {
+  // Full hardware release: closing the context lets the device power down the
+  // speaker amplifier instead of holding the audio channel open at zero gain,
+  // which is what made the speaker hiss while muted.
+  private teardown() {
+    if (this.resumeTimer) clearTimeout(this.resumeTimer);
+    this.resumeTimer = null;
     const ctx = this.context;
     if (!ctx) return;
-    if (!this.canPlay()) {
-      if (this.resumeTimer) clearTimeout(this.resumeTimer);
-      this.resumeTimer = null;
-      // An exponential fade never reaches exact zero. Stop output entirely.
-      this.master?.gain.cancelScheduledValues(ctx.currentTime);
-      this.master?.gain.setValueAtTime(0, ctx.currentTime);
-      if (ctx.state === "running") void ctx.suspend().catch(() => undefined);
-      return;
-    }
+    ctx.onstatechange = null;
+    try { this.source?.stop(); } catch { /* Already stopped. */ }
+    this.source = null;
+    this.context = null;
+    this.filter = null;
+    this.master = null;
+    void ctx.close().catch(() => undefined);
+  }
+
+  private syncOutput() {
+    if (!this.canPlay()) { this.teardown(); return; }
+    if (!this.context) { this.unlock(); return; }
     this.apply();
-    if (ctx.state === "suspended") void ctx.resume().catch(() => undefined);
+    if (this.context.state === "suspended") void this.context.resume().catch(() => undefined);
     this.retryNativeResume();
   }
 
   unlock() {
     this.foreground = true;
+    if (!this.canPlay()) { this.teardown(); return; }
     try {
       if (!this.context) {
         const ctx = new AudioContext();
@@ -77,6 +88,7 @@ export class ForestDrone {
         this.filter.connect(this.master);
         this.master.connect(ctx.destination);
         void this.loadLoop();
+        void this.loadThreat();
       }
       if (!this.volumeTimer && "AndroidAudio" in globalThis) {
         this.volumeTimer = setInterval(() => this.syncOutput(), 200);
@@ -119,6 +131,37 @@ export class ForestDrone {
     }
   }
 
+  private async loadThreat() {
+    const ctx = this.context;
+    if (!ctx) return;
+    try {
+      const response = await fetch(THREAT_URL);
+      if (!response.ok) return;
+      const buffer = await ctx.decodeAudioData(await response.arrayBuffer());
+      if (ctx === this.context) this.threatBuffer = buffer;
+    } catch { /* The sting is optional; the game stays silent without it. */ }
+  }
+
+  // One-shot threat sting. A soft 350 ms fade-out at the tail keeps the ending
+  // from clicking against the silence.
+  playThreat() {
+    const ctx = this.context;
+    const buffer = this.threatBuffer;
+    if (!ctx || !buffer || !this.canPlay()) return;
+    try {
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      const gain = ctx.createGain();
+      const end = ctx.currentTime + buffer.duration;
+      gain.gain.setValueAtTime(0.9, ctx.currentTime);
+      gain.gain.setValueAtTime(0.9, Math.max(ctx.currentTime, end - 0.35));
+      gain.gain.linearRampToValueAtTime(0, end);
+      source.connect(gain);
+      gain.connect(ctx.destination);
+      source.start();
+    } catch { /* Never let a sting break the run. */ }
+  }
+
   setMode(enabled: boolean, running: boolean) {
     this.enabled = enabled;
     this.running = running;
@@ -148,14 +191,6 @@ export class ForestDrone {
   dispose() {
     if (this.volumeTimer) clearInterval(this.volumeTimer);
     this.volumeTimer = null;
-    if (this.resumeTimer) clearTimeout(this.resumeTimer);
-    this.resumeTimer = null;
-    if (this.context) this.context.onstatechange = null;
-    this.source?.stop();
-    this.source = null;
-    void this.context?.close().catch(() => undefined);
-    this.context = null;
-    this.filter = null;
-    this.master = null;
+    this.teardown();
   }
 }
