@@ -577,8 +577,12 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
     if (glow.current) {
       // Behind the fog wall, past every visible trunk. Constant distance keeps the lights unreachable.
       glow.current.position.set(s.x, groundHeight(s.x, s.z - 42) + 4.2, s.z - 42);
+      // Survive mode: the distant lights stutter and die shortly after the start.
+      const die = lightsOut.current >= 0 ? Math.min(1, (s.elapsed - lightsOut.current) / 1.2) : 0;
+      const flicker = die > 0 && die < 1 ? (Math.sin(s.elapsed * 30) > 0 ? 1 : .15) : 1;
       glow.current.children.forEach((child, i) => {
         const sprite = child as THREE.Sprite;
+        (sprite.material as THREE.SpriteMaterial).opacity = 1 * (1 - die) * flicker;
         const high = i > 2;
         sprite.scale.setScalar((high ? 30 : i === 0 ? 24 : 20) * (1 + Math.sin(t * .4 + i) * .08));
         if (high) {
