@@ -240,8 +240,8 @@ export function stepSimulation(s: Simulation, steering: number, delta: number) {
     if (s.pause === "slowing" && s.pauseTime >= PAUSE_SLOW) { s.pause = "paused"; s.pauseTime = 0; }
     else if (s.pause === "resuming" && s.pauseTime >= RESUME_TIME) { s.pause = "none"; s.pauseTime = 0; }
     else if (s.pause === "exiting" && s.pauseTime >= EXIT_TIME) {
-      const { difficulty, elapsed } = s;
-      Object.assign(s, makeSimulation(), { difficulty, elapsed, phase: "menu" });
+      const { difficulty, elapsed, mode } = s;
+      Object.assign(s, makeSimulation(), { difficulty, elapsed, mode, phase: "menu" });
       return;
     }
   }
@@ -251,6 +251,14 @@ export function stepSimulation(s: Simulation, steering: number, delta: number) {
   s.impact = Math.max(0, s.impact - dt);
   s.cooldown = Math.max(0, s.cooldown - dt);
   s.stumble = Math.max(0, s.stumble - dt);
+  if (s.powerUp) {
+    s.powerUpTime += dt;
+    if (s.powerUpTime >= POWERUP_DURATION) { s.powerUp = null; s.powerUpTime = 0; }
+  }
+  // The pursuer's glow flares for about a second after every mistake, and
+  // burns constantly once the runner is down.
+  if (s.mode === "survive" && (s.phase === "falling" || s.phase === "fallen")) s.threat = 1;
+  else s.threat = Math.max(0, s.threat - dt);
   if (s.phase === "awakening" && s.phaseTime >= 1.15) {
     s.phase = "running"; s.phaseTime = 0;
   }
@@ -263,7 +271,9 @@ export function stepSimulation(s: Simulation, steering: number, delta: number) {
   const sub = dt / count;
   for (let i = 0; i < count; i++) {
     if (s.phase !== "running") break;
-    const speed = Math.min(level.maxSpeed, BASE_SPEED + s.distance / level.accel) * (s.stumble > 0 ? s.speedMul : 1);
+    // The freezer slows the world's rush while steering stays fully responsive.
+    const speed = Math.min(level.maxSpeed, BASE_SPEED + s.distance / level.accel)
+      * (s.stumble > 0 ? s.speedMul : 1) * (s.powerUp === "freezer" ? 0.55 : 1);
     s.heading = Math.max(-MAX_HEADING, Math.min(MAX_HEADING, s.heading - steering * 1.7 * sub));
     s.pushX *= Math.exp(-7 * sub);
     s.x += (-Math.sin(s.heading) * speed + s.pushX) * sub;
