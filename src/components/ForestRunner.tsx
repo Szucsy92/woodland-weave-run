@@ -49,6 +49,7 @@ float groundHeight(float x, float z) {
 
 const ORB_SLOTS = 2;
 const ORB_COLORS: Record<PowerUpType, string> = { freezer: "#cfe8ff", ghost: "#7dffa8", shockwave: "#b46bff" };
+const RED = new THREE.Color("#ff3524");
 
 function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPowerUp, onPowerUpEnd, onThreat }: {
   simulation: MutableRefObject<Simulation>;
@@ -84,6 +85,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
   const redLight = useRef<THREE.PointLight>(null);
   const threatStarted = useRef(false);
   const lightsOut = useRef(-1);
+  const redMix = useRef(0);
   const branchMat = useRef<THREE.MeshStandardMaterial>(null);
   const menuLook = useRef(0);
   const lampSway = useRef(0);
