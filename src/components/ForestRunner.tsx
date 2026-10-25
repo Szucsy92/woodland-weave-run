@@ -710,6 +710,8 @@ export function ForestRunner() {
   const [haptics, setHaptics] = useState(true);
   const [orient, setOrient] = useState<"landscape" | "any">("landscape");
   const [difficulty, setDifficulty] = useState<Difficulty>("easy");
+  const [mode, setMode] = useState<GameMode>("classic");
+  const [activePower, setActivePower] = useState<PowerUpType | null>(null);
   const [mood, setMood] = useState<ForestMood>("night");
   const moodRef = useRef<ForestMood>("night");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -771,6 +773,11 @@ export function ForestRunner() {
       if (stored === "easy" || stored === "normal" || stored === "hard") {
         setDifficulty(stored);
         simulation.current.difficulty = stored;
+      }
+      const storedMode = localStorage.getItem("forest-mode");
+      if (storedMode === "classic" || storedMode === "survive") {
+        setMode(storedMode);
+        simulation.current.mode = storedMode;
       }
       const vib = localStorage.getItem("forest-haptics") !== "off";
       setHaptics(vib);
