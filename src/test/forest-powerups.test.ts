@@ -26,7 +26,7 @@ describe("Power-up wisps", () => {
     const s = makeSimulation();
     s.phase = "running";
     collectPowerUp(s, orb("ghost"));
-    for (let t = 0; t < POWERUP_DURATION + 0.2; t += 0.1) stepSimulation(s, 0, 0.1);
+    for (let t = 0; t < POWERUP_DURATION + 0.2; t += 0.05) stepSimulation(s, 0, 0.05);
     expect(s.powerUp).toBeNull();
   });
 
@@ -52,13 +52,13 @@ describe("Power-up wisps", () => {
     const frozen = makeSimulation();
     frozen.phase = "running";
     collectPowerUp(frozen, orb("freezer"));
-    for (let i = 0; i < 10; i++) { stepSimulation(plain, 0, 0.1); stepSimulation(frozen, 0, 0.1); }
+    for (let i = 0; i < 20; i++) { stepSimulation(plain, 0, 0.05); stepSimulation(frozen, 0, 0.05); }
     expect(frozen.distance).toBeLessThan(plain.distance * 0.7);
     // Steering is untouched: same tilt, same heading change.
     const a = makeSimulation(); a.phase = "running";
     const b = makeSimulation(); b.phase = "running";
     collectPowerUp(b, orb("freezer"));
-    stepSimulation(a, 1, 0.1); stepSimulation(b, 1, 0.1);
+    stepSimulation(a, 1, 0.05); stepSimulation(b, 1, 0.05);
     expect(b.heading).toBeCloseTo(a.heading, 5);
   });
 
@@ -91,10 +91,10 @@ describe("Survive mode threat", () => {
     s.phase = "running";
     expect(collide(s, { x: 0, z: -0.3, scale: 1, id: "t1" })).toBe(true);
     expect(s.threat).toBe(1);
-    stepSimulation(s, 0, 0.5);
+    for (let i = 0; i < 10; i++) stepSimulation(s, 0, 0.05);
     expect(s.threat).toBeGreaterThan(0);
     expect(s.threat).toBeLessThan(1);
-    stepSimulation(s, 0, 0.6);
+    for (let i = 0; i < 12; i++) stepSimulation(s, 0, 0.05);
     expect(s.threat).toBe(0);
   });
 
@@ -110,7 +110,7 @@ describe("Survive mode threat", () => {
     s.mode = "survive";
     s.phase = "falling";
     s.threat = 1;
-    for (let i = 0; i < 20; i++) stepSimulation(s, 0, 0.1);
+    for (let i = 0; i < 40; i++) stepSimulation(s, 0, 0.05);
     expect(s.threat).toBe(1);
   });
 
