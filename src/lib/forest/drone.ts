@@ -94,9 +94,6 @@ export class ForestDrone {
         void this.loadLoop();
         void this.loadThreat();
       }
-      if (!this.volumeTimer && "AndroidAudio" in globalThis) {
-        this.volumeTimer = setInterval(() => this.syncOutput(), 200);
-      }
       this.syncOutput();
     } catch { /* Devices without Web Audio stay silent. */ }
   }
