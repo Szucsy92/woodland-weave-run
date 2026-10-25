@@ -838,6 +838,8 @@ export function ForestRunner() {
     setPhase(next);
     if (next === "menu") setPauseUi("none");
     if (next === "falling") {
+      // Survive mode: the same sting that announced the red glow closes the run.
+      if (simulation.current.mode === "survive") drone.current?.playThreat();
       setLast(score);
       setBest(old => Math.max(old, score));
       if (hapticsRef.current) buzz([70, 60, 110, 60, 150]);
@@ -853,6 +855,17 @@ export function ForestRunner() {
   }, []);
   const onStumble = useCallback(() => {
     if (hapticsRef.current) buzz(22);
+  }, []);
+  const onPowerUp = useCallback((type: PowerUpType) => {
+    setActivePower(type);
+    if (hapticsRef.current) buzz([35, 30, 60]);
+  }, []);
+  const onPowerUpEnd = useCallback(() => {
+    setActivePower(null);
+    if (hapticsRef.current) buzz(25);
+  }, []);
+  const onThreat = useCallback(() => {
+    drone.current?.playThreat();
   }, []);
 
   const start = async () => {
