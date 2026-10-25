@@ -921,6 +921,11 @@ export function ForestRunner() {
     simulation.current.cell = "";
     try { localStorage.setItem("forest-difficulty", level); } catch { /* Local storage may be disabled. */ }
   };
+  const changeMode = (next: GameMode) => {
+    setMode(next);
+    simulation.current.mode = next;
+    try { localStorage.setItem("forest-mode", next); } catch { /* Local storage may be disabled. */ }
+  };
   const changeMood = (m: ForestMood) => {
     setMood(m);
     moodRef.current = m;
@@ -942,6 +947,13 @@ export function ForestRunner() {
                   <button className={difficulty === "easy" ? "on" : ""} onClick={() => changeDifficulty("easy")}>Easy</button>
                   <button className={difficulty === "normal" ? "on" : ""} onClick={() => changeDifficulty("normal")}>Normal</button>
                   <button className={difficulty === "hard" ? "on" : ""} onClick={() => changeDifficulty("hard")}>Hard</button>
+                </div>
+              </div>
+              <div className="forest-row">
+                <span>Mode</span>
+                <div className="forest-seg">
+                  <button className={mode === "classic" ? "on" : ""} onClick={() => changeMode("classic")}>Classic</button>
+                  <button className={mode === "survive" ? "on" : ""} onClick={() => changeMode("survive")}>Survive</button>
                 </div>
               </div>
               <div className="forest-row">
