@@ -529,6 +529,13 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
         if (!core || !aura) return;
         if (!orb) { slot.visible = false; return; }
         slot.visible = true;
+        const orbColor = ORB_COLORS[orb.type];
+        const coreMat = core.material as THREE.MeshStandardMaterial;
+        if (coreMat.emissive.getHexString() !== new THREE.Color(orbColor).getHexString()) {
+          coreMat.color.set(orbColor);
+          coreMat.emissive.set(orbColor);
+          (aura.material as THREE.SpriteMaterial).color.set(orbColor);
+        }
         const gy = groundHeight(orb.x, orb.z) + 1.15;
         if (orb.taken != null) {
           // Pickup: the wisp flows into the runner's chest and dissolves.
