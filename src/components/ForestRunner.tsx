@@ -494,8 +494,8 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
         sprite.scale.setScalar(.14 + hash(i, 4, 9) * .12);
         // Survive mode: once the red glow floods the forest, every mote turns ember-red.
         const mat = sprite.material as THREE.SpriteMaterial;
-        if (!sprite.userData.baseColor) sprite.userData.baseColor = mat.color.clone();
-        mat.color.copy(sprite.userData.baseColor as THREE.Color).lerp(RED, redMix.current);
+        if (!sprite.userData["baseColor"]) sprite.userData["baseColor"] = mat.color.clone();
+        mat.color.copy(sprite.userData["baseColor"] as THREE.Color).lerp(RED, redMix.current);
       });
     }
     // Survive mode lighting: the distant lights die shortly after the start,
