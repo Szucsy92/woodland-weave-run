@@ -1039,11 +1039,12 @@ export function ForestRunner() {
       <fog attach="fog" args={[palette.fog, 7, FOG_END]} />
       <hemisphereLight args={[palette.moon, palette.fog, .85]} />
       <directionalLight position={[0, 24, -20]} color={palette.moon} intensity={.7} />
-      <World simulation={simulation} input={input} palette={palette} onPhase={onPhase} onImpact={onImpact} onStumble={onStumble} />
+      <World simulation={simulation} input={input} palette={palette} onPhase={onPhase} onImpact={onImpact} onStumble={onStumble} onPowerUp={onPowerUp} onPowerUpEnd={onPowerUpEnd} onThreat={onThreat} />
       <ForestEffects simulation={simulation} />
       <DayCycle mood={moodRef} night={palette} />
     </Canvas>}
     {(phase === "running" || phase === "awakening" || phase === "falling") && <Hud simulation={simulation} />}
+    {activePower && <div className="forest-power-glow" data-type={activePower} aria-hidden />}
     {(phase === "running" || phase === "awakening") && pauseUi === "none" && (
       <button className="forest-pause" data-forest-ui onClick={pauseRun} aria-label="Pause"><Pause size={18} /></button>
     )}
