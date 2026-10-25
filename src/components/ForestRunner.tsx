@@ -529,6 +529,13 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
         if (!core || !aura) return;
         if (!orb) { slot.visible = false; return; }
         slot.visible = true;
+        const orbColor = ORB_COLORS[orb.type];
+        const coreMat = core.material as THREE.MeshStandardMaterial;
+        if (coreMat.emissive.getHexString() !== new THREE.Color(orbColor).getHexString()) {
+          coreMat.color.set(orbColor);
+          coreMat.emissive.set(orbColor);
+          (aura.material as THREE.SpriteMaterial).color.set(orbColor);
+        }
         const gy = groundHeight(orb.x, orb.z) + 1.15;
         if (orb.taken != null) {
           // Pickup: the wisp flows into the runner's chest and dissolves.
@@ -710,6 +717,8 @@ export function ForestRunner() {
   const [haptics, setHaptics] = useState(true);
   const [orient, setOrient] = useState<"landscape" | "any">("landscape");
   const [difficulty, setDifficulty] = useState<Difficulty>("easy");
+  const [mode, setMode] = useState<GameMode>("classic");
+  const [activePower, setActivePower] = useState<PowerUpType | null>(null);
   const [mood, setMood] = useState<ForestMood>("night");
   const moodRef = useRef<ForestMood>("night");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -772,6 +781,11 @@ export function ForestRunner() {
         setDifficulty(stored);
         simulation.current.difficulty = stored;
       }
+      const storedMode = localStorage.getItem("forest-mode");
+      if (storedMode === "classic" || storedMode === "survive") {
+        setMode(storedMode);
+        simulation.current.mode = storedMode;
+      }
       const vib = localStorage.getItem("forest-haptics") !== "off";
       setHaptics(vib);
       hapticsRef.current = vib;
@@ -831,6 +845,8 @@ export function ForestRunner() {
     setPhase(next);
     if (next === "menu") setPauseUi("none");
     if (next === "falling") {
+      // Survive mode: the same sting that announced the red glow closes the run.
+      if (simulation.current.mode === "survive") drone.current?.playThreat();
       setLast(score);
       setBest(old => Math.max(old, score));
       if (hapticsRef.current) buzz([70, 60, 110, 60, 150]);
@@ -846,6 +862,17 @@ export function ForestRunner() {
   }, []);
   const onStumble = useCallback(() => {
     if (hapticsRef.current) buzz(22);
+  }, []);
+  const onPowerUp = useCallback((type: PowerUpType) => {
+    setActivePower(type);
+    if (hapticsRef.current) buzz([35, 30, 60]);
+  }, []);
+  const onPowerUpEnd = useCallback(() => {
+    setActivePower(null);
+    if (hapticsRef.current) buzz(25);
+  }, []);
+  const onThreat = useCallback(() => {
+    drone.current?.playThreat();
   }, []);
 
   const start = async () => {
@@ -901,6 +928,11 @@ export function ForestRunner() {
     simulation.current.cell = "";
     try { localStorage.setItem("forest-difficulty", level); } catch { /* Local storage may be disabled. */ }
   };
+  const changeMode = (next: GameMode) => {
+    setMode(next);
+    simulation.current.mode = next;
+    try { localStorage.setItem("forest-mode", next); } catch { /* Local storage may be disabled. */ }
+  };
   const changeMood = (m: ForestMood) => {
     setMood(m);
     moodRef.current = m;
@@ -922,6 +954,13 @@ export function ForestRunner() {
                   <button className={difficulty === "easy" ? "on" : ""} onClick={() => changeDifficulty("easy")}>Easy</button>
                   <button className={difficulty === "normal" ? "on" : ""} onClick={() => changeDifficulty("normal")}>Normal</button>
                   <button className={difficulty === "hard" ? "on" : ""} onClick={() => changeDifficulty("hard")}>Hard</button>
+                </div>
+              </div>
+              <div className="forest-row">
+                <span>Mode</span>
+                <div className="forest-seg">
+                  <button className={mode === "classic" ? "on" : ""} onClick={() => changeMode("classic")}>Classic</button>
+                  <button className={mode === "survive" ? "on" : ""} onClick={() => changeMode("survive")}>Survive</button>
                 </div>
               </div>
               <div className="forest-row">
@@ -1007,11 +1046,12 @@ export function ForestRunner() {
       <fog attach="fog" args={[palette.fog, 7, FOG_END]} />
       <hemisphereLight args={[palette.moon, palette.fog, .85]} />
       <directionalLight position={[0, 24, -20]} color={palette.moon} intensity={.7} />
-      <World simulation={simulation} input={input} palette={palette} onPhase={onPhase} onImpact={onImpact} onStumble={onStumble} />
+      <World simulation={simulation} input={input} palette={palette} onPhase={onPhase} onImpact={onImpact} onStumble={onStumble} onPowerUp={onPowerUp} onPowerUpEnd={onPowerUpEnd} onThreat={onThreat} />
       <ForestEffects simulation={simulation} />
       <DayCycle mood={moodRef} night={palette} />
     </Canvas>}
     {(phase === "running" || phase === "awakening" || phase === "falling") && <Hud simulation={simulation} />}
+    {activePower && <div className="forest-power-glow" data-type={activePower} aria-hidden />}
     {(phase === "running" || phase === "awakening") && pauseUi === "none" && (
       <button className="forest-pause" data-forest-ui onClick={pauseRun} aria-label="Pause"><Pause size={18} /></button>
     )}

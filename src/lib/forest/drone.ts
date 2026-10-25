@@ -69,6 +69,10 @@ export class ForestDrone {
 
   unlock() {
     this.foreground = true;
+    // The volume poll must run even while muted, so sound returns without a tap.
+    if (!this.volumeTimer && "AndroidAudio" in globalThis) {
+      this.volumeTimer = setInterval(() => this.syncOutput(), 200);
+    }
     if (!this.canPlay()) { this.teardown(); return; }
     try {
       if (!this.context) {
@@ -89,9 +93,6 @@ export class ForestDrone {
         this.master.connect(ctx.destination);
         void this.loadLoop();
         void this.loadThreat();
-      }
-      if (!this.volumeTimer && "AndroidAudio" in globalThis) {
-        this.volumeTimer = setInterval(() => this.syncOutput(), 200);
       }
       this.syncOutput();
     } catch { /* Devices without Web Audio stay silent. */ }

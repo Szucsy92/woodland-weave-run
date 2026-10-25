@@ -3,18 +3,20 @@ import { ForestDrone } from "@/lib/forest/drone";
 
 describe("Continuous forest soundtrack", () => {
   let audio: ForestDrone;
+  let constructed: number;
   let ctx: {
     state: string; currentTime: number; onstatechange: (() => void) | null;
     resume: ReturnType<typeof vi.fn>; suspend: ReturnType<typeof vi.fn>; close: ReturnType<typeof vi.fn>;
     createBufferSource: ReturnType<typeof vi.fn>;
   };
   let frequency: { value: number; setTargetAtTime: ReturnType<typeof vi.fn>; cancelScheduledValues: ReturnType<typeof vi.fn>; setValueAtTime: ReturnType<typeof vi.fn>; linearRampToValueAtTime: ReturnType<typeof vi.fn> };
-  let gain: { value: number; setTargetAtTime: ReturnType<typeof vi.fn>; cancelScheduledValues: ReturnType<typeof vi.fn>; setValueAtTime: ReturnType<typeof vi.fn> };
+  let gain: { value: number; setTargetAtTime: ReturnType<typeof vi.fn>; cancelScheduledValues: ReturnType<typeof vi.fn>; setValueAtTime: ReturnType<typeof vi.fn>; linearRampToValueAtTime: ReturnType<typeof vi.fn> };
   let start: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    constructed = 0;
     frequency = { value: 0, setTargetAtTime: vi.fn(), cancelScheduledValues: vi.fn(), setValueAtTime: vi.fn(), linearRampToValueAtTime: vi.fn() };
-    gain = { value: 0, setTargetAtTime: vi.fn(), cancelScheduledValues: vi.fn(), setValueAtTime: vi.fn() };
+    gain = { value: 0, setTargetAtTime: vi.fn(), cancelScheduledValues: vi.fn(), setValueAtTime: vi.fn(), linearRampToValueAtTime: vi.fn() };
     start = vi.fn();
     ctx = {
       state: "suspended", currentTime: 0, onstatechange: null,
@@ -23,10 +25,10 @@ describe("Continuous forest soundtrack", () => {
       createBufferSource: vi.fn(() => ({ connect: vi.fn(), start, stop: vi.fn(), loop: false })),
     };
     vi.stubGlobal("AudioContext", class {
-      constructor() { return Object.assign(ctx, {
+      constructor() { constructed++; return Object.assign(ctx, {
         createBiquadFilter: () => ({ frequency, Q: { value: 0 }, connect: vi.fn() }),
         createGain: () => ({ gain, connect: vi.fn() }),
-        decodeAudioData: async () => ({ sampleRate: 44100, length: 4410, numberOfChannels: 1, getChannelData: () => new Float32Array(4410) }),
+        decodeAudioData: async () => ({ sampleRate: 44100, length: 4410, numberOfChannels: 1, duration: 0.1, getChannelData: () => new Float32Array(4410) }),
         createBuffer: (channels: number, length: number, sampleRate: number) => {
           const data = Array.from({ length: channels }, () => new Float32Array(length));
           return { numberOfChannels: channels, length, sampleRate, getChannelData: (c: number) => data[c] };
@@ -79,50 +81,59 @@ describe("Continuous forest soundtrack", () => {
     expect(frequency.setTargetAtTime).toHaveBeenLastCalledWith(4000, 0.5, 0.18);
   });
 
-  it("honours the saved sound-off setting", () => {
-    audio.setMode(false, false); audio.unlock();
-    expect(gain.setValueAtTime).toHaveBeenLastCalledWith(0, 0);
+  it("plays the threat sting once with a soft fade-out at the tail", async () => {
+    audio.unlock();
+    await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+    audio.playThreat();
+    expect(ctx.createBufferSource).toHaveBeenCalledTimes(2);
+    expect(gain.linearRampToValueAtTime).toHaveBeenCalledWith(0, 0.1);
+  });
+
+  it("never opens the audio channel while the saved sound-off setting stands", () => {
+    audio.setMode(false, false);
+    audio.unlock();
+    expect(constructed).toBe(0);
     expect(ctx.resume).not.toHaveBeenCalled();
   });
 
-  it("suspends all audio at zero native media volume and restores it above zero", async () => {
+  it("fully releases the speaker at zero native media volume and recreates it above zero", async () => {
     vi.useFakeTimers();
     let muted = true;
     vi.stubGlobal("AndroidAudio", { isMuted: () => muted });
     audio.unlock();
+    expect(constructed).toBe(0);
     expect(ctx.resume).not.toHaveBeenCalled();
-    expect(gain.setValueAtTime).toHaveBeenLastCalledWith(0, 0);
     muted = false;
     await vi.advanceTimersByTimeAsync(200);
+    expect(constructed).toBe(1);
     expect(ctx.state).toBe("running");
     muted = true;
     await vi.advanceTimersByTimeAsync(200);
-    expect(ctx.suspend).toHaveBeenCalledOnce();
-    expect(ctx.state).toBe("suspended");
+    expect(ctx.close).toHaveBeenCalledOnce();
     muted = false;
+    await vi.advanceTimersByTimeAsync(200);
+    expect(constructed).toBe(2);
     audio.setMode(false, false);
     await vi.advanceTimersByTimeAsync(400);
-    expect(ctx.state).toBe("suspended");
+    expect(ctx.close).toHaveBeenCalledTimes(2);
     audio.setMode(true, false);
-    expect(ctx.state).toBe("running");
+    expect(constructed).toBe(3);
     audio.suspend();
     await vi.advanceTimersByTimeAsync(400);
-    expect(ctx.state).toBe("suspended");
+    expect(ctx.close).toHaveBeenCalledTimes(3);
     audio.dispose();
     const attempts = ctx.resume.mock.calls.length;
     await vi.advanceTimersByTimeAsync(400);
     expect(ctx.resume).toHaveBeenCalledTimes(attempts);
   });
 
-  it("stops active output exactly when the sound switch is turned off", () => {
+  it("closes the audio channel the moment the sound switch is turned off", () => {
     audio.unlock();
     audio.setMode(false, false);
-    expect(gain.cancelScheduledValues).toHaveBeenCalledWith(0);
-    expect(gain.setValueAtTime).toHaveBeenLastCalledWith(0, 0);
-    expect(ctx.state).toBe("suspended");
+    expect(ctx.close).toHaveBeenCalledOnce();
   });
 
-  it.each(["silent", "vibrate"])("stops output when native %s mode is enabled and restores it without a tap", async () => {
+  it.each(["silent", "vibrate"])("fully releases the speaker in native %s mode and restores it without a tap", async () => {
     vi.useFakeTimers();
     let muted = false;
     vi.stubGlobal("AndroidAudio", { isMuted: () => muted });
@@ -131,13 +142,13 @@ describe("Continuous forest soundtrack", () => {
     expect(ctx.state).toBe("running");
     muted = true;
     await vi.advanceTimersByTimeAsync(200);
-    expect(gain.setValueAtTime).toHaveBeenLastCalledWith(0, 0);
-    expect(ctx.state).toBe("suspended");
+    expect(ctx.close).toHaveBeenCalledOnce();
     const attempts = ctx.resume.mock.calls.length;
     await vi.advanceTimersByTimeAsync(600);
     expect(ctx.resume).toHaveBeenCalledTimes(attempts);
     muted = false;
     await vi.advanceTimersByTimeAsync(200);
+    expect(constructed).toBe(2);
     expect(ctx.state).toBe("running");
   });
 
