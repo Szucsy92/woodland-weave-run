@@ -1,6 +1,10 @@
 // Continuous background loop served from /audio/, filtered per game state.
 const SOURCES = ["/audio/forest-loop.wav", "/audio/forest-loop.mp3"];
-const THREAT_URL = "/audio/threat.mp3";
+// One-shot stings, decoded once per audio context.
+export const STINGS = { start: "/audio/run_start.wav", end: "/audio/run_end.wav", threat: "/audio/threat.wav" } as const;
+export type Sting = keyof typeof STINGS;
+// Survive: once the lights die the forest loop sinks to a dull, distant hum.
+const MUFFLED_HZ = 380;
 const MENU_HZ = 220;
 const RUN_HZ = 4000;
 
@@ -28,7 +32,9 @@ export class ForestDrone {
   private filter: BiquadFilterNode | null = null;
   private master: GainNode | null = null;
   private source: AudioBufferSourceNode | null = null;
-  private threatBuffer: AudioBuffer | null = null;
+  private stings: Partial<Record<Sting, AudioBuffer>> = {};
+  private stingLoads: Partial<Record<Sting, Promise<AudioBuffer | null>>> = {};
+  private muffled = false;
   private enabled = true;
   private running = false;
   private resumeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -56,6 +62,8 @@ export class ForestDrone {
     this.context = null;
     this.filter = null;
     this.master = null;
+    this.stings = {};
+    this.stingLoads = {};
     void ctx.close().catch(() => undefined);
   }
 
@@ -92,7 +100,7 @@ export class ForestDrone {
         this.filter.connect(this.master);
         this.master.connect(ctx.destination);
         void this.loadLoop();
-        void this.loadThreat();
+        (Object.keys(STINGS) as Sting[]).forEach(name => void this.loadSting(name));
       }
       this.syncOutput();
     } catch { /* Devices without Web Audio stay silent. */ }
@@ -132,23 +140,42 @@ export class ForestDrone {
     }
   }
 
-  private async loadThreat() {
+  private loadSting(name: Sting) {
     const ctx = this.context;
-    if (!ctx) return;
-    try {
-      const response = await fetch(THREAT_URL);
-      if (!response.ok) return;
-      const buffer = await ctx.decodeAudioData(await response.arrayBuffer());
-      if (ctx === this.context) this.threatBuffer = buffer;
-    } catch { /* The sting is optional; the game stays silent without it. */ }
+    if (!ctx) return Promise.resolve(null);
+    const existing = this.stingLoads[name];
+    if (existing) return existing;
+    const load = (async () => {
+      try {
+        const response = await fetch(STINGS[name]);
+        if (!response.ok) return null;
+        const buffer = await ctx.decodeAudioData(await response.arrayBuffer());
+        if (ctx !== this.context) return null;
+        this.stings[name] = buffer;
+        return buffer;
+      } catch { return null; /* Stings are optional; the game stays silent without them. */ }
+    })();
+    this.stingLoads[name] = load;
+    return load;
   }
 
-  // One-shot threat sting. A soft 350 ms fade-out at the tail keeps the ending
-  // from clicking against the silence.
-  playThreat() {
+  // One-shot sting. A soft 350 ms fade-out at the tail keeps the ending from
+  // clicking against the silence. If the sound is still decoding it plays as
+  // soon as it is ready, unless that would arrive noticeably late.
+  play(name: Sting) {
+    if (!this.context || !this.canPlay()) return;
+    const ready = this.stings[name];
+    if (ready) { this.startSting(ready); return; }
+    const asked = Date.now();
+    void this.loadSting(name).then(buffer => {
+      if (buffer && Date.now() - asked < 700) this.startSting(buffer);
+    });
+  }
+  playThreat() { this.play("threat"); }
+
+  private startSting(buffer: AudioBuffer) {
     const ctx = this.context;
-    const buffer = this.threatBuffer;
-    if (!ctx || !buffer || !this.canPlay()) return;
+    if (!ctx || !this.canPlay()) return;
     try {
       const source = ctx.createBufferSource();
       source.buffer = buffer;
@@ -161,6 +188,13 @@ export class ForestDrone {
       gain.connect(ctx.destination);
       source.start();
     } catch { /* Never let a sting break the run. */ }
+  }
+
+  /** Survive mode: dull the forest loop once the lights die. */
+  setMuffled(muffled: boolean) {
+    if (this.muffled === muffled) return;
+    this.muffled = muffled;
+    this.apply();
   }
 
   setMode(enabled: boolean, running: boolean) {
@@ -176,16 +210,16 @@ export class ForestDrone {
     this.filter.frequency.cancelScheduledValues(now);
     this.filter.frequency.setValueAtTime(this.filter.frequency.value, now);
     this.filter.frequency.linearRampToValueAtTime(MENU_HZ, now + 0.03);
-    this.filter.frequency.setTargetAtTime(this.running ? RUN_HZ : MENU_HZ, now + 0.5, 0.18);
+    this.filter.frequency.setTargetAtTime(this.running ? (this.muffled ? MUFFLED_HZ : RUN_HZ) : MENU_HZ, now + 0.5, 0.18);
   }
 
   private apply() {
     const now = this.context?.currentTime;
     if (now == null || !this.master || !this.filter) return;
     if (!this.canPlay()) return;
-    const target = this.running ? 0.45 : 0.3;
+    const target = this.running ? (this.muffled ? 0.26 : 0.45) : 0.3;
     this.master.gain.setTargetAtTime(target, now, 0.8);
-    this.filter.frequency.setTargetAtTime(this.running ? RUN_HZ : MENU_HZ, now, 0.65);
+    this.filter.frequency.setTargetAtTime(this.running ? (this.muffled ? MUFFLED_HZ : RUN_HZ) : MENU_HZ, now, 0.65);
   }
 
   suspend() { this.foreground = false; this.syncOutput(); }
