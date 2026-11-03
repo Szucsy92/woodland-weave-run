@@ -188,7 +188,8 @@ export function makeSimulation() {
     difficulty: "easy" as Difficulty, stumble: 0, speedMul: 1, lastObstacle: "", stride: 0,
     pause: "none" as PauseState, pauseTime: 0,
     mode: "classic" as GameMode, powerUp: null as PowerUpType | null, powerUpTime: 0,
-    threat: 0, cleared: [] as string[] };
+    threat: 0, cleared: [] as string[], clearedAt: {} as Record<string, number>,
+    surviveTime: -1, found: [] as string[] };
 }
 
 export function beginRun(s: Simulation) {
@@ -201,10 +202,19 @@ export function collide(s: Simulation, tree: Tree) {
   if (s.phase !== "running") return false;
   // Ghost wisps let the runner pass straight through the trunks unharmed.
   if (s.powerUp === "ghost") return false;
+  // Trees the shockwave dissolved are gone for good.
+  if (s.cleared.includes(tree.id)) return false;
   const dx = s.x - tree.x, dz = s.z - tree.z;
   const radius = 0.45 * tree.scale + 0.22;
   const distance = Math.hypot(dx, dz);
   if (distance >= radius) return false;
+  if (s.mode === "freeroam") {
+    // Wandering: simply slide around the trunk, never a hit.
+    const nx = distance > 0.001 ? dx / distance : 1, nz = distance > 0.001 ? dz / distance : 0;
+    s.x = tree.x + nx * (radius + 0.01);
+    s.z = tree.z + nz * (radius + 0.01);
+    return false;
+  }
   const side = dx === 0 ? (hash(Math.floor(tree.x), Math.floor(tree.z), 7) > 0.5 ? 1 : -1) : Math.sign(dx);
   const nz = distance > 0.001 ? dz / distance : 0;
   if (nz > 0) {
@@ -234,6 +244,7 @@ export function collide(s: Simulation, tree: Tree) {
 // speed) for big rocks, a brief drag (0.5 s at 85%) for undergrowth.
 export function collideObstacle(s: Simulation, obstacle: Obstacle) {
   if (s.phase !== "running" || s.stumble > 0) return false;
+  if (s.mode === "freeroam" || s.powerUp === "ghost") return false;
   // The shockwave flattened this patch of undergrowth earlier in the run.
   if (s.cleared.includes(obstacle.id)) return false;
   const distance = Math.hypot(s.x - obstacle.x, s.z - obstacle.z);
@@ -245,6 +256,14 @@ export function collideObstacle(s: Simulation, obstacle: Obstacle) {
   return true;
 }
 
+/** True when a point lies in the stretch just ahead of the runner. */
+export function inShockwave(s: Simulation, x: number, z: number) {
+  const dx = x - s.x, dz = z - s.z;
+  const along = -dx * Math.sin(s.heading) - dz * Math.cos(s.heading);
+  const lateral = dx * Math.cos(s.heading) - dz * Math.sin(s.heading);
+  return along > -1 && along < SHOCKWAVE_AHEAD && Math.abs(lateral) < SHOCKWAVE_SIDE;
+}
+
 // Running into a wisp binds its power — never while another power is active.
 export function collectPowerUp(s: Simulation, p: PowerUp) {
   if (s.phase !== "running" || s.powerUp) return false;
@@ -252,10 +271,11 @@ export function collectPowerUp(s: Simulation, p: PowerUp) {
   s.powerUp = p.type;
   s.powerUpTime = 0;
   if (p.type === "shockwave") {
-    // The purple wave flattens every obstacle in the stretch just ahead.
-    for (const o of s.obstacles) {
-      if (o.z < s.z + 1 && o.z > s.z - 12 && Math.abs(o.x - s.x) < 6 && !s.cleared.includes(o.id)) {
+    // The purple wave dissolves every tree, rock and bush in the stretch ahead.
+    for (const o of [...s.obstacles, ...s.trees]) {
+      if (inShockwave(s, o.x, o.z) && !s.cleared.includes(o.id)) {
         s.cleared.push(o.id);
+        s.clearedAt[o.id] = s.elapsed;
       }
     }
   }
