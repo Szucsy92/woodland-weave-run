@@ -14,16 +14,20 @@ export type Phase = "menu" | "awakening" | "running" | "falling" | "fallen";
 export type Tree = { x: number; z: number; scale: number; id: string };
 export type Obstacle = { x: number; z: number; big: boolean; radius: number; id: string };
 export type Difficulty = "easy" | "normal" | "hard";
-export type GameMode = "classic" | "survive";
+export type GameMode = "classic" | "survive" | "freeroam";
 export type PowerUpType = "freezer" | "ghost" | "shockwave";
 export type PowerUp = { x: number; z: number; type: PowerUpType; id: string };
 export type Simulation = ReturnType<typeof makeSimulation>;
 
-// Lone wisps appear only deep into the run, rare and one at a time.
-export const POWERUP_START = 550;
-export const POWERUP_DURATION = 3;
+// Lone wisps appear from 300 m, rare and one at a time.
+export const POWERUP_START = 300;
+export const POWERUP_DURATION = 5;
 export const POWERUP_GAP = 120;
 export const POWERUP_TYPES: PowerUpType[] = ["freezer", "ghost", "shockwave"];
+// The shockwave clears this stretch ahead (trees included).
+export const SHOCKWAVE_AHEAD = 16;
+export const SHOCKWAVE_SIDE = 7;
+export const SHOCKWAVE_DISSOLVE = 0.9;
 export function placePowerUp(x: number, z: number, index: number, generation: number): PowerUp | null {
   if (hash(index, generation, 31) > 0.4) return null;
   const type = POWERUP_TYPES[Math.floor(hash(index, generation, 32) * 3)] ?? "freezer";
@@ -33,6 +37,60 @@ export function placePowerUp(x: number, z: number, index: number, generation: nu
     type,
     id: `p${index}:${generation}`,
   };
+}
+
+// Survive sequence: at 10 m the lights ahead die, the forest goes dark for a
+// tense moment, then the red pursuer light and the threat sound arrive together.
+export const SURVIVE_DARK_AT = 10;
+export const LIGHTS_DIE = 1.2;
+export const DARK_PAUSE = 1.75;
+export type SurviveStage = "lit" | "dying" | "dark" | "red";
+export function surviveStage(s: Simulation): SurviveStage {
+  if (s.mode !== "survive" || s.surviveTime < 0) return "lit";
+  if (s.surviveTime < LIGHTS_DIE) return "dying";
+  if (s.surviveTime < LIGHTS_DIE + DARK_PAUSE) return "dark";
+  return "red";
+}
+
+// Freeroam: an unhurried walk in any direction, no fatal impacts.
+export const FREEROAM_SPEED = 4.2;
+export const FREEROAM_TURN = 1.5;
+
+// Hidden secrets for freeroam, one chance per large world cell.
+export const SECRET_CELL = 70;
+export const SECRET_REACH = 3.5;
+export const SECRET_CLEARING = 6;
+export type SecretType = "monolith" | "ring" | "lantern";
+export type Secret = { x: number; z: number; type: SecretType; id: string };
+export const SECRET_NAMES: Record<SecretType, string> = {
+  monolith: "The Silent Monolith",
+  ring: "The Fairy Ring",
+  lantern: "The Lost Lantern",
+};
+export function secretsAround(x: number, z: number): Secret[] {
+  const cx = Math.floor(x / SECRET_CELL), cz = Math.floor(z / SECRET_CELL);
+  const out: Secret[] = [];
+  for (let i = -1; i <= 1; i++) {
+    for (let j = -1; j <= 1; j++) {
+      const gx = cx + i, gz = cz + j;
+      if (gx === 0 && gz === 0) continue;
+      if (hash(gx, gz, 300) > 0.45) continue;
+      const types: SecretType[] = ["monolith", "ring", "lantern"];
+      out.push({
+        x: gx * SECRET_CELL + 15 + hash(gx, gz, 301) * (SECRET_CELL - 30),
+        z: gz * SECRET_CELL + 15 + hash(gx, gz, 302) * (SECRET_CELL - 30),
+        type: types[Math.floor(hash(gx, gz, 303) * 3)] ?? "monolith",
+        id: `s${gx}:${gz}`,
+      });
+    }
+  }
+  return out;
+}
+export function discoverSecret(s: Simulation, secret: Secret) {
+  if (s.mode !== "freeroam" || s.phase !== "running" || s.found.includes(secret.id)) return false;
+  if (Math.hypot(s.x - secret.x, s.z - secret.z) > SECRET_REACH) return false;
+  s.found.push(secret.id);
+  return true;
 }
 
 // Speed comes from a gentler base with a stronger ramp; density decides how
@@ -130,7 +188,8 @@ export function makeSimulation() {
     difficulty: "easy" as Difficulty, stumble: 0, speedMul: 1, lastObstacle: "", stride: 0,
     pause: "none" as PauseState, pauseTime: 0,
     mode: "classic" as GameMode, powerUp: null as PowerUpType | null, powerUpTime: 0,
-    threat: 0, cleared: [] as string[] };
+    threat: 0, cleared: [] as string[], clearedAt: {} as Record<string, number>,
+    surviveTime: -1, found: [] as string[] };
 }
 
 export function beginRun(s: Simulation) {
@@ -143,10 +202,19 @@ export function collide(s: Simulation, tree: Tree) {
   if (s.phase !== "running") return false;
   // Ghost wisps let the runner pass straight through the trunks unharmed.
   if (s.powerUp === "ghost") return false;
+  // Trees the shockwave dissolved are gone for good.
+  if (s.cleared.includes(tree.id)) return false;
   const dx = s.x - tree.x, dz = s.z - tree.z;
   const radius = 0.45 * tree.scale + 0.22;
   const distance = Math.hypot(dx, dz);
   if (distance >= radius) return false;
+  if (s.mode === "freeroam") {
+    // Wandering: simply slide around the trunk, never a hit.
+    const nx = distance > 0.001 ? dx / distance : 1, nz = distance > 0.001 ? dz / distance : 0;
+    s.x = tree.x + nx * (radius + 0.01);
+    s.z = tree.z + nz * (radius + 0.01);
+    return false;
+  }
   const side = dx === 0 ? (hash(Math.floor(tree.x), Math.floor(tree.z), 7) > 0.5 ? 1 : -1) : Math.sign(dx);
   const nz = distance > 0.001 ? dz / distance : 0;
   if (nz > 0) {
@@ -176,6 +244,7 @@ export function collide(s: Simulation, tree: Tree) {
 // speed) for big rocks, a brief drag (0.5 s at 85%) for undergrowth.
 export function collideObstacle(s: Simulation, obstacle: Obstacle) {
   if (s.phase !== "running" || s.stumble > 0) return false;
+  if (s.mode === "freeroam" || s.powerUp === "ghost") return false;
   // The shockwave flattened this patch of undergrowth earlier in the run.
   if (s.cleared.includes(obstacle.id)) return false;
   const distance = Math.hypot(s.x - obstacle.x, s.z - obstacle.z);
@@ -187,6 +256,14 @@ export function collideObstacle(s: Simulation, obstacle: Obstacle) {
   return true;
 }
 
+/** True when a point lies in the stretch just ahead of the runner. */
+export function inShockwave(s: Simulation, x: number, z: number) {
+  const dx = x - s.x, dz = z - s.z;
+  const along = -dx * Math.sin(s.heading) - dz * Math.cos(s.heading);
+  const lateral = dx * Math.cos(s.heading) - dz * Math.sin(s.heading);
+  return along > -1 && along < SHOCKWAVE_AHEAD && Math.abs(lateral) < SHOCKWAVE_SIDE;
+}
+
 // Running into a wisp binds its power — never while another power is active.
 export function collectPowerUp(s: Simulation, p: PowerUp) {
   if (s.phase !== "running" || s.powerUp) return false;
@@ -194,10 +271,11 @@ export function collectPowerUp(s: Simulation, p: PowerUp) {
   s.powerUp = p.type;
   s.powerUpTime = 0;
   if (p.type === "shockwave") {
-    // The purple wave flattens every obstacle in the stretch just ahead.
-    for (const o of s.obstacles) {
-      if (o.z < s.z + 1 && o.z > s.z - 12 && Math.abs(o.x - s.x) < 6 && !s.cleared.includes(o.id)) {
+    // The purple wave dissolves every tree, rock and bush in the stretch ahead.
+    for (const o of [...s.obstacles, ...s.trees]) {
+      if (inShockwave(s, o.x, o.z) && !s.cleared.includes(o.id)) {
         s.cleared.push(o.id);
+        s.clearedAt[o.id] = s.elapsed;
       }
     }
   }
@@ -265,16 +343,24 @@ export function stepSimulation(s: Simulation, steering: number, delta: number) {
   if (s.phase === "falling" && s.phaseTime >= 2.8) {
     s.phase = "fallen"; s.phaseTime = 2.8;
   }
+  // Survive clock: starts when the lights begin to die, then keeps running.
+  if (s.mode === "survive") {
+    if (s.surviveTime >= 0) s.surviveTime += dt;
+    else if (s.phase === "running" && s.distance > SURVIVE_DARK_AT) s.surviveTime = 0;
+  }
   if (s.phase !== "running") return;
   const level = DIFFICULTIES[s.difficulty];
+  const free = s.mode === "freeroam";
   const count = Math.ceil(dt / (1 / 120));
   const sub = dt / count;
   for (let i = 0; i < count; i++) {
     if (s.phase !== "running") break;
     // The freezer slows the world's rush while steering stays fully responsive.
-    const speed = Math.min(level.maxSpeed, BASE_SPEED + s.distance / level.accel)
+    const speed = free ? FREEROAM_SPEED : Math.min(level.maxSpeed, BASE_SPEED + s.distance / level.accel)
       * (s.stumble > 0 ? s.speedMul : 1) * (s.powerUp === "freezer" ? 0.55 : 1);
-    s.heading = Math.max(-MAX_HEADING, Math.min(MAX_HEADING, s.heading - steering * 1.7 * sub));
+    // Freeroam turns without limit, so the walker can head any way, even back.
+    s.heading = free ? s.heading - steering * FREEROAM_TURN * sub
+      : Math.max(-MAX_HEADING, Math.min(MAX_HEADING, s.heading - steering * 1.7 * sub));
     s.pushX *= Math.exp(-7 * sub);
     s.x += (-Math.sin(s.heading) * speed + s.pushX) * sub;
     s.z -= Math.cos(s.heading) * speed * sub;
