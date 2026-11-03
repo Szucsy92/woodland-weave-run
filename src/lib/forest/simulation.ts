@@ -14,16 +14,20 @@ export type Phase = "menu" | "awakening" | "running" | "falling" | "fallen";
 export type Tree = { x: number; z: number; scale: number; id: string };
 export type Obstacle = { x: number; z: number; big: boolean; radius: number; id: string };
 export type Difficulty = "easy" | "normal" | "hard";
-export type GameMode = "classic" | "survive";
+export type GameMode = "classic" | "survive" | "freeroam";
 export type PowerUpType = "freezer" | "ghost" | "shockwave";
 export type PowerUp = { x: number; z: number; type: PowerUpType; id: string };
 export type Simulation = ReturnType<typeof makeSimulation>;
 
-// Lone wisps appear only deep into the run, rare and one at a time.
-export const POWERUP_START = 550;
-export const POWERUP_DURATION = 3;
+// Lone wisps appear from 300 m, rare and one at a time.
+export const POWERUP_START = 300;
+export const POWERUP_DURATION = 5;
 export const POWERUP_GAP = 120;
 export const POWERUP_TYPES: PowerUpType[] = ["freezer", "ghost", "shockwave"];
+// The shockwave clears this stretch ahead (trees included).
+export const SHOCKWAVE_AHEAD = 16;
+export const SHOCKWAVE_SIDE = 7;
+export const SHOCKWAVE_DISSOLVE = 0.9;
 export function placePowerUp(x: number, z: number, index: number, generation: number): PowerUp | null {
   if (hash(index, generation, 31) > 0.4) return null;
   const type = POWERUP_TYPES[Math.floor(hash(index, generation, 32) * 3)] ?? "freezer";
@@ -33,6 +37,60 @@ export function placePowerUp(x: number, z: number, index: number, generation: nu
     type,
     id: `p${index}:${generation}`,
   };
+}
+
+// Survive sequence: at 10 m the lights ahead die, the forest goes dark for a
+// tense moment, then the red pursuer light and the threat sound arrive together.
+export const SURVIVE_DARK_AT = 10;
+export const LIGHTS_DIE = 1.2;
+export const DARK_PAUSE = 1.75;
+export type SurviveStage = "lit" | "dying" | "dark" | "red";
+export function surviveStage(s: Simulation): SurviveStage {
+  if (s.mode !== "survive" || s.surviveTime < 0) return "lit";
+  if (s.surviveTime < LIGHTS_DIE) return "dying";
+  if (s.surviveTime < LIGHTS_DIE + DARK_PAUSE) return "dark";
+  return "red";
+}
+
+// Freeroam: an unhurried walk in any direction, no fatal impacts.
+export const FREEROAM_SPEED = 4.2;
+export const FREEROAM_TURN = 1.5;
+
+// Hidden secrets for freeroam, one chance per large world cell.
+export const SECRET_CELL = 70;
+export const SECRET_REACH = 3.5;
+export const SECRET_CLEARING = 6;
+export type SecretType = "monolith" | "ring" | "lantern";
+export type Secret = { x: number; z: number; type: SecretType; id: string };
+export const SECRET_NAMES: Record<SecretType, string> = {
+  monolith: "The Silent Monolith",
+  ring: "The Fairy Ring",
+  lantern: "The Lost Lantern",
+};
+export function secretsAround(x: number, z: number): Secret[] {
+  const cx = Math.floor(x / SECRET_CELL), cz = Math.floor(z / SECRET_CELL);
+  const out: Secret[] = [];
+  for (let i = -1; i <= 1; i++) {
+    for (let j = -1; j <= 1; j++) {
+      const gx = cx + i, gz = cz + j;
+      if (gx === 0 && gz === 0) continue;
+      if (hash(gx, gz, 300) > 0.45) continue;
+      const types: SecretType[] = ["monolith", "ring", "lantern"];
+      out.push({
+        x: gx * SECRET_CELL + 15 + hash(gx, gz, 301) * (SECRET_CELL - 30),
+        z: gz * SECRET_CELL + 15 + hash(gx, gz, 302) * (SECRET_CELL - 30),
+        type: types[Math.floor(hash(gx, gz, 303) * 3)] ?? "monolith",
+        id: `s${gx}:${gz}`,
+      });
+    }
+  }
+  return out;
+}
+export function discoverSecret(s: Simulation, secret: Secret) {
+  if (s.mode !== "freeroam" || s.phase !== "running" || s.found.includes(secret.id)) return false;
+  if (Math.hypot(s.x - secret.x, s.z - secret.z) > SECRET_REACH) return false;
+  s.found.push(secret.id);
+  return true;
 }
 
 // Speed comes from a gentler base with a stronger ramp; density decides how
