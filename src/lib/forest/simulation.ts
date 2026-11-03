@@ -343,16 +343,24 @@ export function stepSimulation(s: Simulation, steering: number, delta: number) {
   if (s.phase === "falling" && s.phaseTime >= 2.8) {
     s.phase = "fallen"; s.phaseTime = 2.8;
   }
+  // Survive clock: starts when the lights begin to die, then keeps running.
+  if (s.mode === "survive") {
+    if (s.surviveTime >= 0) s.surviveTime += dt;
+    else if (s.phase === "running" && s.distance > SURVIVE_DARK_AT) s.surviveTime = 0;
+  }
   if (s.phase !== "running") return;
   const level = DIFFICULTIES[s.difficulty];
+  const free = s.mode === "freeroam";
   const count = Math.ceil(dt / (1 / 120));
   const sub = dt / count;
   for (let i = 0; i < count; i++) {
     if (s.phase !== "running") break;
     // The freezer slows the world's rush while steering stays fully responsive.
-    const speed = Math.min(level.maxSpeed, BASE_SPEED + s.distance / level.accel)
+    const speed = free ? FREEROAM_SPEED : Math.min(level.maxSpeed, BASE_SPEED + s.distance / level.accel)
       * (s.stumble > 0 ? s.speedMul : 1) * (s.powerUp === "freezer" ? 0.55 : 1);
-    s.heading = Math.max(-MAX_HEADING, Math.min(MAX_HEADING, s.heading - steering * 1.7 * sub));
+    // Freeroam turns without limit, so the walker can head any way, even back.
+    s.heading = free ? s.heading - steering * FREEROAM_TURN * sub
+      : Math.max(-MAX_HEADING, Math.min(MAX_HEADING, s.heading - steering * 1.7 * sub));
     s.pushX *= Math.exp(-7 * sub);
     s.x += (-Math.sin(s.heading) * speed + s.pushX) * sub;
     s.z -= Math.cos(s.heading) * speed * sub;
