@@ -33,3 +33,7 @@
 - [x] Configure all four GitHub signing secrets
 - [ ] Verify first permanently signed GitHub APK publication (GitHub signed the APK successfully; certificate comparison failed, corrected diagnostic/parser awaits Lovable Git sync and a new workflow run)
 - [ ] Verify in-place device update (requires installing the first permanently signed APK, then a newer signed APK)
+- [x] Start/end/threat WAV stings; survive sequence (lights die at 10 m, hum dulls, ~1.75 s dark, then red flood + threat + ember spores together)
+- [x] Power-ups from 300 m, bigger, 5 s, vivid blue freezer, shockwave glitch-dissolves trees too
+- [x] Freeroam mode: free 360° walking, no falls, three kinds of hidden secrets remembered on the device
+- [ ] Feel/sound check of the new survive sequence and freeroam on a phone (requires installed APK)
