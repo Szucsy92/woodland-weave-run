@@ -4,7 +4,7 @@ import { ArrowLeft, LogOut, Pause, Settings } from "lucide-react";
 import * as THREE from "three";
 import { ForestEffects } from "./ForestEffects";
 import { ForestDrone } from "@/lib/forest/drone";
-import { beginRun, CELL, collectPowerUp, DIFFICULTIES, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, requestExit, requestPause, requestResume, obstaclesAround, orientationValue, placePowerUp, placeSpore, POWERUP_GAP, POWERUP_START, RADIUS, sporeOpacity, stepSimulation, treesAround, daylightFor, type Difficulty, type ForestMood, type GameMode, type Phase, type PowerUp, type PowerUpType, type Simulation } from "@/lib/forest/simulation";
+import { beginRun, CELL, collectPowerUp, DARK_PAUSE, DIFFICULTIES, discoverSecret, LIGHTS_DIE, SECRET_CLEARING, SECRET_NAMES, secretsAround, SHOCKWAVE_AHEAD, SHOCKWAVE_DISSOLVE, surviveStage, type Secret, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, requestExit, requestPause, requestResume, obstaclesAround, orientationValue, placePowerUp, placeSpore, POWERUP_GAP, POWERUP_START, RADIUS, sporeOpacity, stepSimulation, treesAround, daylightFor, type Difficulty, type ForestMood, type GameMode, type Phase, type PowerUp, type PowerUpType, type Simulation } from "@/lib/forest/simulation";
 import { checkForUpdate, nativeUpdater, type UpdateInfo } from "@/lib/forest/updater";
 import barkUrl from "@/assets/wet-bark.jpg";
 import floorUrl from "@/assets/wet-ground.jpg";
@@ -13,7 +13,8 @@ import barkRough from "@/assets/bark-rough.jpg";
 import floorNormal from "@/assets/ground-normal.jpg";
 import floorRough from "@/assets/ground-rough.jpg";
 
-type Palette = Record<"fog" | "moon" | "lamp" | "green" | "purple" | "lavender" | "lemon" | "trunk" | "ground" | "crown" | "rock" | "plant", THREE.Color>;
+const PALETTE_KEYS = ["fog", "moon", "lamp", "green", "purple", "lavender", "lemon", "trunk", "ground", "crown", "rock", "plant", "ember", "pursuer", "blood", "freezer", "ghost", "shock", "secret"] as const;
+type Palette = Record<typeof PALETTE_KEYS[number], THREE.Color>;
 type Input = { tilt: number; touch: number; touchMode: boolean; neutral: number | null; angle: number };
 const MAX_INSTANCES = (RADIUS * 2 + 1) ** 2;
 const BRANCHES_PER_TREE = 11;
@@ -48,10 +49,13 @@ float groundHeight(float x, float z) {
 }`;
 
 const ORB_SLOTS = 2;
-const ORB_COLORS: Record<PowerUpType, string> = { freezer: "#cfe8ff", ghost: "#7dffa8", shockwave: "#b46bff" };
-const RED = new THREE.Color("#ff3524");
+const ORB_KEY: Record<PowerUpType, "freezer" | "ghost" | "shock"> = { freezer: "freezer", ghost: "ghost", shockwave: "shock" };
+const SECRET_SLOTS = 9;
+const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+/** Shared survive-mode red amount (0..1) read by the scene lights and fog. */
+export type RedRef = MutableRefObject<number>;
 
-function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPowerUp, onPowerUpEnd, onThreat }: {
+function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, onPowerUp, onPowerUpEnd, onThreat, onDark, onSecret }: {
   simulation: MutableRefObject<Simulation>;
   input: MutableRefObject<Input>;
   palette: Palette;
@@ -61,6 +65,9 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
   onPowerUp: (type: PowerUpType) => void;
   onPowerUpEnd: () => void;
   onThreat: () => void;
+  onDark: () => void;
+  onSecret: (secret: Secret) => void;
+  red: RedRef;
 }) {
   const trunks = useRef<THREE.InstancedMesh>(null);
   const branches = useRef<THREE.InstancedMesh>(null);
@@ -83,9 +90,18 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
   const lastOrbSpawn = useRef(0);
   const lastPowerUp = useRef<PowerUpType | null>(null);
   const redLight = useRef<THREE.PointLight>(null);
-  const threatStarted = useRef(false);
-  const lightsOut = useRef(-1);
-  const redMix = useRef(0);
+  const redFlood = useRef<THREE.DirectionalLight>(null);
+  const redTarget = useMemo(() => new THREE.Object3D(), []);
+  const stageRef = useRef("lit");
+  const redMix = red;
+  const ring = useRef<THREE.Mesh>(null);
+  const secretGroup = useRef<THREE.Group>(null);
+  const secretWorld = useRef<Secret[]>([]);
+  // Instance slots per tree/obstacle id, and pristine matrices for the glitch dissolve.
+  const slotMap = useRef(new Map<string, [THREE.InstancedMesh, number][]>());
+  const pristine = useRef(new Map<string, THREE.Matrix4[]>());
+  const tmpM = useMemo(() => new THREE.Matrix4(), []);
+  const tmpG = useMemo(() => new THREE.Matrix4(), []);
   const branchMat = useRef<THREE.MeshStandardMaterial>(null);
   const menuLook = useRef(0);
   const lampSway = useRef(0);
@@ -293,6 +309,16 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
       const level = DIFFICULTIES[s.difficulty];
       s.trees = treesAround(Math.floor(s.x / CELL), Math.floor(s.z / CELL), level.treeGap);
       s.obstacles = obstaclesAround(Math.floor(s.x / CELL), Math.floor(s.z / CELL), level.obstacleGap);
+      if (s.mode === "freeroam") {
+        // Every secret sits in its own small clearing.
+        const secrets = secretsAround(s.x, s.z);
+        secretWorld.current = secrets;
+        const open = (o: { x: number; z: number }) => secrets.every(e => Math.hypot(o.x - e.x, o.z - e.z) > SECRET_CLEARING);
+        s.trees = s.trees.filter(open);
+        s.obstacles = s.obstacles.filter(open);
+      } else secretWorld.current = [];
+      slotMap.current.clear();
+      pristine.current.clear();
       const branchMesh = branches.current, crownMesh = crowns.current, rockMesh = rocks.current, plantMesh = plants.current;
       s.trees.forEach((tree, i) => {
         const seedX = Math.floor(tree.x), seedZ = Math.floor(tree.z);
@@ -369,6 +395,14 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
           crownMesh?.setMatrixAt(i * CROWN_SLOTS + c, resources.dummy.matrix);
         }
       });
+      s.trees.forEach((tree, i) => {
+        const slots: [THREE.InstancedMesh, number][] = [[trunkMesh, i]];
+        if (shadows.current) slots.push([shadows.current, i]);
+        for (let r = 0; r < ROOTS_PER_TREE; r++) if (roots.current) slots.push([roots.current, i * ROOTS_PER_TREE + r]);
+        for (let b = 0; b < BRANCHES_PER_TREE; b++) if (branchMesh) slots.push([branchMesh, i * BRANCHES_PER_TREE + b]);
+        for (let c = 0; c < CROWN_SLOTS; c++) if (crownMesh) slots.push([crownMesh, i * CROWN_SLOTS + c]);
+        slotMap.current.set(tree.id, slots);
+      });
       trunkMesh.count = s.trees.length;
       if (branchMesh) branchMesh.count = s.trees.length * BRANCHES_PER_TREE;
       if (roots.current) { roots.current.count = s.trees.length * ROOTS_PER_TREE; roots.current.instanceMatrix.needsUpdate = true; }
@@ -386,6 +420,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
           resources.dummy.scale.set(o.radius * 1.35, o.radius * (.55 + hash(Math.floor(o.x), Math.floor(o.z), 82) * .35), o.radius * 1.15);
           resources.dummy.updateMatrix();
           rockMesh?.setMatrixAt(rockCount, resources.dummy.matrix);
+          if (rockMesh && shadows.current) slotMap.current.set(o.id, [[rockMesh, rockCount], [shadows.current, s.trees.length + rockCount]]);
           resources.dummy.position.set(o.x, groundHeight(o.x, o.z) + .05, o.z);
           resources.dummy.scale.set(o.radius * 3.2, 1, o.radius * 3);
           resources.dummy.updateMatrix();
@@ -396,9 +431,15 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
           const bs = .85 + hash(Math.floor(o.x), Math.floor(o.z), 83) * .55;
           resources.dummy.scale.set(.8 * bs, (.4 + hash(Math.floor(o.x), Math.floor(o.z), 81) * .35) * bs, .8 * bs);
           resources.dummy.updateMatrix();
+          if (plantMesh) slotMap.current.set(o.id, [[plantMesh, plantCount]]);
           plantMesh?.setMatrixAt(plantCount++, resources.dummy.matrix);
         }
       });
+      // Anything the shockwave already dissolved stays gone across rebuilds.
+      for (const id of s.cleared) {
+        if (s.elapsed - (s.clearedAt[id] ?? -99) < SHOCKWAVE_DISSOLVE) continue;
+        slotMap.current.get(id)?.forEach(([mesh, index]) => mesh.setMatrixAt(index, ZERO));
+      }
       if (shadows.current) { shadows.current.count = s.trees.length + rockCount; shadows.current.instanceMatrix.needsUpdate = true; }
       if (rockMesh) { rockMesh.count = rockCount; rockMesh.instanceMatrix.needsUpdate = true; }
       if (plantMesh) { plantMesh.count = plantCount; plantMesh.instanceMatrix.needsUpdate = true; }
@@ -412,6 +453,38 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
     lastImpact.current = s.impact;
     if (s.stumble > 0 && lastStumble.current <= 0) onStumble();
     lastStumble.current = s.stumble;
+    // Shockwave: cleared trees and undergrowth glitch apart instead of popping out.
+    for (const id of s.cleared) {
+      const age = s.elapsed - (s.clearedAt[id] ?? -99);
+      const slots = slotMap.current.get(id);
+      if (!slots || age > SHOCKWAVE_DISSOLVE + .1) continue;
+      let saved = pristine.current.get(id);
+      if (!saved) {
+        saved = slots.map(([mesh, index]) => { const m = new THREE.Matrix4(); mesh.getMatrixAt(index, m); return m; });
+        pristine.current.set(id, saved);
+      }
+      const k = Math.min(1, age / SHOCKWAVE_DISSOLVE);
+      const step = Math.floor(s.elapsed * 24);
+      const seed = id.length * 31 + (id.charCodeAt(id.length - 1) || 0);
+      const flick = hash(step, seed, 400) > .55 + k * .3 ? .25 : 1;
+      const jx = (hash(step, seed, 401) - .5) * 1.4 * k, jz = (hash(step, seed, 402) - .5) * .8 * k;
+      const squash = Math.max(0, (1 - k * k)) * flick;
+      const thin = Math.max(0, 1 - k) * (.6 + hash(step, seed, 403) * .8);
+      const [first] = slots;
+      if (!first) continue;
+      tmpM.copy(saved[0] ?? tmpM);
+      const bx = tmpM.elements[12] ?? 0, by = tmpM.elements[13] ?? 0, bz = tmpM.elements[14] ?? 0;
+      tmpG.makeTranslation(bx + jx, by, bz + jz)
+        .multiply(new THREE.Matrix4().makeScale(thin, squash, thin))
+        .multiply(new THREE.Matrix4().makeTranslation(-bx, -by, -bz));
+      slots.forEach(([mesh, index], n) => {
+        const base = saved?.[n];
+        if (!base) return;
+        if (k >= 1) mesh.setMatrixAt(index, ZERO);
+        else mesh.setMatrixAt(index, tmpM.multiplyMatrices(tmpG, base));
+        mesh.instanceMatrix.needsUpdate = true;
+      });
+    }
     if (ground.current) {
       ground.current.position.set(s.x, 0, s.z);
       [resources.floor, resources.floorN, resources.floorR].forEach(t => t.offset.set(s.x / 3.125, -s.z / 3.125));
