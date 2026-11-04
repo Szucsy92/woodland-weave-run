@@ -165,3 +165,10 @@ describe("Continuous forest soundtrack", () => {
     expect(ctx.resume).toHaveBeenCalledTimes(attempts);
   });
 });
+
+describe("Run stings", () => {
+  it("uses the supplied WAV recordings for start, end and threat", async () => {
+    const { STINGS } = await import("@/lib/forest/drone");
+    expect(STINGS).toEqual({ start: "/audio/run_start.wav", end: "/audio/run_end.wav", threat: "/audio/threat.wav" });
+  });
+});

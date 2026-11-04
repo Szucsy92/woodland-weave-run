@@ -4,7 +4,7 @@ import { ArrowLeft, LogOut, Pause, Settings } from "lucide-react";
 import * as THREE from "three";
 import { ForestEffects } from "./ForestEffects";
 import { ForestDrone } from "@/lib/forest/drone";
-import { beginRun, CELL, collectPowerUp, DIFFICULTIES, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, requestExit, requestPause, requestResume, obstaclesAround, orientationValue, placePowerUp, placeSpore, POWERUP_GAP, POWERUP_START, RADIUS, sporeOpacity, stepSimulation, treesAround, daylightFor, type Difficulty, type ForestMood, type GameMode, type Phase, type PowerUp, type PowerUpType, type Simulation } from "@/lib/forest/simulation";
+import { beginRun, CELL, collectPowerUp, DIFFICULTIES, discoverSecret, LIGHTS_DIE, SECRET_CLEARING, SECRET_NAMES, secretsAround, SHOCKWAVE_AHEAD, SHOCKWAVE_DISSOLVE, surviveStage, type Secret, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, requestExit, requestPause, requestResume, obstaclesAround, orientationValue, placePowerUp, placeSpore, POWERUP_GAP, POWERUP_START, RADIUS, sporeOpacity, stepSimulation, treesAround, daylightFor, type Difficulty, type ForestMood, type GameMode, type Phase, type PowerUp, type PowerUpType, type Simulation } from "@/lib/forest/simulation";
 import { checkForUpdate, nativeUpdater, type UpdateInfo } from "@/lib/forest/updater";
 import barkUrl from "@/assets/wet-bark.jpg";
 import floorUrl from "@/assets/wet-ground.jpg";
@@ -13,7 +13,8 @@ import barkRough from "@/assets/bark-rough.jpg";
 import floorNormal from "@/assets/ground-normal.jpg";
 import floorRough from "@/assets/ground-rough.jpg";
 
-type Palette = Record<"fog" | "moon" | "lamp" | "green" | "purple" | "lavender" | "lemon" | "trunk" | "ground" | "crown" | "rock" | "plant", THREE.Color>;
+const PALETTE_KEYS = ["fog", "moon", "lamp", "green", "purple", "lavender", "lemon", "trunk", "ground", "crown", "rock", "plant", "ember", "pursuer", "blood", "freezer", "ghost", "shock", "secret"] as const;
+type Palette = Record<typeof PALETTE_KEYS[number], THREE.Color>;
 type Input = { tilt: number; touch: number; touchMode: boolean; neutral: number | null; angle: number };
 const MAX_INSTANCES = (RADIUS * 2 + 1) ** 2;
 const BRANCHES_PER_TREE = 11;
@@ -48,10 +49,13 @@ float groundHeight(float x, float z) {
 }`;
 
 const ORB_SLOTS = 2;
-const ORB_COLORS: Record<PowerUpType, string> = { freezer: "#cfe8ff", ghost: "#7dffa8", shockwave: "#b46bff" };
-const RED = new THREE.Color("#ff3524");
+const ORB_KEY: Record<PowerUpType, "freezer" | "ghost" | "shock"> = { freezer: "freezer", ghost: "ghost", shockwave: "shock" };
+const SECRET_SLOTS = 9;
+const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+/** Shared survive-mode red amount (0..1) read by the scene lights and fog. */
+export type RedRef = MutableRefObject<number>;
 
-function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPowerUp, onPowerUpEnd, onThreat }: {
+function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, onPowerUp, onPowerUpEnd, onThreat, onDark, onSecret }: {
   simulation: MutableRefObject<Simulation>;
   input: MutableRefObject<Input>;
   palette: Palette;
@@ -61,6 +65,9 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
   onPowerUp: (type: PowerUpType) => void;
   onPowerUpEnd: () => void;
   onThreat: () => void;
+  onDark: () => void;
+  onSecret: (secret: Secret) => void;
+  red: RedRef;
 }) {
   const trunks = useRef<THREE.InstancedMesh>(null);
   const branches = useRef<THREE.InstancedMesh>(null);
@@ -83,9 +90,18 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
   const lastOrbSpawn = useRef(0);
   const lastPowerUp = useRef<PowerUpType | null>(null);
   const redLight = useRef<THREE.PointLight>(null);
-  const threatStarted = useRef(false);
-  const lightsOut = useRef(-1);
-  const redMix = useRef(0);
+  const redFlood = useRef<THREE.DirectionalLight>(null);
+  const redTarget = useMemo(() => new THREE.Object3D(), []);
+  const stageRef = useRef("lit");
+  const redMix = red;
+  const ring = useRef<THREE.Mesh>(null);
+  const secretGroup = useRef<THREE.Group>(null);
+  const secretWorld = useRef<Secret[]>([]);
+  // Instance slots per tree/obstacle id, and pristine matrices for the glitch dissolve.
+  const slotMap = useRef(new Map<string, [THREE.InstancedMesh, number][]>());
+  const pristine = useRef(new Map<string, THREE.Matrix4[]>());
+  const tmpM = useMemo(() => new THREE.Matrix4(), []);
+  const tmpG = useMemo(() => new THREE.Matrix4(), []);
   const branchMat = useRef<THREE.MeshStandardMaterial>(null);
   const menuLook = useRef(0);
   const lampSway = useRef(0);
@@ -293,6 +309,16 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
       const level = DIFFICULTIES[s.difficulty];
       s.trees = treesAround(Math.floor(s.x / CELL), Math.floor(s.z / CELL), level.treeGap);
       s.obstacles = obstaclesAround(Math.floor(s.x / CELL), Math.floor(s.z / CELL), level.obstacleGap);
+      if (s.mode === "freeroam") {
+        // Every secret sits in its own small clearing.
+        const secrets = secretsAround(s.x, s.z);
+        secretWorld.current = secrets;
+        const open = (o: { x: number; z: number }) => secrets.every(e => Math.hypot(o.x - e.x, o.z - e.z) > SECRET_CLEARING);
+        s.trees = s.trees.filter(open);
+        s.obstacles = s.obstacles.filter(open);
+      } else secretWorld.current = [];
+      slotMap.current.clear();
+      pristine.current.clear();
       const branchMesh = branches.current, crownMesh = crowns.current, rockMesh = rocks.current, plantMesh = plants.current;
       s.trees.forEach((tree, i) => {
         const seedX = Math.floor(tree.x), seedZ = Math.floor(tree.z);
@@ -369,6 +395,14 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
           crownMesh?.setMatrixAt(i * CROWN_SLOTS + c, resources.dummy.matrix);
         }
       });
+      s.trees.forEach((tree, i) => {
+        const slots: [THREE.InstancedMesh, number][] = [[trunkMesh, i]];
+        if (shadows.current) slots.push([shadows.current, i]);
+        for (let r = 0; r < ROOTS_PER_TREE; r++) if (roots.current) slots.push([roots.current, i * ROOTS_PER_TREE + r]);
+        for (let b = 0; b < BRANCHES_PER_TREE; b++) if (branchMesh) slots.push([branchMesh, i * BRANCHES_PER_TREE + b]);
+        for (let c = 0; c < CROWN_SLOTS; c++) if (crownMesh) slots.push([crownMesh, i * CROWN_SLOTS + c]);
+        slotMap.current.set(tree.id, slots);
+      });
       trunkMesh.count = s.trees.length;
       if (branchMesh) branchMesh.count = s.trees.length * BRANCHES_PER_TREE;
       if (roots.current) { roots.current.count = s.trees.length * ROOTS_PER_TREE; roots.current.instanceMatrix.needsUpdate = true; }
@@ -386,6 +420,7 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
           resources.dummy.scale.set(o.radius * 1.35, o.radius * (.55 + hash(Math.floor(o.x), Math.floor(o.z), 82) * .35), o.radius * 1.15);
           resources.dummy.updateMatrix();
           rockMesh?.setMatrixAt(rockCount, resources.dummy.matrix);
+          if (rockMesh && shadows.current) slotMap.current.set(o.id, [[rockMesh, rockCount], [shadows.current, s.trees.length + rockCount]]);
           resources.dummy.position.set(o.x, groundHeight(o.x, o.z) + .05, o.z);
           resources.dummy.scale.set(o.radius * 3.2, 1, o.radius * 3);
           resources.dummy.updateMatrix();
@@ -396,9 +431,15 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
           const bs = .85 + hash(Math.floor(o.x), Math.floor(o.z), 83) * .55;
           resources.dummy.scale.set(.8 * bs, (.4 + hash(Math.floor(o.x), Math.floor(o.z), 81) * .35) * bs, .8 * bs);
           resources.dummy.updateMatrix();
+          if (plantMesh) slotMap.current.set(o.id, [[plantMesh, plantCount]]);
           plantMesh?.setMatrixAt(plantCount++, resources.dummy.matrix);
         }
       });
+      // Anything the shockwave already dissolved stays gone across rebuilds.
+      for (const id of s.cleared) {
+        if (s.elapsed - (s.clearedAt[id] ?? -99) < SHOCKWAVE_DISSOLVE) continue;
+        slotMap.current.get(id)?.forEach(([mesh, index]) => mesh.setMatrixAt(index, ZERO));
+      }
       if (shadows.current) { shadows.current.count = s.trees.length + rockCount; shadows.current.instanceMatrix.needsUpdate = true; }
       if (rockMesh) { rockMesh.count = rockCount; rockMesh.instanceMatrix.needsUpdate = true; }
       if (plantMesh) { plantMesh.count = plantCount; plantMesh.instanceMatrix.needsUpdate = true; }
@@ -412,6 +453,38 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
     lastImpact.current = s.impact;
     if (s.stumble > 0 && lastStumble.current <= 0) onStumble();
     lastStumble.current = s.stumble;
+    // Shockwave: cleared trees and undergrowth glitch apart instead of popping out.
+    for (const id of s.cleared) {
+      const age = s.elapsed - (s.clearedAt[id] ?? -99);
+      const slots = slotMap.current.get(id);
+      if (!slots || age > SHOCKWAVE_DISSOLVE + .1) continue;
+      let saved = pristine.current.get(id);
+      if (!saved) {
+        saved = slots.map(([mesh, index]) => { const m = new THREE.Matrix4(); mesh.getMatrixAt(index, m); return m; });
+        pristine.current.set(id, saved);
+      }
+      const k = Math.min(1, age / SHOCKWAVE_DISSOLVE);
+      const step = Math.floor(s.elapsed * 24);
+      const seed = id.length * 31 + (id.charCodeAt(id.length - 1) || 0);
+      const flick = hash(step, seed, 400) > .55 + k * .3 ? .25 : 1;
+      const jx = (hash(step, seed, 401) - .5) * 1.4 * k, jz = (hash(step, seed, 402) - .5) * .8 * k;
+      const squash = Math.max(0, (1 - k * k)) * flick;
+      const thin = Math.max(0, 1 - k) * (.6 + hash(step, seed, 403) * .8);
+      const [first] = slots;
+      if (!first) continue;
+      tmpM.copy(saved[0] ?? tmpM);
+      const bx = tmpM.elements[12] ?? 0, by = tmpM.elements[13] ?? 0, bz = tmpM.elements[14] ?? 0;
+      tmpG.makeTranslation(bx + jx, by, bz + jz)
+        .multiply(new THREE.Matrix4().makeScale(thin, squash, thin))
+        .multiply(new THREE.Matrix4().makeTranslation(-bx, -by, -bz));
+      slots.forEach(([mesh, index], n) => {
+        const base = saved?.[n];
+        if (!base) return;
+        if (k >= 1) mesh.setMatrixAt(index, ZERO);
+        else mesh.setMatrixAt(index, tmpM.multiplyMatrices(tmpG, base));
+        mesh.instanceMatrix.needsUpdate = true;
+      });
+    }
     if (ground.current) {
       ground.current.position.set(s.x, 0, s.z);
       [resources.floor, resources.floorN, resources.floorR].forEach(t => t.offset.set(s.x / 3.125, -s.z / 3.125));
@@ -477,46 +550,64 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
           world.push(placeSpore(s.x, s.z, i, 0, true));
         }
       }
+      const sh = Math.sin(s.heading), ch = Math.cos(s.heading);
+      const ember = surviveStage(s) === "red";
       spores.current.children.forEach((child, i) => {
         const sprite = child as THREE.Sprite;
         const seed = i * 7.13;
         const spore = world[i];
         if (!spore) return;
-        if (spore.z > s.z + 18 || Math.abs(spore.x - s.x) > 55) {
-          Object.assign(spore, placeSpore(s.x, s.z, i, Math.floor(s.distance)));
+        // Recycle relative to the facing direction, so freeroam works any way round.
+        const wx = spore.x - s.x, wz = spore.z - s.z;
+        const side = wx * ch - wz * sh, back = wx * sh + wz * ch;
+        if (back > 18 || Math.abs(side) > 55) {
+          const fresh = placeSpore(s.x, s.z, i, Math.floor(s.distance));
+          const dx = fresh.x - s.x, dz = fresh.z - s.z;
+          Object.assign(spore, { x: s.x + dx * ch + dz * sh, z: s.z - dx * sh + dz * ch, h: fresh.h });
         }
         const mx = spore.x + Math.sin(t * .23 + seed * 2) * .6;
         const mz = spore.z + Math.cos(t * .19 + seed) * .6;
         sprite.position.set(mx, groundHeight(mx, mz) + spore.h + Math.sin(t * .5 + seed) * .25, mz);
         const dist = Math.hypot(mx - s.x, mz - s.z);
         const twinkle = .5 + .5 * Math.sin(t * (.35 + hash(i, 2, 8) * .35) + seed * 3);
-        (sprite.material as THREE.SpriteMaterial).opacity = sporeOpacity(dist, twinkle);
-        sprite.scale.setScalar(.14 + hash(i, 4, 9) * .12);
-        // Survive mode: once the red glow floods the forest, every mote turns ember-red.
         const mat = sprite.material as THREE.SpriteMaterial;
+        // Survive mode: from the red onset every mote is a glowing ember of its own.
+        mat.opacity = Math.min(1, sporeOpacity(dist, twinkle) * (ember ? 1.9 : 1));
+        sprite.scale.setScalar((.14 + hash(i, 4, 9) * .12) * (ember ? 1.25 : 1));
         if (!sprite.userData["baseColor"]) sprite.userData["baseColor"] = mat.color.clone();
-        mat.color.copy(sprite.userData["baseColor"] as THREE.Color).lerp(RED, redMix.current);
+        mat.color.copy(ember ? palette.ember : sprite.userData["baseColor"] as THREE.Color);
       });
     }
-    // Survive mode lighting: the distant lights die shortly after the start,
-    // then a red glow rises behind the runner and flares with every mistake.
-    const survive = s.mode === "survive" && (s.phase === "running" || s.phase === "awakening" || lying);
-    const darkPhase = survive && (s.distance > 10 || lying);
-    if (darkPhase && lightsOut.current < 0) lightsOut.current = s.elapsed;
-    if (!survive) { lightsOut.current = -1; threatStarted.current = false; }
-    if (darkPhase && !threatStarted.current) { threatStarted.current = true; onThreat(); }
-    const redTarget = darkPhase ? (lying ? 1 : .55 + s.threat * .45) : 0;
-    redMix.current += (redTarget - redMix.current) * Math.min(1, raw * 2.5);
+    // Survive sequence: lights die (forest hum dulls), a dark tense moment,
+    // then the threat sound and the red pursuer light arrive together.
+    const stage = surviveStage(s);
+    if (stage !== stageRef.current) {
+      if (stage === "dying") onDark();
+      if (stage === "red") onThreat();
+      stageRef.current = stage;
+    }
+    const redOn = stage === "red";
+    const redGoal = redOn ? (lying ? 1 : .8 + s.threat * .2) : 0;
+    // Fast attack so the flood hits on the sound; gentle settle afterwards.
+    redMix.current += (redGoal - redMix.current) * Math.min(1, raw * (redGoal > redMix.current ? 9 : 2.5));
+    const behindX = Math.sin(s.heading), behindZ = Math.cos(s.heading);
     if (redLight.current) {
-      redLight.current.position.set(s.x + Math.sin(s.heading) * 7, groundHeight(s.x, s.z) + 3.2, s.z + Math.cos(s.heading) * 7);
-      redLight.current.intensity = redMix.current * (lying ? 60 : 26 + s.threat * 40);
+      redLight.current.position.set(s.x + behindX * 5, groundHeight(s.x, s.z) + 3.4, s.z + behindZ * 5);
+      redLight.current.intensity = redMix.current * (lying ? 140 : 95 + s.threat * 90);
+    }
+    if (redFlood.current) {
+      // A searchlight from behind: every face turned toward the runner glows red.
+      redFlood.current.position.set(s.x + behindX * 30, groundHeight(s.x, s.z) + 9, s.z + behindZ * 30);
+      redTarget.position.set(s.x - behindX * 20, groundHeight(s.x, s.z) + 1, s.z - behindZ * 20);
+      redTarget.updateMatrixWorld();
+      redFlood.current.intensity = redMix.current * (lying ? 3.2 : 2.6 + s.threat * 2.2);
     }
     if (orbs.current) {
       const world = orbWorld.current;
       // Wisps appear only deep into the run, rare and alone — never while one
       // is still drifting ahead or a power is active.
       const live = world.filter(o => o.taken == null);
-      if (s.phase === "running" && s.distance > POWERUP_START && live.length === 0
+      if (s.phase === "running" && s.mode !== "freeroam" && s.distance > POWERUP_START && live.length === 0
           && s.distance - lastOrbSpawn.current > POWERUP_GAP && !s.powerUp) {
         const index = Math.floor(s.distance / POWERUP_GAP);
         const p = placePowerUp(s.x, s.z, index, Math.floor(s.distance));
@@ -529,12 +620,12 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
         if (!core || !aura) return;
         if (!orb) { slot.visible = false; return; }
         slot.visible = true;
-        const orbColor = ORB_COLORS[orb.type];
+        const orbColor = palette[ORB_KEY[orb.type]];
         const coreMat = core.material as THREE.MeshStandardMaterial;
-        if (coreMat.emissive.getHexString() !== new THREE.Color(orbColor).getHexString()) {
-          coreMat.color.set(orbColor);
-          coreMat.emissive.set(orbColor);
-          (aura.material as THREE.SpriteMaterial).color.set(orbColor);
+        if (!coreMat.emissive.equals(orbColor)) {
+          coreMat.color.copy(orbColor);
+          coreMat.emissive.copy(orbColor);
+          (aura.material as THREE.SpriteMaterial).color.copy(orbColor);
         }
         const gy = groundHeight(orb.x, orb.z) + 1.15;
         if (orb.taken != null) {
@@ -542,21 +633,21 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
           const k = Math.min(1, (s.elapsed - orb.taken) / .25);
           core.position.lerp(camera.position, k * .6);
           core.position.y = THREE.MathUtils.lerp(core.position.y, camera.position.y - .35, k);
-          core.scale.setScalar(Math.max(.001, .14 * (1 - k)));
+          core.scale.setScalar(Math.max(.001, .26 * (1 - k)));
           aura.position.copy(core.position);
-          aura.scale.setScalar(Math.max(.001, .9 * (1 - k)));
+          aura.scale.setScalar(Math.max(.001, 1.9 * (1 - k)));
           (aura.material as THREE.SpriteMaterial).opacity = .5 * (1 - k);
           if (k >= 1) { world.splice(world.indexOf(orb), 1); slot.visible = false; }
           return;
         }
         core.position.set(orb.x, gy + Math.sin(t * 1.3 + i * 2) * .08, orb.z);
         core.rotation.y = t * .8;
-        core.scale.setScalar(.14 + Math.sin(t * 2.1 + i) * .015);
+        core.scale.setScalar(.26 + Math.sin(t * 2.1 + i) * .025);
         aura.position.copy(core.position);
-        aura.scale.setScalar(.9 + Math.sin(t * 1.7 + i) * .12);
-        (aura.material as THREE.SpriteMaterial).opacity = .45 + Math.sin(t * 1.7 + i) * .1;
+        aura.scale.setScalar(1.9 + Math.sin(t * 1.7 + i) * .22);
+        (aura.material as THREE.SpriteMaterial).opacity = .6 + Math.sin(t * 1.7 + i) * .12;
         // Left behind or collected by the simulation.
-        if (orb.z > s.z + 6) { world.splice(world.indexOf(orb), 1); slot.visible = false; return; }
+        if ((orb.x - s.x) * Math.sin(s.heading) + (orb.z - s.z) * Math.cos(s.heading) > 6 || s.mode === "freeroam") { world.splice(world.indexOf(orb), 1); slot.visible = false; return; }
         if (collectPowerUp(s, orb)) { orb.taken = s.elapsed; onPowerUp(orb.type); }
       });
       // The moment a power fades, the frame glow and the haptic follow.
@@ -571,6 +662,38 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
       const bMat = branchMat.current;
       if (bMat) { bMat.transparent = ghost; bMat.opacity = ghost ? .3 : 1; }
     }
+    if (ring.current) {
+      // The purple shockwave ring rolls out over the forest floor.
+      const age = s.powerUp === "shockwave" ? s.powerUpTime : 99;
+      const k = Math.min(1, age / .7);
+      ring.current.visible = age < .7;
+      ring.current.position.set(s.x, groundHeight(s.x, s.z) + .15, s.z);
+      ring.current.scale.setScalar(.5 + k * SHOCKWAVE_AHEAD);
+      (ring.current.material as THREE.MeshBasicMaterial).opacity = (1 - k) * .85;
+    }
+    if (secretGroup.current) {
+      const list = secretWorld.current;
+      secretGroup.current.children.forEach((slot, i) => {
+        const secret = list[i];
+        slot.visible = !!secret;
+        if (!secret) return;
+        const found = s.found.includes(secret.id);
+        if (discoverSecret(s, secret)) onSecret(secret);
+        slot.position.set(secret.x, groundHeight(secret.x, secret.z), secret.z);
+        slot.children.forEach((variant, v) => {
+          variant.visible = ["monolith", "ring", "lantern"][v] === secret.type;
+        });
+        const pulse = (found ? 1.4 : 1) * (.8 + Math.sin(t * 1.6 + i) * .2);
+        slot.traverse(o => {
+          if (o instanceof THREE.Sprite) {
+            const base = (o.userData["base"] as number | undefined) ?? (o.userData["base"] = o.material.opacity);
+            o.material.opacity = Math.min(1, base * pulse * (secret.type === "lantern" ? .85 + Math.sin(t * 9 + i) * .15 : 1));
+          }
+        });
+        const ringGroup = slot.children[1];
+        if (ringGroup) ringGroup.rotation.y = t * .25;
+      });
+    }
     if (mist.current) {
       // Low layered mist drifting between the trunks ahead; a few large soft sprites only.
       mist.current.children.forEach((child, i) => {
@@ -583,13 +706,17 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
     }
     if (glow.current) {
       // Behind the fog wall, past every visible trunk. Constant distance keeps the lights unreachable.
-      glow.current.position.set(s.x, groundHeight(s.x, s.z - 42) + 4.2, s.z - 42);
-      // Survive mode: the distant lights stutter and die shortly after the start.
-      const die = lightsOut.current >= 0 ? Math.min(1, (s.elapsed - lightsOut.current) / 1.2) : 0;
-      const flicker = die > 0 && die < 1 ? (Math.sin(s.elapsed * 30) > 0 ? 1 : .15) : 1;
+      const gx = s.x - Math.sin(s.heading) * 42, gz = s.z - Math.cos(s.heading) * 42;
+      glow.current.position.set(gx, groundHeight(gx, gz) + 4.2, gz);
+      glow.current.rotation.y = s.heading;
+      // Survive mode: the distant lights stutter and die one after another.
+      const die = s.mode === "survive" && s.surviveTime >= 0 ? Math.min(1, s.surviveTime / LIGHTS_DIE) : 0;
       glow.current.children.forEach((child, i) => {
         const sprite = child as THREE.Sprite;
-        (sprite.material as THREE.SpriteMaterial).opacity = 1 * (1 - die) * flicker;
+        // Staggered: each light gutters out a little after the previous one.
+        const own = Math.min(1, Math.max(0, die * 1.6 - i * .15));
+        const flick = own > 0 && own < 1 ? (Math.sin(s.elapsed * (26 + i * 7)) > .2 ? 1 : .1) : 1;
+        (sprite.material as THREE.SpriteMaterial).opacity = (1 - own) * flick;
         const high = i > 2;
         sprite.scale.setScalar((high ? 30 : i === 0 ? 24 : 20) * (1 + Math.sin(t * .4 + i) * .08));
         if (high) {
@@ -603,7 +730,64 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
   });
   return <>
     <pointLight ref={lamp} color={palette.lamp} intensity={65} distance={27} decay={1.6} />
-    <pointLight ref={redLight} color="#ff2418" intensity={0} distance={34} decay={1.4} />
+    <pointLight ref={redLight} color={palette.pursuer} intensity={0} distance={70} decay={1.1} />
+    <directionalLight ref={redFlood} color={palette.pursuer} intensity={0} target={redTarget} userData={{ survive: true }} />
+    <primitive object={redTarget} />
+    <mesh ref={ring} rotation-x={-Math.PI / 2} visible={false} renderOrder={2}>
+      <ringGeometry args={[.86, 1, 64]} />
+      <meshBasicMaterial color={palette.shock} transparent opacity={0} blending={THREE.AdditiveBlending} depthWrite={false} side={THREE.DoubleSide} fog={false} />
+    </mesh>
+    <group ref={secretGroup}>
+      {Array.from({ length: SECRET_SLOTS }, (_, i) => (
+        <group key={i} visible={false}>
+          <group>
+            {/* The Silent Monolith: a dark slab with a glowing rune seam. */}
+            <mesh position={[0, 2, 0]} rotation-y={.4}>
+              <boxGeometry args={[1, 4.4, .35]} />
+              <meshStandardMaterial color={palette.rock} roughness={.35} metalness={.2} emissive={palette.secret} emissiveIntensity={.08} />
+            </mesh>
+            <mesh position={[.07, 2.1, .2]} rotation-y={.4}>
+              <boxGeometry args={[.06, 3.2, .02]} />
+              <meshBasicMaterial color={palette.secret} />
+            </mesh>
+            <sprite position={[0, 2.4, 0]} scale={[5, 7, 1]}>
+              <spriteMaterial map={resources.glowTexture} color={palette.secret} transparent opacity={.35} blending={THREE.AdditiveBlending} depthWrite={false} />
+            </sprite>
+          </group>
+          <group>
+            {/* The Fairy Ring: glowing caps circling a patch of moss. */}
+            {Array.from({ length: 11 }, (_, m) => {
+              const a = (m / 11) * Math.PI * 2;
+              return (
+                <group key={m} position={[Math.cos(a) * 2.6, 0, Math.sin(a) * 2.6]}>
+                  <mesh position={[0, .2, 0]} scale={[.16, .1, .16]}>
+                    <sphereGeometry args={[1, 10, 6]} />
+                    <meshBasicMaterial color={palette.green} />
+                  </mesh>
+                  <sprite position={[0, .3, 0]} scale={[.9, .9, 1]}>
+                    <spriteMaterial map={resources.glowTexture} color={palette.green} transparent opacity={.7} blending={THREE.AdditiveBlending} depthWrite={false} />
+                  </sprite>
+                </group>
+              );
+            })}
+          </group>
+          <group>
+            {/* The Lost Lantern: a crooked post with a warm, guttering light. */}
+            <mesh position={[0, .8, 0]} rotation-z={.08}>
+              <cylinderGeometry args={[.05, .07, 1.6, 6]} />
+              <meshStandardMaterial color={palette.trunk} roughness={.9} />
+            </mesh>
+            <mesh position={[.06, 1.7, 0]}>
+              <boxGeometry args={[.24, .3, .24]} />
+              <meshBasicMaterial color={palette.lamp} />
+            </mesh>
+            <sprite position={[.06, 1.7, 0]} scale={[3.2, 3.2, 1]}>
+              <spriteMaterial map={resources.glowTexture} color={palette.lamp} transparent opacity={.75} blending={THREE.AdditiveBlending} depthWrite={false} />
+            </sprite>
+          </group>
+        </group>
+      ))}
+    </group>
     <group ref={orbs}>
       {Array.from({ length: ORB_SLOTS }, (_, i) => (
         <group key={i} visible={false}>
@@ -661,17 +845,17 @@ function World({ simulation, input, palette, onPhase, onImpact, onStumble, onPow
   </>;
 }
 
-function Hud({ simulation }: { simulation: MutableRefObject<Simulation> }) {
+function Hud({ simulation, secrets }: { simulation: MutableRefObject<Simulation>; secrets: number | null }) {
   const [meters, setMeters] = useState(0);
   useEffect(() => {
     const id = window.setInterval(() => setMeters(Math.floor(simulation.current.distance)), 120);
     return () => window.clearInterval(id);
   }, [simulation]);
-  return <div className="forest-hud" aria-live="off">{meters}<small>m</small></div>;
+  return <div className="forest-hud" aria-live="off">{meters}<small>m</small>{secrets != null && <small> · {secrets} secrets</small>}</div>;
 }
 
 
-function DayCycle({ mood, night }: { mood: MutableRefObject<ForestMood>; night: Palette }) {
+function DayCycle({ mood, night, red }: { mood: MutableRefObject<ForestMood>; night: Palette; red: RedRef }) {
   const { scene } = useThree();
   const day = useMemo(() => {
     const st = getComputedStyle(document.documentElement);
@@ -685,12 +869,15 @@ function DayCycle({ mood, night }: { mood: MutableRefObject<ForestMood>; night: 
     // Manual switches glide over ~2 s; auto follows the clock continuously.
     level.current = level.current < 0 ? target : level.current + (target - level.current) * Math.min(1, raw * 1.5);
     const k = level.current;
-    tmp.copy(night.fog).lerp(day.fog, k);
+    // Survive: the pursuer's red soaks the air itself, not just the lit faces.
+    const r = red.current;
+    tmp.copy(night.fog).lerp(day.fog, k).lerp(night.blood, r * .75);
     if (scene.background instanceof THREE.Color) scene.background.copy(tmp);
     if (scene.fog instanceof THREE.Fog) { scene.fog.color.copy(tmp); scene.fog.near = 7 - k * 3; }
     scene.traverse(o => {
-      if (o instanceof THREE.HemisphereLight) { o.color.copy(night.moon).lerp(day.moon, k); o.groundColor.copy(tmp); o.intensity = .85 + k * 1.6; }
-      else if (o instanceof THREE.DirectionalLight) { o.color.copy(night.moon).lerp(day.moon, k); o.intensity = .7 + k * 1.3; }
+      if (o.userData["survive"]) return;
+      if (o instanceof THREE.HemisphereLight) { o.color.copy(night.moon).lerp(day.moon, k).lerp(night.pursuer, r * .8); o.groundColor.copy(tmp).lerp(night.pursuer, r * .55); o.intensity = .85 + k * 1.6 + r * 1.4; }
+      else if (o instanceof THREE.DirectionalLight) { o.color.copy(night.moon).lerp(day.moon, k).lerp(night.pursuer, r * .6); o.intensity = .7 + k * 1.3; }
     });
   });
   return null;
@@ -707,6 +894,9 @@ function buzz(pattern: number | number[]) {
 
 export function ForestRunner() {
   const simulation = useRef(makeSimulation());
+  const red = useRef(0);
+  const [secretToast, setSecretToast] = useState("");
+  const [secretCount, setSecretCount] = useState(0);
   const input = useRef<Input>({ tilt: 0, touch: 0, touchMode: false, neutral: null, angle: 0 });
   const drone = useRef<ForestDrone | null>(null);
   const [phase, setPhase] = useState<Phase>("menu");
@@ -782,7 +972,7 @@ export function ForestRunner() {
         simulation.current.difficulty = stored;
       }
       const storedMode = localStorage.getItem("forest-mode");
-      if (storedMode === "classic" || storedMode === "survive") {
+      if (storedMode === "classic" || storedMode === "survive" || storedMode === "freeroam") {
         setMode(storedMode);
         simulation.current.mode = storedMode;
       }
@@ -804,7 +994,7 @@ export function ForestRunner() {
     if (ctx) {
       const styles = getComputedStyle(document.documentElement);
       const p = {} as Palette;
-      for (const name of ["fog", "moon", "lamp", "green", "purple", "lavender", "lemon", "trunk", "ground", "crown", "rock", "plant"] as const) {
+      for (const name of PALETTE_KEYS) {
         ctx.fillStyle = styles.getPropertyValue(`--forest-${name}`).trim();
         ctx.fillRect(0, 0, 1, 1);
         const data = ctx.getImageData(0, 0, 1, 1).data;
@@ -843,10 +1033,9 @@ export function ForestRunner() {
 
   const onPhase = useCallback((next: Phase, score: number) => {
     setPhase(next);
-    if (next === "menu") setPauseUi("none");
+    if (next === "menu") { setPauseUi("none"); drone.current?.setMuffled(false); }
     if (next === "falling") {
-      // Survive mode: the same sting that announced the red glow closes the run.
-      if (simulation.current.mode === "survive") drone.current?.playThreat();
+      drone.current?.play("end");
       setLast(score);
       setBest(old => Math.max(old, score));
       if (hapticsRef.current) buzz([70, 60, 110, 60, 150]);
@@ -872,7 +1061,21 @@ export function ForestRunner() {
     if (hapticsRef.current) buzz(25);
   }, []);
   const onThreat = useCallback(() => {
-    drone.current?.playThreat();
+    drone.current?.play("threat");
+    if (hapticsRef.current) buzz([40, 40, 90]);
+  }, []);
+  const onDark = useCallback(() => {
+    drone.current?.setMuffled(true);
+  }, []);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onSecret = useCallback((secret: Secret) => {
+    const found = simulation.current.found;
+    setSecretCount(found.length);
+    setSecretToast(`Secret found: ${SECRET_NAMES[secret.type]}`);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setSecretToast(""), 3200);
+    if (hapticsRef.current) buzz([30, 50, 30, 50, 80]);
+    try { localStorage.setItem("forest-secrets", JSON.stringify(found)); } catch { /* Local storage may be disabled. */ }
   }, []);
 
   const start = async () => {
@@ -899,6 +1102,15 @@ export function ForestRunner() {
     }
     input.current.touch = 0;
     beginRun(simulation.current);
+    // Secrets stay discovered across freeroam walks on this device.
+    try {
+      const saved: unknown = JSON.parse(localStorage.getItem("forest-secrets") ?? "[]");
+      if (Array.isArray(saved)) simulation.current.found = saved.filter((v): v is string => typeof v === "string");
+    } catch { /* Local storage may be disabled. */ }
+    setSecretCount(simulation.current.found.length);
+    red.current = 0;
+    drone.current?.setMuffled(false);
+    drone.current?.play("start");
     setPhase("awakening");
   };
   const toggleSound = () => {
@@ -958,9 +1170,10 @@ export function ForestRunner() {
               </div>
               <div className="forest-row">
                 <span>Mode</span>
-                <div className="forest-seg">
+                <div className="forest-seg forest-seg-three">
                   <button className={mode === "classic" ? "on" : ""} onClick={() => changeMode("classic")}>Classic</button>
                   <button className={mode === "survive" ? "on" : ""} onClick={() => changeMode("survive")}>Survive</button>
+                  <button className={mode === "freeroam" ? "on" : ""} onClick={() => changeMode("freeroam")}>Freeroam</button>
                 </div>
               </div>
               <div className="forest-row">
@@ -1046,11 +1259,12 @@ export function ForestRunner() {
       <fog attach="fog" args={[palette.fog, 7, FOG_END]} />
       <hemisphereLight args={[palette.moon, palette.fog, .85]} />
       <directionalLight position={[0, 24, -20]} color={palette.moon} intensity={.7} />
-      <World simulation={simulation} input={input} palette={palette} onPhase={onPhase} onImpact={onImpact} onStumble={onStumble} onPowerUp={onPowerUp} onPowerUpEnd={onPowerUpEnd} onThreat={onThreat} />
+      <World simulation={simulation} input={input} palette={palette} red={red} onDark={onDark} onSecret={onSecret} onPhase={onPhase} onImpact={onImpact} onStumble={onStumble} onPowerUp={onPowerUp} onPowerUpEnd={onPowerUpEnd} onThreat={onThreat} />
       <ForestEffects simulation={simulation} />
-      <DayCycle mood={moodRef} night={palette} />
+      <DayCycle mood={moodRef} night={palette} red={red} />
     </Canvas>}
-    {(phase === "running" || phase === "awakening" || phase === "falling") && <Hud simulation={simulation} />}
+    {(phase === "running" || phase === "awakening" || phase === "falling") && <Hud simulation={simulation} secrets={mode === "freeroam" ? secretCount : null} />}
+    {secretToast && phase === "running" && <div className="forest-secret-toast" role="status">{secretToast}</div>}
     {activePower && <div className="forest-power-glow" data-type={activePower} aria-hidden />}
     {(phase === "running" || phase === "awakening") && pauseUi === "none" && (
       <button className="forest-pause" data-forest-ui onClick={pauseRun} aria-label="Pause"><Pause size={18} /></button>
