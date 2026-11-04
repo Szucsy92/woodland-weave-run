@@ -5,7 +5,7 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
-import { EXIT_TIME, IMPACT_DURATION, PAUSE_SLOW, RESUME_TIME, type Simulation } from "@/lib/forest/simulation";
+import { DARK_PAUSE, EXIT_TIME, IMPACT_DURATION, LIGHTS_DIE, PAUSE_SLOW, POWERUP_DURATION, RESUME_TIME, SHOCKWAVE_DISSOLVE, type Simulation } from "@/lib/forest/simulation";
 
 export function ForestEffects({ simulation }: { simulation: MutableRefObject<Simulation> }) {
   const { gl, scene, camera, size } = useThree();
@@ -64,6 +64,20 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
     const arrive = s.phase === "menu" ? Math.max(0, 1 - s.phaseTime / .9) * 2.9 : 0;
     effect.uniforms["blur"]!.value = Math.max(effect.uniforms["blur"]!.value + arrive, pb);
     effect.uniforms["glitch"]!.value += pg + arrive * .15;
+    // Power-ups: a glitch surge on pickup, a faint shimmer while active and a
+    // last flutter as the effect fades; the shockwave tears hardest.
+    if (s.powerUp) {
+      const a = s.powerUpTime, left = POWERUP_DURATION - a;
+      const surge = a < .5 ? Math.sin((a / .5) * Math.PI) * .7 : 0;
+      const tear = s.powerUp === "shockwave" && a < SHOCKWAVE_DISSOLVE ? Math.pow(Math.max(0, Math.sin(a * 31)), 3) * .9 * (1 - a / SHOCKWAVE_DISSOLVE) : 0;
+      const fade = left < .6 ? Math.sin((left / .6) * Math.PI) * .45 : 0;
+      effect.uniforms["glitch"]!.value += surge + tear + fade + .05;
+    }
+    // Survive: the red onset hits with a short violent tear.
+    if (s.mode === "survive" && s.surviveTime >= 0) {
+      const r = s.surviveTime - LIGHTS_DIE - DARK_PAUSE;
+      if (r >= 0 && r < .45) effect.uniforms["glitch"]!.value += Math.sin((r / .45) * Math.PI) * 1.1;
+    }
     effect.uniforms["time"]!.value = s.elapsed + s.pauseTime;
     composer.render(delta);
   }, 1);
