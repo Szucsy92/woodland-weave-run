@@ -876,7 +876,7 @@ function DayCycle({ mood, night, red }: { mood: MutableRefObject<ForestMood>; ni
     if (scene.fog instanceof THREE.Fog) { scene.fog.color.copy(tmp); scene.fog.near = 7 - k * 3; }
     scene.traverse(o => {
       if (o.userData["survive"]) return;
-      if (o instanceof THREE.HemisphereLight) { o.color.copy(night.moon).lerp(day.moon, k).lerp(night.pursuer, r * .8); o.groundColor.copy(tmp); o.intensity = .85 + k * 1.6 + r * .9; }
+      if (o instanceof THREE.HemisphereLight) { o.color.copy(night.moon).lerp(day.moon, k).lerp(night.pursuer, r * .8); o.groundColor.copy(tmp).lerp(night.pursuer, r * .55); o.intensity = .85 + k * 1.6 + r * 1.4; }
       else if (o instanceof THREE.DirectionalLight) { o.color.copy(night.moon).lerp(day.moon, k).lerp(night.pursuer, r * .6); o.intensity = .7 + k * 1.3; }
     });
   });
