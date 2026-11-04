@@ -550,46 +550,64 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
           world.push(placeSpore(s.x, s.z, i, 0, true));
         }
       }
+      const sh = Math.sin(s.heading), ch = Math.cos(s.heading);
+      const ember = surviveStage(s) === "red";
       spores.current.children.forEach((child, i) => {
         const sprite = child as THREE.Sprite;
         const seed = i * 7.13;
         const spore = world[i];
         if (!spore) return;
-        if (spore.z > s.z + 18 || Math.abs(spore.x - s.x) > 55) {
-          Object.assign(spore, placeSpore(s.x, s.z, i, Math.floor(s.distance)));
+        // Recycle relative to the facing direction, so freeroam works any way round.
+        const wx = spore.x - s.x, wz = spore.z - s.z;
+        const side = wx * ch - wz * sh, back = wx * sh + wz * ch;
+        if (back > 18 || Math.abs(side) > 55) {
+          const fresh = placeSpore(s.x, s.z, i, Math.floor(s.distance));
+          const dx = fresh.x - s.x, dz = fresh.z - s.z;
+          Object.assign(spore, { x: s.x + dx * ch + dz * sh, z: s.z - dx * sh + dz * ch, h: fresh.h });
         }
         const mx = spore.x + Math.sin(t * .23 + seed * 2) * .6;
         const mz = spore.z + Math.cos(t * .19 + seed) * .6;
         sprite.position.set(mx, groundHeight(mx, mz) + spore.h + Math.sin(t * .5 + seed) * .25, mz);
         const dist = Math.hypot(mx - s.x, mz - s.z);
         const twinkle = .5 + .5 * Math.sin(t * (.35 + hash(i, 2, 8) * .35) + seed * 3);
-        (sprite.material as THREE.SpriteMaterial).opacity = sporeOpacity(dist, twinkle);
-        sprite.scale.setScalar(.14 + hash(i, 4, 9) * .12);
-        // Survive mode: once the red glow floods the forest, every mote turns ember-red.
         const mat = sprite.material as THREE.SpriteMaterial;
+        // Survive mode: from the red onset every mote is a glowing ember of its own.
+        mat.opacity = Math.min(1, sporeOpacity(dist, twinkle) * (ember ? 1.9 : 1));
+        sprite.scale.setScalar((.14 + hash(i, 4, 9) * .12) * (ember ? 1.25 : 1));
         if (!sprite.userData["baseColor"]) sprite.userData["baseColor"] = mat.color.clone();
-        mat.color.copy(sprite.userData["baseColor"] as THREE.Color).lerp(RED, redMix.current);
+        mat.color.copy(ember ? palette.ember : sprite.userData["baseColor"] as THREE.Color);
       });
     }
-    // Survive mode lighting: the distant lights die shortly after the start,
-    // then a red glow rises behind the runner and flares with every mistake.
-    const survive = s.mode === "survive" && (s.phase === "running" || s.phase === "awakening" || lying);
-    const darkPhase = survive && (s.distance > 10 || lying);
-    if (darkPhase && lightsOut.current < 0) lightsOut.current = s.elapsed;
-    if (!survive) { lightsOut.current = -1; threatStarted.current = false; }
-    if (darkPhase && !threatStarted.current) { threatStarted.current = true; onThreat(); }
-    const redTarget = darkPhase ? (lying ? 1 : .55 + s.threat * .45) : 0;
-    redMix.current += (redTarget - redMix.current) * Math.min(1, raw * 2.5);
+    // Survive sequence: lights die (forest hum dulls), a dark tense moment,
+    // then the threat sound and the red pursuer light arrive together.
+    const stage = surviveStage(s);
+    if (stage !== stageRef.current) {
+      if (stage === "dying") onDark();
+      if (stage === "red") onThreat();
+      stageRef.current = stage;
+    }
+    const redOn = stage === "red";
+    const redGoal = redOn ? (lying ? 1 : .8 + s.threat * .2) : 0;
+    // Fast attack so the flood hits on the sound; gentle settle afterwards.
+    redMix.current += (redGoal - redMix.current) * Math.min(1, raw * (redGoal > redMix.current ? 9 : 2.5));
+    const behindX = Math.sin(s.heading), behindZ = Math.cos(s.heading);
     if (redLight.current) {
-      redLight.current.position.set(s.x + Math.sin(s.heading) * 7, groundHeight(s.x, s.z) + 3.2, s.z + Math.cos(s.heading) * 7);
-      redLight.current.intensity = redMix.current * (lying ? 60 : 26 + s.threat * 40);
+      redLight.current.position.set(s.x + behindX * 5, groundHeight(s.x, s.z) + 3.4, s.z + behindZ * 5);
+      redLight.current.intensity = redMix.current * (lying ? 140 : 95 + s.threat * 90);
+    }
+    if (redFlood.current) {
+      // A searchlight from behind: every face turned toward the runner glows red.
+      redFlood.current.position.set(s.x + behindX * 30, groundHeight(s.x, s.z) + 9, s.z + behindZ * 30);
+      redTarget.position.set(s.x - behindX * 20, groundHeight(s.x, s.z) + 1, s.z - behindZ * 20);
+      redTarget.updateMatrixWorld();
+      redFlood.current.intensity = redMix.current * (lying ? 3.2 : 2.6 + s.threat * 2.2);
     }
     if (orbs.current) {
       const world = orbWorld.current;
       // Wisps appear only deep into the run, rare and alone — never while one
       // is still drifting ahead or a power is active.
       const live = world.filter(o => o.taken == null);
-      if (s.phase === "running" && s.distance > POWERUP_START && live.length === 0
+      if (s.phase === "running" && s.mode !== "freeroam" && s.distance > POWERUP_START && live.length === 0
           && s.distance - lastOrbSpawn.current > POWERUP_GAP && !s.powerUp) {
         const index = Math.floor(s.distance / POWERUP_GAP);
         const p = placePowerUp(s.x, s.z, index, Math.floor(s.distance));
@@ -602,12 +620,12 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
         if (!core || !aura) return;
         if (!orb) { slot.visible = false; return; }
         slot.visible = true;
-        const orbColor = ORB_COLORS[orb.type];
+        const orbColor = palette[ORB_KEY[orb.type]];
         const coreMat = core.material as THREE.MeshStandardMaterial;
-        if (coreMat.emissive.getHexString() !== new THREE.Color(orbColor).getHexString()) {
-          coreMat.color.set(orbColor);
-          coreMat.emissive.set(orbColor);
-          (aura.material as THREE.SpriteMaterial).color.set(orbColor);
+        if (!coreMat.emissive.equals(orbColor)) {
+          coreMat.color.copy(orbColor);
+          coreMat.emissive.copy(orbColor);
+          (aura.material as THREE.SpriteMaterial).color.copy(orbColor);
         }
         const gy = groundHeight(orb.x, orb.z) + 1.15;
         if (orb.taken != null) {
@@ -615,21 +633,21 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
           const k = Math.min(1, (s.elapsed - orb.taken) / .25);
           core.position.lerp(camera.position, k * .6);
           core.position.y = THREE.MathUtils.lerp(core.position.y, camera.position.y - .35, k);
-          core.scale.setScalar(Math.max(.001, .14 * (1 - k)));
+          core.scale.setScalar(Math.max(.001, .26 * (1 - k)));
           aura.position.copy(core.position);
-          aura.scale.setScalar(Math.max(.001, .9 * (1 - k)));
+          aura.scale.setScalar(Math.max(.001, 1.9 * (1 - k)));
           (aura.material as THREE.SpriteMaterial).opacity = .5 * (1 - k);
           if (k >= 1) { world.splice(world.indexOf(orb), 1); slot.visible = false; }
           return;
         }
         core.position.set(orb.x, gy + Math.sin(t * 1.3 + i * 2) * .08, orb.z);
         core.rotation.y = t * .8;
-        core.scale.setScalar(.14 + Math.sin(t * 2.1 + i) * .015);
+        core.scale.setScalar(.26 + Math.sin(t * 2.1 + i) * .025);
         aura.position.copy(core.position);
-        aura.scale.setScalar(.9 + Math.sin(t * 1.7 + i) * .12);
-        (aura.material as THREE.SpriteMaterial).opacity = .45 + Math.sin(t * 1.7 + i) * .1;
+        aura.scale.setScalar(1.9 + Math.sin(t * 1.7 + i) * .22);
+        (aura.material as THREE.SpriteMaterial).opacity = .6 + Math.sin(t * 1.7 + i) * .12;
         // Left behind or collected by the simulation.
-        if (orb.z > s.z + 6) { world.splice(world.indexOf(orb), 1); slot.visible = false; return; }
+        if ((orb.x - s.x) * Math.sin(s.heading) + (orb.z - s.z) * Math.cos(s.heading) > 6 || s.mode === "freeroam") { world.splice(world.indexOf(orb), 1); slot.visible = false; return; }
         if (collectPowerUp(s, orb)) { orb.taken = s.elapsed; onPowerUp(orb.type); }
       });
       // The moment a power fades, the frame glow and the haptic follow.
@@ -644,6 +662,38 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
       const bMat = branchMat.current;
       if (bMat) { bMat.transparent = ghost; bMat.opacity = ghost ? .3 : 1; }
     }
+    if (ring.current) {
+      // The purple shockwave ring rolls out over the forest floor.
+      const age = s.powerUp === "shockwave" ? s.powerUpTime : 99;
+      const k = Math.min(1, age / .7);
+      ring.current.visible = age < .7;
+      ring.current.position.set(s.x, groundHeight(s.x, s.z) + .15, s.z);
+      ring.current.scale.setScalar(.5 + k * SHOCKWAVE_AHEAD);
+      (ring.current.material as THREE.MeshBasicMaterial).opacity = (1 - k) * .85;
+    }
+    if (secretGroup.current) {
+      const list = secretWorld.current;
+      secretGroup.current.children.forEach((slot, i) => {
+        const secret = list[i];
+        slot.visible = !!secret;
+        if (!secret) return;
+        const found = s.found.includes(secret.id);
+        if (discoverSecret(s, secret)) onSecret(secret);
+        slot.position.set(secret.x, groundHeight(secret.x, secret.z), secret.z);
+        slot.children.forEach((variant, v) => {
+          variant.visible = ["monolith", "ring", "lantern"][v] === secret.type;
+        });
+        const pulse = (found ? 1.4 : 1) * (.8 + Math.sin(t * 1.6 + i) * .2);
+        slot.traverse(o => {
+          if (o instanceof THREE.Sprite) {
+            const base = (o.userData["base"] as number | undefined) ?? (o.userData["base"] = o.material.opacity);
+            o.material.opacity = Math.min(1, base * pulse * (secret.type === "lantern" ? .85 + Math.sin(t * 9 + i) * .15 : 1));
+          }
+        });
+        const ringGroup = slot.children[1];
+        if (ringGroup) ringGroup.rotation.y = t * .25;
+      });
+    }
     if (mist.current) {
       // Low layered mist drifting between the trunks ahead; a few large soft sprites only.
       mist.current.children.forEach((child, i) => {
@@ -656,13 +706,18 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
     }
     if (glow.current) {
       // Behind the fog wall, past every visible trunk. Constant distance keeps the lights unreachable.
-      glow.current.position.set(s.x, groundHeight(s.x, s.z - 42) + 4.2, s.z - 42);
-      // Survive mode: the distant lights stutter and die shortly after the start.
-      const die = lightsOut.current >= 0 ? Math.min(1, (s.elapsed - lightsOut.current) / 1.2) : 0;
+      const gx = s.x - Math.sin(s.heading) * 42, gz = s.z - Math.cos(s.heading) * 42;
+      glow.current.position.set(gx, groundHeight(gx, gz) + 4.2, gz);
+      glow.current.rotation.y = s.heading;
+      // Survive mode: the distant lights stutter and die one after another.
+      const die = s.mode === "survive" && s.surviveTime >= 0 ? Math.min(1, s.surviveTime / LIGHTS_DIE) : 0;
       const flicker = die > 0 && die < 1 ? (Math.sin(s.elapsed * 30) > 0 ? 1 : .15) : 1;
       glow.current.children.forEach((child, i) => {
         const sprite = child as THREE.Sprite;
-        (sprite.material as THREE.SpriteMaterial).opacity = 1 * (1 - die) * flicker;
+        // Staggered: each light gutters out a little after the previous one.
+        const own = Math.min(1, Math.max(0, die * 1.6 - i * .15));
+        const flick = own > 0 && own < 1 ? (Math.sin(s.elapsed * (26 + i * 7)) > .2 ? 1 : .1) : 1;
+        (sprite.material as THREE.SpriteMaterial).opacity = (1 - own) * flick * (flicker > 0 ? 1 : 1);
         const high = i > 2;
         sprite.scale.setScalar((high ? 30 : i === 0 ? 24 : 20) * (1 + Math.sin(t * .4 + i) * .08));
         if (high) {
@@ -676,7 +731,64 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
   });
   return <>
     <pointLight ref={lamp} color={palette.lamp} intensity={65} distance={27} decay={1.6} />
-    <pointLight ref={redLight} color="#ff2418" intensity={0} distance={34} decay={1.4} />
+    <pointLight ref={redLight} color={palette.pursuer} intensity={0} distance={70} decay={1.1} />
+    <directionalLight ref={redFlood} color={palette.pursuer} intensity={0} target={redTarget} userData={{ survive: true }} />
+    <primitive object={redTarget} />
+    <mesh ref={ring} rotation-x={-Math.PI / 2} visible={false} renderOrder={2}>
+      <ringGeometry args={[.86, 1, 64]} />
+      <meshBasicMaterial color={palette.shock} transparent opacity={0} blending={THREE.AdditiveBlending} depthWrite={false} side={THREE.DoubleSide} fog={false} />
+    </mesh>
+    <group ref={secretGroup}>
+      {Array.from({ length: SECRET_SLOTS }, (_, i) => (
+        <group key={i} visible={false}>
+          <group>
+            {/* The Silent Monolith: a dark slab with a glowing rune seam. */}
+            <mesh position={[0, 2, 0]} rotation-y={.4}>
+              <boxGeometry args={[1, 4.4, .35]} />
+              <meshStandardMaterial color={palette.rock} roughness={.35} metalness={.2} emissive={palette.secret} emissiveIntensity={.08} />
+            </mesh>
+            <mesh position={[.07, 2.1, .2]} rotation-y={.4}>
+              <boxGeometry args={[.06, 3.2, .02]} />
+              <meshBasicMaterial color={palette.secret} />
+            </mesh>
+            <sprite position={[0, 2.4, 0]} scale={[5, 7, 1]}>
+              <spriteMaterial map={resources.glowTexture} color={palette.secret} transparent opacity={.35} blending={THREE.AdditiveBlending} depthWrite={false} />
+            </sprite>
+          </group>
+          <group>
+            {/* The Fairy Ring: glowing caps circling a patch of moss. */}
+            {Array.from({ length: 11 }, (_, m) => {
+              const a = (m / 11) * Math.PI * 2;
+              return (
+                <group key={m} position={[Math.cos(a) * 2.6, 0, Math.sin(a) * 2.6]}>
+                  <mesh position={[0, .2, 0]} scale={[.16, .1, .16]}>
+                    <sphereGeometry args={[1, 10, 6]} />
+                    <meshBasicMaterial color={palette.green} />
+                  </mesh>
+                  <sprite position={[0, .3, 0]} scale={[.9, .9, 1]}>
+                    <spriteMaterial map={resources.glowTexture} color={palette.green} transparent opacity={.7} blending={THREE.AdditiveBlending} depthWrite={false} />
+                  </sprite>
+                </group>
+              );
+            })}
+          </group>
+          <group>
+            {/* The Lost Lantern: a crooked post with a warm, guttering light. */}
+            <mesh position={[0, .8, 0]} rotation-z={.08}>
+              <cylinderGeometry args={[.05, .07, 1.6, 6]} />
+              <meshStandardMaterial color={palette.trunk} roughness={.9} />
+            </mesh>
+            <mesh position={[.06, 1.7, 0]}>
+              <boxGeometry args={[.24, .3, .24]} />
+              <meshBasicMaterial color={palette.lamp} />
+            </mesh>
+            <sprite position={[.06, 1.7, 0]} scale={[3.2, 3.2, 1]}>
+              <spriteMaterial map={resources.glowTexture} color={palette.lamp} transparent opacity={.75} blending={THREE.AdditiveBlending} depthWrite={false} />
+            </sprite>
+          </group>
+        </group>
+      ))}
+    </group>
     <group ref={orbs}>
       {Array.from({ length: ORB_SLOTS }, (_, i) => (
         <group key={i} visible={false}>
