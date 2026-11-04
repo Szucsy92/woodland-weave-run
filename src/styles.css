@@ -71,6 +71,8 @@
   --forest-lemon: #f6ff4f;
   --forest-trunk: #b8a58c;
   --forest-ground: #9aa896; --forest-crown: #17251c; --forest-rock: #3a4048; --forest-plant: #22301f;
+  --forest-ember: #ff2a1a; --forest-pursuer: #ff1e10; --forest-blood: #3a0605;
+  --forest-freezer: #2b6cff; --forest-ghost: #2ee88a; --forest-shock: #b04dff; --forest-secret: #7fe8d8;
   --forest-launch: #282828;
   --forest-day-fog: #8f9b98; --forest-day-moon: #dfe6e2;
   --forest-glass: oklch(0.36 0.009 290 / 0.3);
@@ -205,9 +207,10 @@ html, body { margin: 0; min-height: 100%; overscroll-behavior: none; }
   z-index: 5;
   animation: forest-power-pulse 1.6s ease-in-out infinite;
 }
-.forest-power-glow[data-type="freezer"] { box-shadow: inset 0 0 70px 20px rgb(180 220 255 / 0.35); }
-.forest-power-glow[data-type="ghost"] { box-shadow: inset 0 0 70px 20px rgb(125 255 168 / 0.32); }
-.forest-power-glow[data-type="shockwave"] { box-shadow: inset 0 0 70px 20px rgb(180 107 255 / 0.4); }
+.forest-power-glow[data-type="freezer"] { box-shadow: inset 0 0 80px 24px color-mix(in srgb, var(--forest-freezer) 55%, transparent); }
+.forest-power-glow[data-type="ghost"] { box-shadow: inset 0 0 80px 24px color-mix(in srgb, var(--forest-ghost) 42%, transparent); }
+.forest-power-glow[data-type="shockwave"] { box-shadow: inset 0 0 80px 24px color-mix(in srgb, var(--forest-shock) 50%, transparent); }
+.forest-secret-toast { position: absolute; top: max(52px, calc(env(safe-area-inset-top) + 44px)); left: 50%; transform: translateX(-50%); padding: 7px 14px; border-radius: 8px; background: var(--forest-glass); border: 1px solid var(--forest-edge); backdrop-filter: blur(12px); color: var(--forest-text); font-size: 12px; letter-spacing: .06em; pointer-events: none; animation: forest-arrive 0.9s ease both; }
 @keyframes forest-power-pulse {
   0%, 100% { opacity: .55; }
   50% { opacity: 1; }
