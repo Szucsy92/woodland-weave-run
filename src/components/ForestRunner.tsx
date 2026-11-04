@@ -845,17 +845,17 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
   </>;
 }
 
-function Hud({ simulation }: { simulation: MutableRefObject<Simulation> }) {
+function Hud({ simulation, secrets }: { simulation: MutableRefObject<Simulation>; secrets: number | null }) {
   const [meters, setMeters] = useState(0);
   useEffect(() => {
     const id = window.setInterval(() => setMeters(Math.floor(simulation.current.distance)), 120);
     return () => window.clearInterval(id);
   }, [simulation]);
-  return <div className="forest-hud" aria-live="off">{meters}<small>m</small></div>;
+  return <div className="forest-hud" aria-live="off">{meters}<small>m</small>{secrets != null && <small> · {secrets} secrets</small>}</div>;
 }
 
 
-function DayCycle({ mood, night }: { mood: MutableRefObject<ForestMood>; night: Palette }) {
+function DayCycle({ mood, night, red }: { mood: MutableRefObject<ForestMood>; night: Palette; red: RedRef }) {
   const { scene } = useThree();
   const day = useMemo(() => {
     const st = getComputedStyle(document.documentElement);
@@ -869,12 +869,15 @@ function DayCycle({ mood, night }: { mood: MutableRefObject<ForestMood>; night: 
     // Manual switches glide over ~2 s; auto follows the clock continuously.
     level.current = level.current < 0 ? target : level.current + (target - level.current) * Math.min(1, raw * 1.5);
     const k = level.current;
-    tmp.copy(night.fog).lerp(day.fog, k);
+    // Survive: the pursuer's red soaks the air itself, not just the lit faces.
+    const r = red.current;
+    tmp.copy(night.fog).lerp(day.fog, k).lerp(night.blood, r * .75);
     if (scene.background instanceof THREE.Color) scene.background.copy(tmp);
     if (scene.fog instanceof THREE.Fog) { scene.fog.color.copy(tmp); scene.fog.near = 7 - k * 3; }
     scene.traverse(o => {
-      if (o instanceof THREE.HemisphereLight) { o.color.copy(night.moon).lerp(day.moon, k); o.groundColor.copy(tmp); o.intensity = .85 + k * 1.6; }
-      else if (o instanceof THREE.DirectionalLight) { o.color.copy(night.moon).lerp(day.moon, k); o.intensity = .7 + k * 1.3; }
+      if (o.userData["survive"]) return;
+      if (o instanceof THREE.HemisphereLight) { o.color.copy(night.moon).lerp(day.moon, k).lerp(night.pursuer, r * .8); o.groundColor.copy(tmp); o.intensity = .85 + k * 1.6 + r * .9; }
+      else if (o instanceof THREE.DirectionalLight) { o.color.copy(night.moon).lerp(day.moon, k).lerp(night.pursuer, r * .6); o.intensity = .7 + k * 1.3; }
     });
   });
   return null;
@@ -891,6 +894,9 @@ function buzz(pattern: number | number[]) {
 
 export function ForestRunner() {
   const simulation = useRef(makeSimulation());
+  const red = useRef(0);
+  const [secretToast, setSecretToast] = useState("");
+  const [secretCount, setSecretCount] = useState(0);
   const input = useRef<Input>({ tilt: 0, touch: 0, touchMode: false, neutral: null, angle: 0 });
   const drone = useRef<ForestDrone | null>(null);
   const [phase, setPhase] = useState<Phase>("menu");
@@ -966,7 +972,7 @@ export function ForestRunner() {
         simulation.current.difficulty = stored;
       }
       const storedMode = localStorage.getItem("forest-mode");
-      if (storedMode === "classic" || storedMode === "survive") {
+      if (storedMode === "classic" || storedMode === "survive" || storedMode === "freeroam") {
         setMode(storedMode);
         simulation.current.mode = storedMode;
       }
@@ -988,7 +994,7 @@ export function ForestRunner() {
     if (ctx) {
       const styles = getComputedStyle(document.documentElement);
       const p = {} as Palette;
-      for (const name of ["fog", "moon", "lamp", "green", "purple", "lavender", "lemon", "trunk", "ground", "crown", "rock", "plant"] as const) {
+      for (const name of PALETTE_KEYS) {
         ctx.fillStyle = styles.getPropertyValue(`--forest-${name}`).trim();
         ctx.fillRect(0, 0, 1, 1);
         const data = ctx.getImageData(0, 0, 1, 1).data;
@@ -1027,10 +1033,9 @@ export function ForestRunner() {
 
   const onPhase = useCallback((next: Phase, score: number) => {
     setPhase(next);
-    if (next === "menu") setPauseUi("none");
+    if (next === "menu") { setPauseUi("none"); drone.current?.setMuffled(false); }
     if (next === "falling") {
-      // Survive mode: the same sting that announced the red glow closes the run.
-      if (simulation.current.mode === "survive") drone.current?.playThreat();
+      drone.current?.play("end");
       setLast(score);
       setBest(old => Math.max(old, score));
       if (hapticsRef.current) buzz([70, 60, 110, 60, 150]);
@@ -1056,7 +1061,21 @@ export function ForestRunner() {
     if (hapticsRef.current) buzz(25);
   }, []);
   const onThreat = useCallback(() => {
-    drone.current?.playThreat();
+    drone.current?.play("threat");
+    if (hapticsRef.current) buzz([40, 40, 90]);
+  }, []);
+  const onDark = useCallback(() => {
+    drone.current?.setMuffled(true);
+  }, []);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onSecret = useCallback((secret: Secret) => {
+    const found = simulation.current.found;
+    setSecretCount(found.length);
+    setSecretToast(`Secret found: ${SECRET_NAMES[secret.type]}`);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setSecretToast(""), 3200);
+    if (hapticsRef.current) buzz([30, 50, 30, 50, 80]);
+    try { localStorage.setItem("forest-secrets", JSON.stringify(found)); } catch { /* Local storage may be disabled. */ }
   }, []);
 
   const start = async () => {
@@ -1083,6 +1102,15 @@ export function ForestRunner() {
     }
     input.current.touch = 0;
     beginRun(simulation.current);
+    // Secrets stay discovered across freeroam walks on this device.
+    try {
+      const saved: unknown = JSON.parse(localStorage.getItem("forest-secrets") ?? "[]");
+      if (Array.isArray(saved)) simulation.current.found = saved.filter((v): v is string => typeof v === "string");
+    } catch { /* Local storage may be disabled. */ }
+    setSecretCount(simulation.current.found.length);
+    red.current = 0;
+    drone.current?.setMuffled(false);
+    drone.current?.play("start");
     setPhase("awakening");
   };
   const toggleSound = () => {
@@ -1142,9 +1170,10 @@ export function ForestRunner() {
               </div>
               <div className="forest-row">
                 <span>Mode</span>
-                <div className="forest-seg">
+                <div className="forest-seg forest-seg-three">
                   <button className={mode === "classic" ? "on" : ""} onClick={() => changeMode("classic")}>Classic</button>
                   <button className={mode === "survive" ? "on" : ""} onClick={() => changeMode("survive")}>Survive</button>
+                  <button className={mode === "freeroam" ? "on" : ""} onClick={() => changeMode("freeroam")}>Freeroam</button>
                 </div>
               </div>
               <div className="forest-row">
@@ -1230,11 +1259,12 @@ export function ForestRunner() {
       <fog attach="fog" args={[palette.fog, 7, FOG_END]} />
       <hemisphereLight args={[palette.moon, palette.fog, .85]} />
       <directionalLight position={[0, 24, -20]} color={palette.moon} intensity={.7} />
-      <World simulation={simulation} input={input} palette={palette} onPhase={onPhase} onImpact={onImpact} onStumble={onStumble} onPowerUp={onPowerUp} onPowerUpEnd={onPowerUpEnd} onThreat={onThreat} />
+      <World simulation={simulation} input={input} palette={palette} red={red} onDark={onDark} onSecret={onSecret} onPhase={onPhase} onImpact={onImpact} onStumble={onStumble} onPowerUp={onPowerUp} onPowerUpEnd={onPowerUpEnd} onThreat={onThreat} />
       <ForestEffects simulation={simulation} />
-      <DayCycle mood={moodRef} night={palette} />
+      <DayCycle mood={moodRef} night={palette} red={red} />
     </Canvas>}
-    {(phase === "running" || phase === "awakening" || phase === "falling") && <Hud simulation={simulation} />}
+    {(phase === "running" || phase === "awakening" || phase === "falling") && <Hud simulation={simulation} secrets={mode === "freeroam" ? secretCount : null} />}
+    {secretToast && phase === "running" && <div className="forest-secret-toast" role="status">{secretToast}</div>}
     {activePower && <div className="forest-power-glow" data-type={activePower} aria-hidden />}
     {(phase === "running" || phase === "awakening") && pauseUi === "none" && (
       <button className="forest-pause" data-forest-ui onClick={pauseRun} aria-label="Pause"><Pause size={18} /></button>
