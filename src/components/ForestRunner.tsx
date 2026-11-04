@@ -711,13 +711,12 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
       glow.current.rotation.y = s.heading;
       // Survive mode: the distant lights stutter and die one after another.
       const die = s.mode === "survive" && s.surviveTime >= 0 ? Math.min(1, s.surviveTime / LIGHTS_DIE) : 0;
-      const flicker = die > 0 && die < 1 ? (Math.sin(s.elapsed * 30) > 0 ? 1 : .15) : 1;
       glow.current.children.forEach((child, i) => {
         const sprite = child as THREE.Sprite;
         // Staggered: each light gutters out a little after the previous one.
         const own = Math.min(1, Math.max(0, die * 1.6 - i * .15));
         const flick = own > 0 && own < 1 ? (Math.sin(s.elapsed * (26 + i * 7)) > .2 ? 1 : .1) : 1;
-        (sprite.material as THREE.SpriteMaterial).opacity = (1 - own) * flick * (flicker > 0 ? 1 : 1);
+        (sprite.material as THREE.SpriteMaterial).opacity = (1 - own) * flick;
         const high = i > 2;
         sprite.scale.setScalar((high ? 30 : i === 0 ? 24 : 20) * (1 + Math.sin(t * .4 + i) * .08));
         if (high) {
