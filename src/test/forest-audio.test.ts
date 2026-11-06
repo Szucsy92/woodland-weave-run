@@ -10,13 +10,13 @@ describe("Continuous forest soundtrack", () => {
     createBufferSource: ReturnType<typeof vi.fn>;
   };
   let frequency: { value: number; setTargetAtTime: ReturnType<typeof vi.fn>; cancelScheduledValues: ReturnType<typeof vi.fn>; setValueAtTime: ReturnType<typeof vi.fn>; linearRampToValueAtTime: ReturnType<typeof vi.fn> };
-  let gain: { value: number; setTargetAtTime: ReturnType<typeof vi.fn>; cancelScheduledValues: ReturnType<typeof vi.fn>; setValueAtTime: ReturnType<typeof vi.fn>; linearRampToValueAtTime: ReturnType<typeof vi.fn> };
+  let gain: { value: number; setTargetAtTime: ReturnType<typeof vi.fn>; cancelScheduledValues: ReturnType<typeof vi.fn>; setValueAtTime: ReturnType<typeof vi.fn>; linearRampToValueAtTime: ReturnType<typeof vi.fn>; exponentialRampToValueAtTime: ReturnType<typeof vi.fn> };
   let start: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     constructed = 0;
     frequency = { value: 0, setTargetAtTime: vi.fn(), cancelScheduledValues: vi.fn(), setValueAtTime: vi.fn(), linearRampToValueAtTime: vi.fn() };
-    gain = { value: 0, setTargetAtTime: vi.fn(), cancelScheduledValues: vi.fn(), setValueAtTime: vi.fn(), linearRampToValueAtTime: vi.fn() };
+    gain = { value: 0, setTargetAtTime: vi.fn(), cancelScheduledValues: vi.fn(), setValueAtTime: vi.fn(), linearRampToValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn() };
     start = vi.fn();
     ctx = {
       state: "suspended", currentTime: 0, onstatechange: null,
@@ -79,6 +79,45 @@ describe("Continuous forest soundtrack", () => {
     audio.unlock(); audio.setMode(true, true); audio.impactDip();
     expect(frequency.linearRampToValueAtTime).toHaveBeenCalledWith(220, 0.03);
     expect(frequency.setTargetAtTime).toHaveBeenLastCalledWith(4000, 0.5, 0.18);
+  });
+
+  it("does not re-issue unchanged targets, so repeated syncs leave an impact dip alone", async () => {
+    audio.unlock();
+    await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+    audio.setMode(true, true);
+    audio.impactDip();
+    const targets = frequency.setTargetAtTime.mock.calls.length;
+    const cancels = frequency.cancelScheduledValues.mock.calls.length;
+    audio.setMode(true, true);
+    audio.setMode(true, true);
+    expect(frequency.setTargetAtTime.mock.calls.length).toBe(targets);
+    expect(frequency.cancelScheduledValues.mock.calls.length).toBe(cancels);
+  });
+
+  it("drops a stale impact-dip recovery when the muffle really changes", async () => {
+    audio.unlock();
+    await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+    audio.setMode(true, true);
+    audio.impactDip();
+    const cancels = frequency.cancelScheduledValues.mock.calls.length;
+    audio.setMuffled(true);
+    expect(frequency.cancelScheduledValues.mock.calls.length).toBe(cancels + 1);
+    expect(frequency.setTargetAtTime).toHaveBeenLastCalledWith(380, 0, 0.65);
+  });
+
+  it("plays effect cues as short blips and stays silent without an open channel", () => {
+    const osc = { type: "sine", frequency: { setValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn() }, connect: vi.fn(), start: vi.fn(), stop: vi.fn() };
+    audio.unlock();
+    // Contexts without oscillators must never break a run.
+    expect(() => audio.cue("gate")).not.toThrow();
+    const make = vi.fn(() => osc);
+    (ctx as unknown as { createOscillator: typeof make }).createOscillator = make;
+    audio.cue("secret");
+    expect(make).toHaveBeenCalledTimes(3);
+    expect(osc.start).toHaveBeenCalledTimes(3);
+    audio.setMode(false, false);
+    audio.cue("secret");
+    expect(make).toHaveBeenCalledTimes(3);
   });
 
   it("plays the threat sting once with a soft fade-out at the tail", async () => {
