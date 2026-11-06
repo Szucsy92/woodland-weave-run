@@ -691,13 +691,14 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
       // The moment a power fades, the frame glow and the haptic follow.
       if (lastPowerUp.current && !s.powerUp) onPowerUpEnd();
       lastPowerUp.current = s.powerUp;
-      // Ghost wisp: trunks, roots and branches turn into pale, softly glowing,
-      // see-through ghosts (the crowns only slightly), fading in and out.
+      // Ghost wisp: trunks, roots and branches (never the crowns: a see-through crown
+      // would draw over the ghost trunks and hide their transparency) turn into pale, softly glowing,
+      // see-through ghosts, fading in and out.
       const ghostLeft = POWERUP_DURATION - s.powerUpTime;
       const ghostTarget = s.powerUp === "ghost" ? THREE.MathUtils.smootherstep(ghostLeft, 0, 1.6) : 0;
       ghostK.current += (ghostTarget - ghostK.current) * Math.min(1, raw * (ghostTarget > ghostK.current ? 7 : 5));
       const g = ghostK.current < .01 ? 0 : ghostK.current;
-      ([[resources.trunkMaterial, .34, .55], [branchMat.current, .34, .55], [resources.crownMaterial, .16, .2]] as const).forEach(([mat, fade, glow]) => {
+      ([[resources.trunkMaterial, .34, .55], [branchMat.current, .34, .55]] as const).forEach(([mat, fade, glow]) => {
         if (!mat) return;
         const on = g > 0;
         // Flipping transparency needs a recompile, otherwise three.js keeps the opaque shader and ignores opacity.
