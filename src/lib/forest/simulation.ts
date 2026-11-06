@@ -24,9 +24,13 @@ export const POWERUP_START = 100;
 export const POWERUP_DURATION = 5;
 export const POWERUP_GAP = 120;
 export const POWERUP_TYPES: PowerUpType[] = ["freezer", "ghost", "shockwave"];
-// The shockwave clears this stretch ahead (trees included).
-export const SHOCKWAVE_AHEAD = 16;
+// The shockwave sweeps a widening wedge out to the horizon (trees included):
+// FOG_END is where the forest fades into fog, so nothing visible is left standing.
+export const SHOCKWAVE_AHEAD = FOG_END + 6;
 export const SHOCKWAVE_SIDE = 7;
+export const SHOCKWAVE_SPREAD = 1.25;
+// The wave front rolls out over this long; farther trees start dissolving later.
+export const SHOCKWAVE_WAVE = 0.7;
 export const SHOCKWAVE_DISSOLVE = 0.9;
 export function canSpawnPowerUp(s: Simulation, lastSpawn: number, hasLiveOrb: boolean) {
   return s.phase === "running" && s.distance >= POWERUP_START && !s.powerUp && !hasLiveOrb
@@ -40,10 +44,10 @@ export function forestLightsAround(x: number, z: number) {
     return { x: gx * 84 + 20, z: gz * 84 + 42 };
   });
 }
-// Classic and survive keep the lights fixed relative to the runner: a few
-// far lights ahead that follow the heading, so nothing repeats or pops when
-// the world cell changes. Only freeroam uses the world-cell lattice above.
-const FIXED_LIGHTS = [{ ahead: 100, side: 0 }, { ahead: 85, side: -32 }, { ahead: 85, side: 32 }];
+// Classic and survive keep a single far light fixed relative to the runner,
+// straight ahead, following the heading, so nothing repeats or pops when the
+// world cell changes. Only freeroam uses the world-cell lattice above.
+const FIXED_LIGHTS = [{ ahead: 100, side: 0 }];
 export function fixedForestLights(x: number, z: number, heading: number) {
   const fx = -Math.sin(heading), fz = -Math.cos(heading);
   const rx = Math.cos(heading), rz = -Math.sin(heading);
@@ -71,8 +75,13 @@ export const SURVIVE_DARK_AT = 10;
 export const LIGHTS_DIE = 1.2;
 export const DARK_PAUSE = 1.75;
 export type SurviveStage = "lit" | "dying" | "dark" | "red";
+// Survive mode runs the pursuer sequence from the start of the run; freeroam
+// only while a red gate has switched it on (surviveTime >= 0).
+export function surviveOn(s: Simulation) {
+  return s.mode === "survive" || (s.mode === "freeroam" && s.surviveTime >= 0);
+}
 export function surviveStage(s: Simulation): SurviveStage {
-  if (s.mode !== "survive" || s.surviveTime < 0) return "lit";
+  if (!surviveOn(s) || s.surviveTime < 0) return "lit";
   if (s.surviveTime < LIGHTS_DIE) return "dying";
   if (s.surviveTime < LIGHTS_DIE + DARK_PAUSE) return "dark";
   return "red";
@@ -115,6 +124,49 @@ export function discoverSecret(s: Simulation, secret: Secret) {
   if (s.mode !== "freeroam" || s.phase !== "running" || s.found.includes(secret.id)) return false;
   if (Math.hypot(s.x - secret.x, s.z - secret.z) > SECRET_REACH) return false;
   s.found.push(secret.id);
+  return true;
+}
+
+// Red gates for freeroam: walking through one switches the survive atmosphere
+// on (lights die, dark, red pursuer, threat sound); the next gate switches it off.
+export const GATE_CELL = 90;
+export const GATE_HALF = 2.4;
+export const GATE_DEPTH = 0.9;
+export const GATE_CLEARING = 5;
+export const GATE_REARM = 9;
+export type Gate = { x: number; z: number; angle: number; id: string };
+export function gatesAround(x: number, z: number): Gate[] {
+  const cx = Math.floor(x / GATE_CELL), cz = Math.floor(z / GATE_CELL);
+  const out: Gate[] = [];
+  for (let i = -1; i <= 1; i++) {
+    for (let j = -1; j <= 1; j++) {
+      const gx = cx + i, gz = cz + j;
+      if (gx === 0 && gz === 0) continue;
+      if (hash(gx, gz, 500) > 0.4) continue;
+      out.push({
+        x: gx * GATE_CELL + 15 + hash(gx, gz, 501) * (GATE_CELL - 30),
+        z: gz * GATE_CELL + 15 + hash(gx, gz, 502) * (GATE_CELL - 30),
+        angle: hash(gx, gz, 503) * Math.PI,
+        id: `g${gx}:${gz}`,
+      });
+    }
+  }
+  return out;
+}
+/** Walking through the opening of a gate toggles the survive atmosphere (freeroam only). */
+export function passGate(s: Simulation, gate: Gate) {
+  if (s.mode !== "freeroam" || s.phase !== "running") return false;
+  const dx = s.x - gate.x, dz = s.z - gate.z;
+  if (s.lastGate === gate.id) {
+    // A gate fires once; it re-arms only after the runner has walked away from it.
+    if (Math.hypot(dx, dz) > GATE_REARM) s.lastGate = "";
+    return false;
+  }
+  const lateral = dx * Math.cos(gate.angle) - dz * Math.sin(gate.angle);
+  const normal = dx * Math.sin(gate.angle) + dz * Math.cos(gate.angle);
+  if (Math.abs(lateral) > GATE_HALF || Math.abs(normal) > GATE_DEPTH) return false;
+  s.lastGate = gate.id;
+  s.surviveTime = s.surviveTime >= 0 ? -1 : 0;
   return true;
 }
 
@@ -214,7 +266,7 @@ export function makeSimulation() {
     pause: "none" as PauseState, pauseTime: 0,
     mode: "classic" as GameMode, powerUp: null as PowerUpType | null, powerUpTime: 0,
     threat: 0, cleared: [] as string[], clearedAt: {} as Record<string, number>,
-    surviveTime: -1, found: [] as string[] };
+    surviveTime: -1, lastGate: "", found: [] as string[] };
 }
 
 export function beginRun(s: Simulation) {
@@ -255,7 +307,7 @@ export function collide(s: Simulation, tree: Tree) {
   s.impactSide = side;
   if (s.hits >= MAX_IMPACTS) { s.phase = "falling"; s.phaseTime = 0; }
   // In survive mode every impact means the pursuer crept closer.
-  if (s.mode === "survive") s.threat = 1;
+  if (surviveOn(s)) s.threat = 1;
   return true;
 }
 
@@ -271,7 +323,7 @@ export function collideObstacle(s: Simulation, obstacle: Obstacle) {
   s.stumble = obstacle.big ? 1 : 0.5;
   s.speedMul = obstacle.big ? 0.65 : 0.85;
   s.lastObstacle = obstacle.id;
-  if (s.mode === "survive") s.threat = 1;
+  if (surviveOn(s)) s.threat = 1;
   return true;
 }
 
@@ -280,7 +332,13 @@ export function inShockwave(s: Simulation, x: number, z: number) {
   const dx = x - s.x, dz = z - s.z;
   const along = -dx * Math.sin(s.heading) - dz * Math.cos(s.heading);
   const lateral = dx * Math.cos(s.heading) - dz * Math.sin(s.heading);
-  return along > -1 && along < SHOCKWAVE_AHEAD && Math.abs(lateral) < SHOCKWAVE_SIDE;
+  return along > -1 && along < SHOCKWAVE_AHEAD && Math.abs(lateral) < SHOCKWAVE_SIDE + Math.max(0, along) * SHOCKWAVE_SPREAD;
+}
+
+/** Seconds until the rolling wave front reaches a point (0 beside the runner). */
+export function shockwaveDelay(s: Simulation, x: number, z: number) {
+  const along = -(x - s.x) * Math.sin(s.heading) - (z - s.z) * Math.cos(s.heading);
+  return Math.min(1, Math.max(0, along) / SHOCKWAVE_AHEAD) * SHOCKWAVE_WAVE;
 }
 
 // Running into a wisp binds its power — never while another power is active.
@@ -290,11 +348,12 @@ export function collectPowerUp(s: Simulation, p: PowerUp) {
   s.powerUp = p.type;
   s.powerUpTime = 0;
   if (p.type === "shockwave") {
-    // The purple wave dissolves every tree, rock and bush in the stretch ahead.
+    // The purple wave dissolves every tree, rock and bush out to the horizon;
+    // each one starts when the wave front reaches it, so the wave visibly rolls out.
     for (const o of [...s.obstacles, ...s.trees]) {
       if (inShockwave(s, o.x, o.z) && !s.cleared.includes(o.id)) {
         s.cleared.push(o.id);
-        s.clearedAt[o.id] = s.elapsed;
+        s.clearedAt[o.id] = s.elapsed + shockwaveDelay(s, o.x, o.z);
       }
     }
   }
@@ -354,7 +413,7 @@ export function stepSimulation(s: Simulation, steering: number, delta: number) {
   }
   // The pursuer's glow flares for about a second after every mistake, and
   // burns constantly once the runner is down.
-  if (s.mode === "survive" && (s.phase === "falling" || s.phase === "fallen")) s.threat = 1;
+  if (surviveOn(s) && (s.phase === "falling" || s.phase === "fallen")) s.threat = 1;
   else s.threat = Math.max(0, s.threat - dt);
   if (s.phase === "awakening" && s.phaseTime >= 1.15) {
     s.phase = "running"; s.phaseTime = 0;
@@ -366,6 +425,8 @@ export function stepSimulation(s: Simulation, steering: number, delta: number) {
   if (s.mode === "survive") {
     if (s.surviveTime >= 0) s.surviveTime += dt;
     else if (s.phase === "running" && s.distance > SURVIVE_DARK_AT) s.surviveTime = 0;
+  } else if (s.mode === "freeroam" && s.surviveTime >= 0) {
+    s.surviveTime += dt;
   }
   if (s.phase !== "running") return;
   const level = DIFFICULTIES[s.difficulty];
