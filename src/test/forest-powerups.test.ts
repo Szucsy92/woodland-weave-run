@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { beginRun, collectPowerUp, collide, collideObstacle, DARK_PAUSE, discoverSecret, canSpawnPowerUp, forestLightsAround, fixedForestLights, forestLightsFor, gatesAround, passGate, surviveOn, GATE_REARM, LIGHTS_DIE, makeSimulation, MAX_HEADING, placePowerUp, POWERUP_DURATION, POWERUP_GAP, POWERUP_START, SHOCKWAVE_AHEAD, shockwaveDelay, secretsAround, stepSimulation, surviveStage, type PowerUp } from "@/lib/forest/simulation";
+import { beginRun, collectPowerUp, collide, collideObstacle, DARK_PAUSE, discoverSecret, canSpawnPowerUp, forestLightsAround, fixedForestLights, forestLightsFor, gatesAround, passGate, surviveOn, GATE_REARM, LIGHTS_DIE, makeSimulation, MAX_HEADING, placePowerUp, POWERUP_DURATION, POWERUP_GAP, POWERUP_START, SHOCKWAVE_AHEAD, shockwaveDelay, sweepShockwave, secretsAround, stepSimulation, surviveStage, type PowerUp } from "@/lib/forest/simulation";
 
 const orb = (type: PowerUp["type"], x = 0, z = 0): PowerUp => ({ x, z, type, id: `t-${type}` });
 
@@ -273,15 +273,15 @@ describe("Earlier power-ups and fixed forest lights", () => {
     expect(next).toContainEqual({ x: 20, z: 42 });
     expect(next.filter(p => lights.some(q => q.x === p.x && q.z === p.z))).toHaveLength(6);
   });
-  it("keeps lights fixed relative to the runner in classic and survive, world-anchored only in freeroam", () => {
-    const a = fixedForestLights(0, 0, 0), b = fixedForestLights(500, -900, 0);
+  it("keeps one static light centred on the runner (heading-independent) in classic and survive, world-anchored only in freeroam", () => {
+    const a = fixedForestLights(0, 0), b = fixedForestLights(500, -900);
     a.forEach((l, i) => { expect(b[i]!.x - 500).toBeCloseTo(l.x); expect(b[i]!.z + 900).toBeCloseTo(l.z); });
     expect(a).toHaveLength(1);
     expect(a.length).toBeLessThan(forestLightsAround(0, 0).length);
     expect(a.every(l => l.z < 0)).toBe(true);
-    expect(forestLightsFor("classic", 30, 30, .3)).toEqual(fixedForestLights(30, 30, .3));
-    expect(forestLightsFor("survive", 30, 30, .3)).toEqual(fixedForestLights(30, 30, .3));
-    expect(forestLightsFor("freeroam", 30, 30, .3)).toEqual(forestLightsAround(30, 30));
+    expect(forestLightsFor("classic", 30, 30)).toEqual(fixedForestLights(30, 30));
+    expect(forestLightsFor("survive", 30, 30)).toEqual(fixedForestLights(30, 30));
+    expect(forestLightsFor("freeroam", 30, 30)).toEqual(forestLightsAround(30, 30));
   });
   it("shockwave clears trees out to the horizon in a widening wedge, rolling outward", () => {
     const s = makeSimulation();
@@ -335,5 +335,23 @@ describe("Earlier power-ups and fixed forest lights", () => {
     f.surviveTime = 0; f.hits = 0; f.cooldown = 0; f.x = 0; f.z = 0; f.pushX = 0;
     expect(collide(f, { x: 0, z: -0.3, scale: 1, id: "tu" })).toBe(true);
     expect(f.threat).toBe(1);
+  });
+  it("shockwave keeps tearing out whatever comes into reach while it lasts", () => {
+    const s = makeSimulation();
+    s.phase = "running";
+    collectPowerUp(s, orb("shockwave"));
+    expect(s.powerUp).toBe("shockwave");
+    const late = { x: 0, z: -30, scale: 1, id: "late" };
+    s.trees = [late];
+    stepSimulation(s, 0, .016);
+    expect(s.cleared).toContain("late");
+    expect(s.clearedAt["late"]!).toBeGreaterThanOrEqual(s.elapsed);
+    // After the power-up ends nothing new is cleared.
+    s.powerUp = null;
+    const after = { x: 0, z: -30, scale: 1, id: "after" };
+    s.trees = [after];
+    stepSimulation(s, 0, .016);
+    expect(s.cleared).not.toContain("after");
+    sweepShockwave(s);
   });
 });
