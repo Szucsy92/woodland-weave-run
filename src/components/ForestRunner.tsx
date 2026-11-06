@@ -4,7 +4,7 @@ import { ArrowLeft, LogOut, Pause, Settings } from "lucide-react";
 import * as THREE from "three";
 import { ForestEffects } from "./ForestEffects";
 import { ForestDrone } from "@/lib/forest/drone";
-import { beginRun, canSpawnPowerUp, forestLightsAround, CELL, collectPowerUp, DIFFICULTIES, discoverSecret, LIGHTS_DIE, SECRET_CLEARING, SECRET_NAMES, secretsAround, SHOCKWAVE_AHEAD, SHOCKWAVE_DISSOLVE, surviveStage, type Secret, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, requestExit, requestPause, requestResume, obstaclesAround, orientationValue, placePowerUp, placeSpore, POWERUP_GAP, RADIUS, sporeOpacity, stepSimulation, treesAround, daylightFor, type Difficulty, type ForestMood, type GameMode, type Phase, type PowerUp, type PowerUpType, type Simulation } from "@/lib/forest/simulation";
+import { beginRun, canSpawnPowerUp, forestLightsFor, CELL, collectPowerUp, DIFFICULTIES, discoverSecret, LIGHTS_DIE, SECRET_CLEARING, SECRET_NAMES, secretsAround, SHOCKWAVE_AHEAD, SHOCKWAVE_DISSOLVE, surviveStage, type Secret, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, requestExit, requestPause, requestResume, obstaclesAround, orientationValue, placePowerUp, placeSpore, POWERUP_GAP, RADIUS, sporeOpacity, stepSimulation, treesAround, daylightFor, type Difficulty, type ForestMood, type GameMode, type Phase, type PowerUp, type PowerUpType, type Simulation } from "@/lib/forest/simulation";
 import { checkForUpdate, nativeUpdater, type UpdateInfo } from "@/lib/forest/updater";
 import barkUrl from "@/assets/wet-bark.jpg";
 import floorUrl from "@/assets/wet-ground.jpg";
@@ -711,12 +711,18 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
       });
     }
     if (glow.current) {
-      const cell = `${Math.floor(s.x / 84)},${Math.floor(s.z / 84)}`;
-      if (cell !== glowCell.current) {
+      // Freeroam: lights stay anchored to world cells and move only when the
+      // cell changes. Classic and survive: a few fixed lights ahead of the
+      // runner, updated every frame so they follow the heading.
+      const free = s.mode === "freeroam";
+      const cell = free ? `free:${Math.floor(s.x / 84)},${Math.floor(s.z / 84)}` : "fixed";
+      if (!free || cell !== glowCell.current) {
         glowCell.current = cell;
-        forestLightsAround(s.x, s.z).forEach((light, i) => {
-          const cluster = glow.current?.children[i];
-          if (cluster) cluster.position.set(light.x, groundHeight(light.x, light.z) + 4.2, light.z);
+        const lights = forestLightsFor(s.mode, s.x, s.z, s.heading);
+        glow.current.children.forEach((cluster, i) => {
+          const light = lights[i];
+          cluster.visible = !!light;
+          if (light) cluster.position.set(light.x, groundHeight(light.x, light.z) + 4.2, light.z);
         });
       }
       // Survive mode: the distant lights stutter and die one after another.
@@ -726,7 +732,7 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
         // Staggered: each light gutters out a little after the previous one.
         const own = Math.min(1, Math.max(0, die * 1.6 - i * .15));
         const flick = own > 0 && own < 1 ? (Math.sin(s.elapsed * (26 + i * 7)) > .2 ? 1 : .1) : 1;
-        (sprite.material as THREE.SpriteMaterial).opacity = (1 - own) * flick;
+        (sprite.material as THREE.SpriteMaterial).opacity = (sprite.userData["base"] as number) * (1 - own) * flick;
         const high = i > 2;
         sprite.scale.setScalar((high ? 30 : i === 0 ? 24 : 20) * (1 + Math.sin(t * .4 + i) * .08));
         if (high) {
@@ -814,7 +820,7 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
     <group ref={glow}>
       {Array.from({ length: 9 }, (_, cluster) => <group key={cluster}>
         {[palette.green, palette.purple, palette.lavender, palette.purple, palette.lavender].map((color, i) => (
-          <sprite key={i} renderOrder={-1}>
+          <sprite key={i} renderOrder={-1} userData={{ base: i > 2 ? .14 : .66 }}>
             <spriteMaterial map={resources.glowTexture} color={color} transparent opacity={i > 2 ? .14 : .66} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} />
           </sprite>
         ))}
