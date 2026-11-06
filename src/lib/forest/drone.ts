@@ -3,6 +3,8 @@ const SOURCES = ["/audio/forest-loop.wav", "/audio/forest-loop.mp3"];
 // One-shot stings, decoded once per audio context.
 export const STINGS = { start: "/audio/run_start.wav", end: "/audio/run_end.wav", threat: "/audio/threat.wav" } as const;
 export type Sting = keyof typeof STINGS;
+// Short synthesized cues for moments that were silent (haptics only) until now.
+export type Cue = "freezer" | "ghost" | "shockwave" | "ring" | "end" | "stumble" | "gate" | "secret";
 // Survive: once the lights die the forest loop sinks to a dull, distant hum.
 const MUFFLED_HZ = 380;
 const MENU_HZ = 220;
@@ -40,6 +42,9 @@ export class ForestDrone {
   private resumeTimer: ReturnType<typeof setTimeout> | null = null;
   private volumeTimer: ReturnType<typeof setInterval> | null = null;
   private foreground = true;
+  // Last targets handed to the audio graph: apply() runs every 200 ms on Android, and
+  // re-issuing the same targets cut every impact dip short and fought its recovery.
+  private applied: { context: AudioContext | null; gain: number; hz: number } = { context: null, gain: -1, hz: -1 };
 
   private canPlay() {
     const native = (globalThis as { AndroidAudio?: { isMuted(): boolean } }).AndroidAudio;
@@ -62,6 +67,7 @@ export class ForestDrone {
     this.context = null;
     this.filter = null;
     this.master = null;
+    this.applied = { context: null, gain: -1, hz: -1 };
     this.stings = {};
     this.stingLoads = {};
     void ctx.close().catch(() => undefined);
@@ -218,8 +224,54 @@ export class ForestDrone {
     if (now == null || !this.master || !this.filter) return;
     if (!this.canPlay()) return;
     const target = this.running ? (this.muffled ? 0.26 : 0.45) : 0.3;
+    const hz = this.running ? (this.muffled ? MUFFLED_HZ : RUN_HZ) : MENU_HZ;
+    const done = this.applied;
+    if (done.context === this.context && done.gain === target && done.hz === hz) return;
+    this.applied = { context: this.context, gain: target, hz };
     this.master.gain.setTargetAtTime(target, now, 0.8);
-    this.filter.frequency.setTargetAtTime(this.running ? (this.muffled ? MUFFLED_HZ : RUN_HZ) : MENU_HZ, now, 0.65);
+    // A real change of state replaces whatever was still scheduled: a pending impact-dip
+    // recovery computed for the old state would otherwise un-muffle the dark forest.
+    this.filter.frequency.cancelScheduledValues(now);
+    this.filter.frequency.setValueAtTime(this.filter.frequency.value, now);
+    this.filter.frequency.setTargetAtTime(hz, now, 0.65);
+  }
+
+  private blip(from: number, to: number, seconds: number, peak: number, type: OscillatorType = "sine", delay = 0) {
+    const ctx = this.context;
+    if (!ctx || !this.canPlay()) return;
+    try {
+      const t0 = ctx.currentTime + delay;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(from, t0);
+      if (to !== from) osc.frequency.exponentialRampToValueAtTime(Math.max(1, to), t0 + seconds);
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(peak, t0 + Math.min(0.03, seconds / 4));
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + seconds);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(t0);
+      osc.stop(t0 + seconds + 0.05);
+    } catch { /* Cues are optional; they must never break a run. */ }
+  }
+
+  /** Soft, short feedback for pickups, rings, stumbles, gates and secrets. */
+  cue(name: Cue) {
+    switch (name) {
+      case "freezer": this.blip(1320, 660, 0.6, 0.07); this.blip(1980, 990, 0.5, 0.04, "triangle", 0.04); break;
+      case "ghost": this.blip(440, 880, 0.7, 0.06); this.blip(660, 1320, 0.7, 0.035, "sine", 0.08); break;
+      case "shockwave": this.blip(120, 42, 0.8, 0.2); this.blip(220, 900, 0.45, 0.04, "triangle", 0.05); break;
+      case "ring": this.blip(150, 52, 0.55, 0.11); break;
+      case "end": this.blip(520, 260, 0.35, 0.045); break;
+      case "stumble": this.blip(95, 52, 0.2, 0.15, "triangle"); break;
+      case "gate": this.blip(72, 54, 0.7, 0.11); this.blip(144, 108, 0.6, 0.05, "sine", 0.05); break;
+      case "secret":
+        this.blip(880, 880, 0.9, 0.055);
+        this.blip(1320, 1320, 0.9, 0.04, "sine", 0.12);
+        this.blip(1760, 1760, 1.1, 0.03, "sine", 0.26);
+        break;
+    }
   }
 
   suspend() { this.foreground = false; this.syncOutput(); }
