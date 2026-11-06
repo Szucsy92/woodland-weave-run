@@ -5,12 +5,16 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
-import { DARK_PAUSE, EXIT_TIME, IMPACT_DURATION, LIGHTS_DIE, PAUSE_SLOW, POWERUP_DURATION, RESUME_TIME, SHOCKWAVE_AHEAD, SHOCKWAVE_GAP, SHOCKWAVE_RINGS, SHOCKWAVE_WAVE, type Simulation } from "@/lib/forest/simulation";
+import { DARK_PAUSE, EXIT_TIME, IMPACT_DURATION, LIGHTS_DIE, PAUSE_SLOW, POWERUP_DURATION, RESUME_TIME, SHOCKWAVE_AHEAD, SHOCKWAVE_GAP, SHOCKWAVE_RINGS, SHOCKWAVE_WAVE, surviveOn, type Simulation } from "@/lib/forest/simulation";
 
 export function ForestEffects({ simulation }: { simulation: MutableRefObject<Simulation> }) {
   const { gl, scene, camera, size } = useThree();
   const { composer, effect } = useMemo(() => {
-    const composer = new EffectComposer(gl);
+    // The canvas' antialias flag does not reach the composer's off-screen targets, so thin
+    // branches and trunk edges came out jagged and crawling. Give the target its own MSAA.
+    const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: Math.min(4, gl.capabilities.maxSamples) });
+    target.texture.name = "EffectComposer.rt1";
+    const composer = new EffectComposer(gl, target);
     const effect = new ShaderPass({
       uniforms: { tDiffuse: { value: null }, blur: { value: 0 }, glitch: { value: 0 }, frost: { value: 0 }, lens: { value: 0 }, wave: { value: 0 }, waveT: { value: 0 }, time: { value: 0 }, resolution: { value: new THREE.Vector2() } },
       vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
@@ -76,9 +80,13 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
     composer.setSize(size.width, size.height);
     effect.uniforms["resolution"]!.value.set(size.width, size.height);
   }, [composer, effect, size, gl]);
-  useEffect(() => () => composer.dispose(), [composer]);
+  useEffect(() => () => { effect.dispose(); composer.dispose(); }, [composer, effect]);
   // Smoothed 0..1 frost amount: eases in on pickup and melts away at the end.
   const frost = useRef(0);
+  // Shader clock that only ever moves forward. s.elapsed stops while paused and restarts with
+  // every run, and s.pauseTime resets at each pause step, so mixing them made the glitch bands
+  // and frost crystals jump.
+  const clock = useRef(0);
   useFrame((_, delta) => {
     const s = simulation.current;
     const lying = s.phase === "falling" || s.phase === "fallen";
@@ -126,12 +134,14 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
     const frostTarget = s.powerUp === "freezer" ? Math.min(1, (POWERUP_DURATION - s.powerUpTime) / .9) : 0;
     frost.current += (frostTarget - frost.current) * Math.min(1, delta * 4);
     effect.uniforms["frost"]!.value = frost.current < .005 ? 0 : frost.current;
-    // Survive: the red onset hits with a short violent tear.
-    if (s.mode === "survive" && s.surviveTime >= 0) {
+    // Survive atmosphere (survive mode or a freeroam red gate): the red onset hits with a
+    // short violent tear.
+    if (surviveOn(s) && s.surviveTime >= 0) {
       const r = s.surviveTime - LIGHTS_DIE - DARK_PAUSE;
       if (r >= 0 && r < .45) effect.uniforms["glitch"]!.value += Math.sin((r / .45) * Math.PI) * 1.1;
     }
-    effect.uniforms["time"]!.value = s.elapsed + s.pauseTime;
+    clock.current += Math.min(delta, .1);
+    effect.uniforms["time"]!.value = clock.current;
     composer.render(delta);
   }, 1);
   return null;

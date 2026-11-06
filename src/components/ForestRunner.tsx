@@ -4,7 +4,7 @@ import { ArrowLeft, LogOut, Pause, Settings } from "lucide-react";
 import * as THREE from "three";
 import { ForestEffects } from "./ForestEffects";
 import { ForestDrone } from "@/lib/forest/drone";
-import { beginRun, canSpawnPowerUp, forestLightsFor, CELL, collectPowerUp, DIFFICULTIES, discoverSecret, GATE_CLEARING, GATE_HALF, gatesAround, type Gate, LIGHTS_DIE, passGate, SECRET_CLEARING, secretsAround, SHOCKWAVE_DISSOLVE, surviveStage, type Secret, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, requestExit, requestPause, requestResume, obstaclesAround, orientationValue, makeTiltCal, resetTilt, updateTilt, type TiltCal, placePowerUp, placeSpore, POWERUP_DURATION, POWERUP_GAP, RADIUS, sporeOpacity, stepSimulation, treesAround, daylightFor, type Difficulty, type ForestMood, type GameMode, type Phase, type PowerUp, type PowerUpType, type Simulation } from "@/lib/forest/simulation";
+import { beginRun, canSpawnPowerUp, forestLightsFor, CELL, collectPowerUp, DIFFICULTIES, discoverSecret, GATE_CLEARING, GATE_HALF, gatesAround, type Gate, LIGHTS_DIE, passGate, SECRET_CLEARING, secretsAround, SHOCKWAVE_DISSOLVE, SHOCKWAVE_GAP, SHOCKWAVE_RINGS, surviveStage, type Secret, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, requestExit, requestPause, requestResume, obstaclesAround, orientationValue, makeTiltCal, resetTilt, updateTilt, type TiltCal, placePowerUp, placeSpore, POWERUP_DURATION, POWERUP_GAP, RADIUS, sporeOpacity, stepSimulation, treesAround, daylightFor, type Difficulty, type ForestMood, type GameMode, type Phase, type PowerUp, type PowerUpType, type Simulation } from "@/lib/forest/simulation";
 import { checkForUpdate, nativeUpdater, type UpdateInfo } from "@/lib/forest/updater";
 import barkUrl from "@/assets/wet-bark.jpg";
 import floorUrl from "@/assets/wet-ground.jpg";
@@ -48,6 +48,8 @@ float groundHeight(float x, float z) {
   return (w1 * 1.15 + w2 * 0.55 + w3 * 0.35) * 0.3;
 }`;
 
+// Ground plane: 200 m over 160 segments.
+const GROUND_STEP = 200 / 160;
 const ORB_SLOTS = 2;
 const GHOST_GLOW = "#eaf6ff";
 const ORB_KEY: Record<PowerUpType, "freezer" | "ghost" | "shock"> = { freezer: "freezer", ghost: "ghost", shockwave: "shock" };
@@ -56,7 +58,7 @@ const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 /** Shared survive-mode red amount (0..1) read by the scene lights and fog. */
 export type RedRef = MutableRefObject<number>;
 
-function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, onPowerUp, onPowerUpEnd, onThreat, onDark, onLit, onGate, onSecret }: {
+function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, onPowerUp, onPowerUpEnd, onRing, onThreat, onDark, onLit, onGate, onSecret }: {
   simulation: MutableRefObject<Simulation>;
   input: MutableRefObject<Input>;
   palette: Palette;
@@ -65,6 +67,7 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
   onStumble: () => void;
   onPowerUp: (type: PowerUpType) => void;
   onPowerUpEnd: () => void;
+  onRing: () => void;
   onThreat: () => void;
   onDark: () => void;
   onLit: () => void;
@@ -93,6 +96,8 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
   const orbWorld = useRef<(PowerUp & { taken?: number })[]>([]);
   const lastOrbSpawn = useRef(0);
   const lastPowerUp = useRef<PowerUpType | null>(null);
+  // Index of the last shockwave ring whose birth already made its sound.
+  const lastRing = useRef(-1);
   // Smoothed 0..1 ghost amount, so trees fade into and out of their ghost look.
   const ghostK = useRef(0);
   const redLight = useRef<THREE.PointLight>(null);
@@ -474,6 +479,16 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
       if (s.phase === "awakening" || s.phase === "menu") {
         orbWorld.current = [];
         lastOrbSpawn.current = 0;
+        // Spores are anchored to the world around the last run's end point: re-seed them
+        // around the new start so a fresh run never opens with an empty, half-recycled sky.
+        sporeWorld.current = [];
+        lastRing.current = -1;
+      }
+      if (s.phase === "awakening") {
+        // The previous run's survive atmosphere and ghost look must not bleed into a new run
+        // (lights and canopy glow would otherwise fade back in over the first seconds).
+        dieRef.current = 0;
+        ghostK.current = 0;
       }
       previousPhase.current = s.phase; onPhase(s.phase, Math.floor(s.distance));
     }
@@ -517,8 +532,11 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
       });
     }
     if (ground.current) {
-      ground.current.position.set(s.x, 0, s.z);
-      [resources.floor, resources.floorN, resources.floorR].forEach(t => t.offset.set(s.x / 3.125, -s.z / 3.125));
+      // Snap the plane to its own vertex lattice: the displaced vertices then stay fixed in the
+      // world, so the terrain no longer shimmers as the mesh slides under the runner.
+      const gx = Math.round(s.x / GROUND_STEP) * GROUND_STEP, gz = Math.round(s.z / GROUND_STEP) * GROUND_STEP;
+      ground.current.position.set(gx, 0, gz);
+      [resources.floor, resources.floorN, resources.floorR].forEach(t => t.offset.set(gx / 3.125, -gz / 3.125));
     }
     const t = s.elapsed;
     const lying = s.phase === "falling" || s.phase === "fallen";
@@ -649,8 +667,22 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
       if (canSpawnPowerUp(s, lastOrbSpawn.current, live.length > 0)) {
         const index = Math.floor(s.distance / POWERUP_GAP);
         const p = placePowerUp(s.x, s.z, index, Math.floor(s.distance), s.heading);
-        if (p) { world.push(p); lastOrbSpawn.current = s.distance; }
+        if (p) {
+          // A wisp must never hang inside a trunk (it could not be collected, either):
+          // slide it out to the open ground beside the nearest tree.
+          for (const tree of s.trees) {
+            const clear = .45 * tree.scale + .22 + 1.3;
+            const dx = p.x - tree.x, dz = p.z - tree.z, d = Math.hypot(dx, dz);
+            if (d >= clear) continue;
+            const nx = d > .001 ? dx / d : 1, nz = d > .001 ? dz / d : 0;
+            p.x = tree.x + nx * clear; p.z = tree.z + nz * clear;
+          }
+          world.push(p); lastOrbSpawn.current = s.distance;
+        }
       }
+      // Finished or lost wisps are removed after the pass: splicing mid-iteration shifted the
+      // list under the slots and made the neighbouring wisp skip a frame.
+      const gone: (PowerUp & { taken?: number })[] = [];
       orbs.current.children.forEach((slot, i) => {
         const orb = world[i];
         const core = slot.children[0] as THREE.Mesh | undefined;
@@ -675,7 +707,7 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
           aura.position.copy(core.position);
           aura.scale.setScalar(Math.max(.001, 2.8 * (1 - k)));
           (aura.material as THREE.SpriteMaterial).opacity = .5 * (1 - k);
-          if (k >= 1) { world.splice(world.indexOf(orb), 1); slot.visible = false; }
+          if (k >= 1) { gone.push(orb); slot.visible = false; }
           return;
         }
         core.position.set(orb.x, gy + Math.sin(t * 1.3 + i * 2) * .08, orb.z);
@@ -685,12 +717,18 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
         aura.scale.setScalar(2.8 + Math.sin(t * 1.7 + i) * .28);
         (aura.material as THREE.SpriteMaterial).opacity = .6 + Math.sin(t * 1.7 + i) * .12;
         // Left behind or collected by the simulation.
-        if (Math.hypot(orb.x - s.x, orb.z - s.z) > 70) { world.splice(world.indexOf(orb), 1); slot.visible = false; return; }
+        if (Math.hypot(orb.x - s.x, orb.z - s.z) > 70) { gone.push(orb); slot.visible = false; return; }
         if (collectPowerUp(s, orb)) { orb.taken = s.elapsed; onPowerUp(orb.type); }
       });
+      for (const orb of gone) { const at = world.indexOf(orb); if (at >= 0) world.splice(at, 1); }
       // The moment a power fades, the frame glow and the haptic follow.
       if (lastPowerUp.current && !s.powerUp) onPowerUpEnd();
       lastPowerUp.current = s.powerUp;
+      // Every shockwave ring after the first is born with its own low pulse, in step with
+      // the ring and lens kick drawn by ForestEffects (ring i is born at i * SHOCKWAVE_GAP).
+      const ring = s.powerUp === "shockwave" ? Math.min(SHOCKWAVE_RINGS - 1, Math.floor(s.powerUpTime / SHOCKWAVE_GAP)) : -1;
+      if (ring > lastRing.current && ring > 0) onRing();
+      lastRing.current = ring;
       // Ghost wisp: trunks, roots and branches (never the crowns: a see-through crown
       // would draw over the ghost trunks and hide their transparency) turn into pale, softly glowing,
       // see-through ghosts, fading in and out.
@@ -940,7 +978,7 @@ function Hud({ simulation, secrets }: { simulation: MutableRefObject<Simulation>
     const id = window.setInterval(() => setMeters(Math.floor(simulation.current.distance)), 120);
     return () => window.clearInterval(id);
   }, [simulation]);
-  return <div className="forest-hud" aria-live="off">{meters}<small>m</small>{secrets != null && <small> · {secrets} secrets</small>}</div>;
+  return <div className="forest-hud" aria-live="off">{meters}<small>m</small>{secrets != null && <small> · {secrets} {secrets === 1 ? "secret" : "secrets"}</small>}</div>;
 }
 
 
@@ -1008,6 +1046,12 @@ export function ForestRunner() {
   const [notice, setNotice] = useState("");
   const hapticsRef = useRef(true);
   const menuDrag = useRef<{ x: number; moved: boolean } | null>(null);
+  // What the player picked in Settings. It reaches the simulation only while the menu is idle
+  // (or when the next run begins): changing it mid-run or over a death scene used to leak one
+  // mode's rules and look (heading clamp, survive light, freeroam clearings) into another.
+  const modeRef = useRef<GameMode>("classic");
+  const difficultyRef = useRef<Difficulty>("easy");
+  const starting = useRef(false);
   const menu = phase === "menu" || phase === "fallen";
   const [pauseUi, setPauseUi] = useState<"none" | "paused" | "exiting">("none");
   const paused = pauseUi === "paused";
@@ -1061,11 +1105,13 @@ export function ForestRunner() {
       const stored = localStorage.getItem("forest-difficulty");
       if (stored === "easy" || stored === "normal" || stored === "hard") {
         setDifficulty(stored);
+        difficultyRef.current = stored;
         simulation.current.difficulty = stored;
       }
       const storedMode = localStorage.getItem("forest-mode");
       if (storedMode === "classic" || storedMode === "survive" || storedMode === "freeroam") {
         setMode(storedMode);
+        modeRef.current = storedMode;
         simulation.current.mode = storedMode;
       }
       const vib = localStorage.getItem("forest-haptics") !== "off";
@@ -1127,9 +1173,17 @@ export function ForestRunner() {
   }, []);
   useEffect(() => { drone.current?.setMode(sound, (phase === "awakening" || phase === "running") && pauseUi === "none"); }, [sound, phase, pauseUi]);
 
+  /** Hands the picked mode/difficulty to the simulation and forces a clean scene rebuild. */
+  const applySelection = useCallback(() => {
+    const s = simulation.current;
+    if (s.mode === modeRef.current && s.difficulty === difficultyRef.current) return;
+    s.mode = modeRef.current;
+    s.difficulty = difficultyRef.current;
+    s.cell = "";
+  }, []);
   const onPhase = useCallback((next: Phase, score: number) => {
     setPhase(next);
-    if (next === "menu") { setPauseUi("none"); drone.current?.setMuffled(false); }
+    if (next === "menu") { applySelection(); setPauseUi("none"); drone.current?.setMuffled(false); }
     if (next === "falling") {
       drone.current?.play("end");
       setLast(score);
@@ -1140,13 +1194,14 @@ export function ForestRunner() {
         localStorage.setItem("forest-best", String(Math.max(Number(localStorage.getItem("forest-best")) || 0, score)));
       } catch { /* Local storage may be disabled. */ }
     }
-  }, []);
+  }, [applySelection]);
   const onImpact = useCallback(() => {
     if (hapticsRef.current) buzz(65);
     drone.current?.impactDip();
   }, []);
   const onStumble = useCallback(() => {
     if (hapticsRef.current) buzz(22);
+    drone.current?.cue("stumble");
   }, []);
   const onPowerUp = useCallback((type: PowerUpType) => {
     if (leaveTimer.current) clearTimeout(leaveTimer.current);
@@ -1154,6 +1209,7 @@ export function ForestRunner() {
     lastPowerType.current = type;
     setActivePower(type);
     if (hapticsRef.current) buzz([35, 30, 60]);
+    drone.current?.cue(type);
   }, []);
   const onPowerUpEnd = useCallback(() => {
     setActivePower(null);
@@ -1161,6 +1217,10 @@ export function ForestRunner() {
     if (leaveTimer.current) clearTimeout(leaveTimer.current);
     leaveTimer.current = setTimeout(() => setLeavingPower(null), 1100);
     if (hapticsRef.current) buzz(25);
+    drone.current?.cue("end");
+  }, []);
+  const onRing = useCallback(() => {
+    drone.current?.cue("ring");
   }, []);
   const onThreat = useCallback(() => {
     drone.current?.play("threat");
@@ -1174,37 +1234,53 @@ export function ForestRunner() {
   }, []);
   const onGate = useCallback(() => {
     if (hapticsRef.current) buzz([30, 40, 30]);
+    drone.current?.cue("gate");
   }, []);
   const onSecret = useCallback((_secret: Secret) => {
     const found = simulation.current.found;
     setSecretCount(found.length);
     if (hapticsRef.current) buzz([30, 50, 30, 50, 80]);
+    drone.current?.cue("secret");
     try { localStorage.setItem("forest-secrets", JSON.stringify(found)); } catch { /* Local storage may be disabled. */ }
   }, []);
 
   const start = async () => {
     if (phase !== "menu" && phase !== "fallen") return;
-    setNotice("");
-    drone.current?.unlock();
-    await lockOrientation(orient);
-    if (!touchMode) {
-      if (typeof DeviceOrientationEvent === "undefined") {
-        setNotice("Tilt is not available. Switch to touch controls.");
-        return;
-      }
-      const D = DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> };
-      try {
-        if (D.requestPermission && await D.requestPermission() !== "granted") {
-          setNotice("Tilt permission denied. Switch to touch controls.");
+    // Starting awaits the orientation lock and the tilt permission: a second tap meanwhile
+    // used to begin the run twice (double start sting, awakening restarted).
+    if (starting.current) return;
+    starting.current = true;
+    try {
+      setNotice("");
+      drone.current?.unlock();
+      await lockOrientation(orient);
+      if (!touchMode) {
+        if (typeof DeviceOrientationEvent === "undefined") {
+          setNotice("Tilt is not available. Switch to touch controls.");
           return;
         }
-      } catch {
-        setNotice("Switch to touch controls.");
-        return;
+        const D = DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> };
+        try {
+          if (D.requestPermission && await D.requestPermission() !== "granted") {
+            setNotice("Tilt permission denied. Switch to touch controls.");
+            return;
+          }
+        } catch {
+          setNotice("Switch to touch controls.");
+          return;
+        }
+        resetTilt(input.current.cal, performance.now());
       }
-      resetTilt(input.current.cal, performance.now());
+      input.current.touch = 0;
+      launchRun();
+    } finally {
+      starting.current = false;
     }
-    input.current.touch = 0;
+  };
+  const launchRun = () => {
+    // The picked mode and difficulty take effect exactly here, on a clean run.
+    simulation.current.mode = modeRef.current;
+    simulation.current.difficulty = difficultyRef.current;
     beginRun(simulation.current);
     // Secrets stay discovered across freeroam walks on this device.
     try {
@@ -1238,15 +1314,19 @@ export function ForestRunner() {
     setNotice("");
     try { localStorage.setItem("forest-touch", checked ? "on" : "off"); } catch { /* Local storage may be disabled. */ }
   };
+  // Only an idle menu shows the new setting at once; during a run (pause screen) or over a
+  // death scene it waits for the next run instead of rebuilding the forest underneath.
+  const settingsLive = () => simulation.current.phase === "menu" && simulation.current.pause === "none";
   const changeDifficulty = (level: Difficulty) => {
     setDifficulty(level);
-    simulation.current.difficulty = level;
-    simulation.current.cell = "";
+    difficultyRef.current = level;
+    if (settingsLive()) applySelection();
     try { localStorage.setItem("forest-difficulty", level); } catch { /* Local storage may be disabled. */ }
   };
   const changeMode = (next: GameMode) => {
     setMode(next);
-    simulation.current.mode = next;
+    modeRef.current = next;
+    if (settingsLive()) applySelection();
     try { localStorage.setItem("forest-mode", next); } catch { /* Local storage may be disabled. */ }
   };
   const changeMood = (m: ForestMood) => {
@@ -1271,6 +1351,7 @@ export function ForestRunner() {
                   <button className={difficulty === "normal" ? "on" : ""} onClick={() => changeDifficulty("normal")}>Normal</button>
                   <button className={difficulty === "hard" ? "on" : ""} onClick={() => changeDifficulty("hard")}>Hard</button>
                 </div>
+                {phase !== "menu" && <small className="forest-hint">Applies from the next run.</small>}
               </div>
               <div className="forest-row">
                 <span>Mode</span>
@@ -1279,6 +1360,7 @@ export function ForestRunner() {
                   <button className={mode === "survive" ? "on" : ""} onClick={() => changeMode("survive")}>Survive</button>
                   <button className={mode === "freeroam" ? "on" : ""} onClick={() => changeMode("freeroam")}>Freeroam</button>
                 </div>
+                {phase !== "menu" && <small className="forest-hint">Applies from the next run.</small>}
               </div>
               <div className="forest-row">
                 <span>Forest</span>
@@ -1363,7 +1445,7 @@ export function ForestRunner() {
       <fog attach="fog" args={[palette.fog, 7, FOG_END]} />
       <hemisphereLight args={[palette.moon, palette.fog, .85]} />
       <directionalLight position={[0, 24, -20]} color={palette.moon} intensity={.7} />
-      <World simulation={simulation} input={input} palette={palette} red={red} onDark={onDark} onLit={onLit} onGate={onGate} onSecret={onSecret} onPhase={onPhase} onImpact={onImpact} onStumble={onStumble} onPowerUp={onPowerUp} onPowerUpEnd={onPowerUpEnd} onThreat={onThreat} />
+      <World simulation={simulation} input={input} palette={palette} red={red} onDark={onDark} onLit={onLit} onGate={onGate} onSecret={onSecret} onPhase={onPhase} onImpact={onImpact} onStumble={onStumble} onPowerUp={onPowerUp} onPowerUpEnd={onPowerUpEnd} onRing={onRing} onThreat={onThreat} />
       <ForestEffects simulation={simulation} />
       <DayCycle mood={moodRef} night={palette} red={red} />
     </Canvas>}
