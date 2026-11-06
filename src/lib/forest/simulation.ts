@@ -31,7 +31,8 @@ export const SHOCKWAVE_SIDE = 7;
 export const SHOCKWAVE_SPREAD = 1.25;
 // The wave front rolls out over this long; farther trees start dissolving later.
 export const SHOCKWAVE_WAVE = 0.7;
-export const SHOCKWAVE_DISSOLVE = 0.9;
+// Each tree is shoved forward into the depth and torn out over this long.
+export const SHOCKWAVE_DISSOLVE = 1.4;
 export function canSpawnPowerUp(s: Simulation, lastSpawn: number, hasLiveOrb: boolean) {
   return s.phase === "running" && s.distance >= POWERUP_START && !s.powerUp && !hasLiveOrb
     && (lastSpawn === 0 || s.distance - lastSpawn >= POWERUP_GAP);
@@ -44,17 +45,17 @@ export function forestLightsAround(x: number, z: number) {
     return { x: gx * 84 + 20, z: gz * 84 + 42 };
   });
 }
-// Classic and survive keep a single far light fixed relative to the runner,
-// straight ahead, following the heading, so nothing repeats or pops when the
-// world cell changes. Only freeroam uses the world-cell lattice above.
-const FIXED_LIGHTS = [{ ahead: 100, side: 0 }];
-export function fixedForestLights(x: number, z: number, heading: number) {
-  const fx = -Math.sin(heading), fz = -Math.cos(heading);
-  const rx = Math.cos(heading), rz = -Math.sin(heading);
-  return FIXED_LIGHTS.map(l => ({ x: x + fx * l.ahead + rx * l.side, z: z + fz * l.ahead + rz * l.side }));
+// Classic and survive: one far light that is static in the world and centred on
+// the runner. It keeps a constant offset from the runner's position (so it never
+// gets closer or pops when the world cell changes) but ignores the heading, so
+// turning swings it across the view like a real distant light. Only freeroam
+// uses the world-cell lattice above.
+export const FIXED_LIGHT_OFFSETS = [{ x: 0, z: -100 }];
+export function fixedForestLights(x: number, z: number) {
+  return FIXED_LIGHT_OFFSETS.map(o => ({ x: x + o.x, z: z + o.z }));
 }
-export function forestLightsFor(mode: GameMode, x: number, z: number, heading: number) {
-  return mode === "freeroam" ? forestLightsAround(x, z) : fixedForestLights(x, z, heading);
+export function forestLightsFor(mode: GameMode, x: number, z: number) {
+  return mode === "freeroam" ? forestLightsAround(x, z) : fixedForestLights(x, z);
 }
 export function placePowerUp(x: number, z: number, index: number, generation: number, heading = 0): PowerUp | null {
   if (hash(index, generation, 31) > 0.4) return null;
@@ -341,22 +342,23 @@ export function shockwaveDelay(s: Simulation, x: number, z: number) {
   return Math.min(1, Math.max(0, along) / SHOCKWAVE_AHEAD) * SHOCKWAVE_WAVE;
 }
 
+/** Marks everything inside the wave wedge as torn out; each piece starts when the front reaches it. */
+export function sweepShockwave(s: Simulation) {
+  for (const o of [...s.obstacles, ...s.trees]) {
+    if (inShockwave(s, o.x, o.z) && !s.cleared.includes(o.id)) {
+      s.cleared.push(o.id);
+      s.clearedAt[o.id] = s.elapsed + shockwaveDelay(s, o.x, o.z);
+    }
+  }
+}
+
 // Running into a wisp binds its power — never while another power is active.
 export function collectPowerUp(s: Simulation, p: PowerUp) {
   if (s.phase !== "running" || s.powerUp) return false;
   if (Math.hypot(s.x - p.x, s.z - p.z) > 1.1) return false;
   s.powerUp = p.type;
   s.powerUpTime = 0;
-  if (p.type === "shockwave") {
-    // The purple wave dissolves every tree, rock and bush out to the horizon;
-    // each one starts when the wave front reaches it, so the wave visibly rolls out.
-    for (const o of [...s.obstacles, ...s.trees]) {
-      if (inShockwave(s, o.x, o.z) && !s.cleared.includes(o.id)) {
-        s.cleared.push(o.id);
-        s.clearedAt[o.id] = s.elapsed + shockwaveDelay(s, o.x, o.z);
-      }
-    }
-  }
+  if (p.type === "shockwave") sweepShockwave(s);
   return true;
 }
 
@@ -433,6 +435,8 @@ export function stepSimulation(s: Simulation, steering: number, delta: number) {
   const free = s.mode === "freeroam";
   const count = Math.ceil(dt / (1 / 120));
   const sub = dt / count;
+  // The waves keep rolling for the whole power-up: whatever comes into reach is torn out too.
+  if (s.powerUp === "shockwave") sweepShockwave(s);
   for (let i = 0; i < count; i++) {
     if (s.phase !== "running") break;
     // The freezer slows the world's rush while steering stays fully responsive.
@@ -466,6 +470,49 @@ export function orientationValue(gamma: number, beta: number, angle: number) {
   const sx = a === 90 ? gy : a === 270 ? -gy : a === 180 ? -gx : gx;
   const deg = (Math.asin(Math.max(-1, Math.min(1, sx))) * 180) / Math.PI;
   return Math.max(-1, Math.min(1, deg / 25));
+}
+
+// Tilt calibration. The neutral (zero) tilt is captured once the phone is held
+// steady, and again whenever the screen rotates, the app resumes, or the value
+// has been pegged far from neutral for too long. This keeps steering from
+// sticking when the phone is turned after the run has already started.
+export const TILT_SETTLE_MS = 500;   // ignore input while the phone is still being turned
+export const TILT_SAMPLES = 6;       // steady samples averaged into the neutral
+export const TILT_STEADY = 0.08;     // max spread (~2°) of a steady sample window
+export const TILT_FORCE_MS = 1500;   // accept the average anyway after this long
+export const TILT_PEG = 1.2;         // offset (~30°) that counts as "stuck"
+export const TILT_PEG_MS = 1200;     // ...when held this long
+export type TiltCal = {
+  neutral: number | null; angle: number | null; settleUntil: number;
+  sum: number; count: number; min: number; max: number; since: number; pegSince: number;
+};
+export function makeTiltCal(): TiltCal {
+  return { neutral: null, angle: null, settleUntil: 0, sum: 0, count: 0, min: 0, max: 0, since: 0, pegSince: 0 };
+}
+/** Throw the neutral away; steering reads 0 until the phone is steady again. */
+export function resetTilt(c: TiltCal, now: number, settleMs = TILT_SETTLE_MS) {
+  c.neutral = null; c.settleUntil = now + settleMs;
+  c.sum = 0; c.count = 0; c.since = now + settleMs; c.pegSince = 0;
+}
+/** Feed one orientation sample (raw from orientationValue); returns steering tilt -1..1. */
+export function updateTilt(c: TiltCal, raw: number, angle: number, now: number) {
+  if (c.angle !== angle) { c.angle = angle; resetTilt(c, now); }
+  if (now < c.settleUntil) return 0;
+  if (c.neutral == null) {
+    if (c.count > 0 && Math.max(c.max, raw) - Math.min(c.min, raw) > TILT_STEADY && now - c.since < TILT_FORCE_MS) {
+      c.sum = 0; c.count = 0; // still moving: start the window again
+    }
+    if (c.count === 0) { c.min = raw; c.max = raw; } else { c.min = Math.min(c.min, raw); c.max = Math.max(c.max, raw); }
+    c.sum += raw; c.count++;
+    if (c.count >= TILT_SAMPLES) { c.neutral = c.sum / c.count; c.pegSince = 0; }
+    return 0;
+  }
+  const off = raw - c.neutral;
+  if (Math.abs(off) > TILT_PEG) {
+    if (c.pegSince === 0) c.pegSince = now;
+    else if (now - c.pegSince > TILT_PEG_MS) { resetTilt(c, now, 250); return 0; }
+  } else c.pegSince = 0;
+  return Math.max(-1, Math.min(1, off));
 }
 
 export type ForestMood = "night" | "day" | "auto";
