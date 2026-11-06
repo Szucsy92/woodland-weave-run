@@ -199,18 +199,28 @@ html, body { margin: 0; min-height: 100%; overscroll-behavior: none; }
 .forest-hud small { margin-left: 4px; font-size: 12px; color: var(--forest-muted); }
 .forest-seg-three button { padding: 6px 9px; font-size: 11px; }
 
-/* Soft pulsing frame glow while a power-up is active. */
+/* Every power-up: the same frame glowing inward from the screen outline (a flare on
+   pickup that settles into a soft pulse) plus a faint veil in the power-up's colour. */
+.forest-power-glow, .forest-power-veil { position: absolute; inset: 0; pointer-events: none; }
+.forest-power-glow[data-type="freezer"], .forest-power-veil[data-type="freezer"] { --pc: var(--forest-freezer); }
+.forest-power-glow[data-type="ghost"], .forest-power-veil[data-type="ghost"] { --pc: var(--forest-ghost); }
+.forest-power-glow[data-type="shockwave"], .forest-power-veil[data-type="shockwave"] { --pc: var(--forest-shock); }
 .forest-power-glow {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
   z-index: 5;
-  animation: forest-power-pulse 1.6s ease-in-out infinite;
+  box-shadow: inset 0 0 90px 18px color-mix(in srgb, var(--pc) 38%, transparent), inset 0 0 6px 1px color-mix(in srgb, white 45%, transparent);
+  animation: forest-power-in .7s ease-out, forest-power-pulse 3.4s ease-in-out .7s infinite;
 }
-.forest-power-glow[data-type="freezer"] { box-shadow: inset 0 0 90px 18px color-mix(in srgb, var(--forest-freezer) 38%, transparent), inset 0 0 6px 1px color-mix(in srgb, white 45%, transparent); animation-duration: 3.4s; }
-.forest-power-glow[data-type="ghost"] { box-shadow: inset 0 0 80px 24px color-mix(in srgb, color-mix(in srgb, var(--forest-ghost) 45%, white) 42%, transparent); }
-.forest-power-glow[data-type="shockwave"] { box-shadow: inset 0 0 80px 24px color-mix(in srgb, var(--forest-shock) 50%, transparent); }
-.forest-secret-toast { position: absolute; top: max(52px, calc(env(safe-area-inset-top) + 44px)); left: 50%; transform: translateX(-50%); padding: 7px 14px; border-radius: 8px; background: var(--forest-glass); border: 1px solid var(--forest-edge); backdrop-filter: blur(12px); color: var(--forest-text); font-size: 12px; letter-spacing: .06em; pointer-events: none; animation: forest-arrive 0.9s ease both; }
+.forest-power-veil {
+  z-index: 4;
+  background: color-mix(in srgb, var(--pc) 10%, transparent);
+  animation: forest-veil-in .6s ease-out;
+}
+@keyframes forest-power-in {
+  0% { opacity: 0; transform: scale(1.14); }
+  30% { opacity: 1; transform: scale(1); }
+  100% { opacity: .8; transform: scale(1); }
+}
+@keyframes forest-veil-in { 0% { opacity: 0; } 100% { opacity: 1; } }
 @keyframes forest-power-pulse {
   0%, 100% { opacity: .55; }
   50% { opacity: 1; }
