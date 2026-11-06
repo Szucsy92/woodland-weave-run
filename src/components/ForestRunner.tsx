@@ -4,7 +4,7 @@ import { ArrowLeft, LogOut, Pause, Settings } from "lucide-react";
 import * as THREE from "three";
 import { ForestEffects } from "./ForestEffects";
 import { ForestDrone } from "@/lib/forest/drone";
-import { beginRun, CELL, collectPowerUp, DIFFICULTIES, discoverSecret, LIGHTS_DIE, SECRET_CLEARING, SECRET_NAMES, secretsAround, SHOCKWAVE_AHEAD, SHOCKWAVE_DISSOLVE, surviveStage, type Secret, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, requestExit, requestPause, requestResume, obstaclesAround, orientationValue, placePowerUp, placeSpore, POWERUP_GAP, POWERUP_START, RADIUS, sporeOpacity, stepSimulation, treesAround, daylightFor, type Difficulty, type ForestMood, type GameMode, type Phase, type PowerUp, type PowerUpType, type Simulation } from "@/lib/forest/simulation";
+import { beginRun, canSpawnPowerUp, forestLightsAround, CELL, collectPowerUp, DIFFICULTIES, discoverSecret, LIGHTS_DIE, SECRET_CLEARING, SECRET_NAMES, secretsAround, SHOCKWAVE_AHEAD, SHOCKWAVE_DISSOLVE, surviveStage, type Secret, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, requestExit, requestPause, requestResume, obstaclesAround, orientationValue, placePowerUp, placeSpore, POWERUP_GAP, RADIUS, sporeOpacity, stepSimulation, treesAround, daylightFor, type Difficulty, type ForestMood, type GameMode, type Phase, type PowerUp, type PowerUpType, type Simulation } from "@/lib/forest/simulation";
 import { checkForUpdate, nativeUpdater, type UpdateInfo } from "@/lib/forest/updater";
 import barkUrl from "@/assets/wet-bark.jpg";
 import floorUrl from "@/assets/wet-ground.jpg";
@@ -80,6 +80,7 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
   const ground = useRef<THREE.Mesh>(null);
   const lamp = useRef<THREE.PointLight>(null);
   const glow = useRef<THREE.Group>(null);
+  const glowCell = useRef("");
   const lastImpact = useRef(0);
   const lastStumble = useRef(0);
   const lean = useRef(0);
@@ -448,7 +449,13 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
       if (crownMesh) crownMesh.instanceMatrix.needsUpdate = true;
     }
     stepSimulation(s, getSteering(input.current.touchMode, input.current.touch, input.current.tilt), raw);
-    if (s.phase !== previousPhase.current) { previousPhase.current = s.phase; onPhase(s.phase, Math.floor(s.distance)); }
+    if (s.phase !== previousPhase.current) {
+      if (s.phase === "awakening" || s.phase === "menu") {
+        orbWorld.current = [];
+        lastOrbSpawn.current = 0;
+      }
+      previousPhase.current = s.phase; onPhase(s.phase, Math.floor(s.distance));
+    }
     if (s.impact > 0 && lastImpact.current <= 0) onImpact(s.impactSide);
     lastImpact.current = s.impact;
     if (s.stumble > 0 && lastStumble.current <= 0) onStumble();
@@ -607,10 +614,9 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
       // Wisps appear only deep into the run, rare and alone — never while one
       // is still drifting ahead or a power is active.
       const live = world.filter(o => o.taken == null);
-      if (s.phase === "running" && s.mode !== "freeroam" && s.distance > POWERUP_START && live.length === 0
-          && s.distance - lastOrbSpawn.current > POWERUP_GAP && !s.powerUp) {
+      if (canSpawnPowerUp(s, lastOrbSpawn.current, live.length > 0)) {
         const index = Math.floor(s.distance / POWERUP_GAP);
-        const p = placePowerUp(s.x, s.z, index, Math.floor(s.distance));
+        const p = placePowerUp(s.x, s.z, index, Math.floor(s.distance), s.heading);
         if (p) { world.push(p); lastOrbSpawn.current = s.distance; }
       }
       orbs.current.children.forEach((slot, i) => {
@@ -633,21 +639,21 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
           const k = Math.min(1, (s.elapsed - orb.taken) / .25);
           core.position.lerp(camera.position, k * .6);
           core.position.y = THREE.MathUtils.lerp(core.position.y, camera.position.y - .35, k);
-          core.scale.setScalar(Math.max(.001, .26 * (1 - k)));
+          core.scale.setScalar(Math.max(.001, .42 * (1 - k)));
           aura.position.copy(core.position);
-          aura.scale.setScalar(Math.max(.001, 1.9 * (1 - k)));
+          aura.scale.setScalar(Math.max(.001, 2.8 * (1 - k)));
           (aura.material as THREE.SpriteMaterial).opacity = .5 * (1 - k);
           if (k >= 1) { world.splice(world.indexOf(orb), 1); slot.visible = false; }
           return;
         }
         core.position.set(orb.x, gy + Math.sin(t * 1.3 + i * 2) * .08, orb.z);
         core.rotation.y = t * .8;
-        core.scale.setScalar(.26 + Math.sin(t * 2.1 + i) * .025);
+        core.scale.setScalar(.42 + Math.sin(t * 2.1 + i) * .035);
         aura.position.copy(core.position);
-        aura.scale.setScalar(1.9 + Math.sin(t * 1.7 + i) * .22);
+        aura.scale.setScalar(2.8 + Math.sin(t * 1.7 + i) * .28);
         (aura.material as THREE.SpriteMaterial).opacity = .6 + Math.sin(t * 1.7 + i) * .12;
         // Left behind or collected by the simulation.
-        if ((orb.x - s.x) * Math.sin(s.heading) + (orb.z - s.z) * Math.cos(s.heading) > 6 || s.mode === "freeroam") { world.splice(world.indexOf(orb), 1); slot.visible = false; return; }
+        if (Math.hypot(orb.x - s.x, orb.z - s.z) > 70) { world.splice(world.indexOf(orb), 1); slot.visible = false; return; }
         if (collectPowerUp(s, orb)) { orb.taken = s.elapsed; onPowerUp(orb.type); }
       });
       // The moment a power fades, the frame glow and the haptic follow.
@@ -705,13 +711,17 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
       });
     }
     if (glow.current) {
-      // Behind the fog wall, past every visible trunk. Constant distance keeps the lights unreachable.
-      const gx = s.x - Math.sin(s.heading) * 42, gz = s.z - Math.cos(s.heading) * 42;
-      glow.current.position.set(gx, groundHeight(gx, gz) + 4.2, gz);
-      glow.current.rotation.y = s.heading;
+      const cell = `${Math.floor(s.x / 84)},${Math.floor(s.z / 84)}`;
+      if (cell !== glowCell.current) {
+        glowCell.current = cell;
+        forestLightsAround(s.x, s.z).forEach((light, i) => {
+          const cluster = glow.current?.children[i];
+          if (cluster) cluster.position.set(light.x, groundHeight(light.x, light.z) + 4.2, light.z);
+        });
+      }
       // Survive mode: the distant lights stutter and die one after another.
       const die = s.mode === "survive" && s.surviveTime >= 0 ? Math.min(1, s.surviveTime / LIGHTS_DIE) : 0;
-      glow.current.children.forEach((child, i) => {
+      glow.current.children.forEach(cluster => cluster.children.forEach((child, i) => {
         const sprite = child as THREE.Sprite;
         // Staggered: each light gutters out a little after the previous one.
         const own = Math.min(1, Math.max(0, die * 1.6 - i * .15));
@@ -725,7 +735,7 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
         } else {
           sprite.position.x = (i === 0 ? -5 : i === 1 ? 5 : 0) + Math.sin(t * .16 + i) * 1.5;
         }
-      });
+      }));
     }
   });
   return <>
@@ -793,20 +803,22 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
         <group key={i} visible={false}>
           <mesh>
             <icosahedronGeometry args={[1, 1]} />
-            <meshStandardMaterial color="#ffffff" emissive="#ffffff" emissiveIntensity={1.6} roughness={.2} />
+            <meshStandardMaterial color={palette.freezer} emissive={palette.freezer} emissiveIntensity={1.6} roughness={.2} />
           </mesh>
           <sprite>
-            <spriteMaterial map={resources.glowTexture} color="#ffffff" transparent opacity={.5} depthWrite={false} blending={THREE.AdditiveBlending} />
+            <spriteMaterial map={resources.glowTexture} color={palette.freezer} transparent opacity={.5} depthWrite={false} blending={THREE.AdditiveBlending} />
           </sprite>
         </group>
       ))}
     </group>
     <group ref={glow}>
+      {Array.from({ length: 9 }, (_, cluster) => <group key={cluster}>
         {[palette.green, palette.purple, palette.lavender, palette.purple, palette.lavender].map((color, i) => (
           <sprite key={i} renderOrder={-1}>
             <spriteMaterial map={resources.glowTexture} color={color} transparent opacity={i > 2 ? .14 : .66} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} />
           </sprite>
         ))}
+      </group>)}
     </group>
     <group ref={mist}>
       {[0, 1, 2, 3].map(i => (

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { beginRun, collectPowerUp, collide, collideObstacle, DARK_PAUSE, discoverSecret, FREEROAM_SPEED, LIGHTS_DIE, makeSimulation, MAX_HEADING, placePowerUp, POWERUP_DURATION, POWERUP_GAP, POWERUP_START, secretsAround, stepSimulation, surviveStage, type PowerUp } from "@/lib/forest/simulation";
+import { beginRun, collectPowerUp, collide, collideObstacle, DARK_PAUSE, discoverSecret, canSpawnPowerUp, forestLightsAround, LIGHTS_DIE, makeSimulation, MAX_HEADING, placePowerUp, POWERUP_DURATION, POWERUP_GAP, POWERUP_START, secretsAround, stepSimulation, surviveStage, type PowerUp } from "@/lib/forest/simulation";
 
 const orb = (type: PowerUp["type"], x = 0, z = 0): PowerUp => ({ x, z, type, id: `t-${type}` });
 
 describe("Power-up wisps", () => {
   it("only appear deep into the run, rare and spaced far apart", () => {
-    expect(POWERUP_START).toBe(300);
+    expect(POWERUP_START).toBe(100);
     expect(POWERUP_GAP).toBeGreaterThanOrEqual(120);
     // Placement itself is chance-gated: most slots stay empty.
     let placed = 0;
@@ -194,16 +194,39 @@ describe("Freeroam", () => {
     expect(s.heading).toBeGreaterThan(MAX_HEADING * 2);
   });
 
-  it("walks at an unhurried constant pace and never falls on trees", () => {
-    const s = makeSimulation();
-    s.mode = "freeroam";
-    s.phase = "running";
-    s.distance = 2000;
-    stepSimulation(s, 0, 0.05);
-    expect(s.distance - 2000).toBeCloseTo(FREEROAM_SPEED * 0.05, 3);
-    for (let i = 0; i < 5; i++) { s.x = 0; s.z = -0.3; collide(s, { x: 0, z: -0.3 - i * 0.01, scale: 1, id: `f${i}` }); }
-    expect(s.hits).toBe(0);
-    expect(s.phase).toBe("running");
+  it("runs at the same difficulty-based pace as classic", () => {
+    for (const difficulty of ["easy", "normal", "hard"] as const) {
+      const free = makeSimulation(); free.mode = "freeroam"; free.phase = "running"; free.difficulty = difficulty; free.distance = 500;
+      const classic = makeSimulation(); classic.phase = "running"; classic.difficulty = difficulty; classic.distance = 500;
+      for (let i = 0; i < 20; i++) { stepSimulation(free, 0, .05); stepSimulation(classic, 0, .05); }
+      expect(free.distance).toBeCloseTo(classic.distance, 6);
+    }
+  });
+
+  it("falls on the third tree impact while retaining unrestricted heading", () => {
+    const s = makeSimulation(); s.mode = "freeroam"; s.phase = "running"; s.heading = Math.PI;
+    for (let i = 0; i < 3; i++) {
+      s.x = .4; s.z = -i * 10; s.cooldown = 0;
+      expect(collide(s, { x: 0, z: s.z, scale: 1, id: `f${i}` })).toBe(true);
+      expect(s.phase).toBe(i === 2 ? "falling" : "running");
+    }
+    expect(s.hits).toBe(3);
+    expect(s.heading).toBeGreaterThan(MAX_HEADING);
+  });
+
+  it("stumbles on rocks just like classic", () => {
+    const s = makeSimulation(); s.mode = "freeroam"; s.phase = "running";
+    expect(collideObstacle(s, { x: 0, z: 0, big: true, radius: .7, id: "rock" })).toBe(true);
+    expect(s.stumble).toBe(1); expect(s.speedMul).toBe(.65);
+  });
+
+  it("freezer slows freeroam without changing steering", () => {
+    const a = makeSimulation(); a.mode = "freeroam"; a.phase = "running";
+    const b = makeSimulation(); b.mode = "freeroam"; b.phase = "running";
+    collectPowerUp(b, orb("freezer"));
+    stepSimulation(a, 1, .05); stepSimulation(b, 1, .05);
+    expect(b.distance).toBeLessThan(a.distance * .6);
+    expect(b.heading).toBeCloseTo(a.heading, 6);
   });
 
   it("hides secrets in the world that are discovered once each", () => {
@@ -218,5 +241,36 @@ describe("Freeroam", () => {
     expect(discoverSecret(s, secret)).toBe(true);
     expect(discoverSecret(s, secret)).toBe(false);
     expect(s.found).toEqual([secret.id]);
+  });
+});
+
+describe("Earlier power-ups and fixed forest lights", () => {
+  it("allows a first orb at exactly 100 m in every mode, never before", () => {
+    for (const mode of ["classic", "survive", "freeroam"] as const) {
+      const s = makeSimulation(); s.mode = mode; s.phase = "running";
+      s.distance = 99.99; expect(canSpawnPowerUp(s, 0, false)).toBe(false);
+      s.distance = 100; expect(canSpawnPowerUp(s, 0, false)).toBe(true);
+      expect(canSpawnPowerUp(s, 0, true)).toBe(false);
+      collectPowerUp(s, orb("ghost")); expect(canSpawnPowerUp(s, 0, false)).toBe(false);
+    }
+  });
+  it("preserves spacing between successive orbs", () => {
+    const s = makeSimulation(); s.phase = "running";
+    s.distance = 219; expect(canSpawnPowerUp(s, 100, false)).toBe(false);
+    s.distance = 220; expect(canSpawnPowerUp(s, 100, false)).toBe(true);
+  });
+  it("places orbs ahead even when running backwards", () => {
+    let p: PowerUp | null = null;
+    for (let i = 0; i < 20 && !p; i++) p = placePowerUp(0, 0, i, 100, Math.PI);
+    if (!p) throw new Error("No orb generated");
+    expect(p.z).toBeGreaterThan(28);
+  });
+  it("anchors light clusters to world cells, retaining shared locations across cells", () => {
+    const lights = forestLightsAround(0, 0);
+    expect(lights).toEqual(forestLightsAround(30, 30));
+    expect(lights).toContainEqual({ x: 20, z: 42 });
+    const next = forestLightsAround(85, 0);
+    expect(next).toContainEqual({ x: 20, z: 42 });
+    expect(next.filter(p => lights.some(q => q.x === p.x && q.z === p.z))).toHaveLength(6);
   });
 });

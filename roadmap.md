@@ -1,4 +1,7 @@
 # Roadmap
+- [x] Freeroam uses normal running, stumbles and three-hit falls, while retaining unlimited turns and secrets; rule tests and live run/turn checked
+- [x] Anchor forest lights in stable world cells instead of rotating with the player; rule tests and landscape screenshots checked
+- [x] Larger power-up orbs available from 100 m in every mode, still lasting 5 s; 56 checks pass (pickup appearance not reached in browser)
 - [x] Make hardware volume keys control game media and stop output in silent/vibrate mode; 10 audio lifecycle tests and 5 native policy checks pass; isolated browser playback suspends/restores
 - [ ] Verify speaker noise is absent on the installed update (requires physical phone)
 - [x] Silence audio output at zero device volume and when sound is off; verify automated lifecycle tests
@@ -34,6 +37,6 @@
 - [ ] Verify first permanently signed GitHub APK publication (GitHub signed the APK successfully; certificate comparison failed, corrected diagnostic/parser awaits Lovable Git sync and a new workflow run)
 - [ ] Verify in-place device update (requires installing the first permanently signed APK, then a newer signed APK)
 - [x] Start/end/threat WAV stings; survive sequence (lights die at 10 m, hum dulls, ~1.75 s dark, then red flood + threat + ember spores together)
-- [x] Power-ups from 300 m, bigger, 5 s, vivid blue freezer, shockwave glitch-dissolves trees too
-- [x] Freeroam mode: free 360° walking, no falls, three kinds of hidden secrets remembered on the device
+- [x] Power-ups from 100 m, bigger, 5 s, vivid blue freezer, shockwave glitch-dissolves trees too
+- [x] Freeroam mode: normal running and falls with free 360° turns, three kinds of hidden secrets remembered on the device
 - [ ] Feel/sound check of the new survive sequence and freeroam on a phone (requires installed APK)
