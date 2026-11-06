@@ -1,4 +1,7 @@
 # Roadmap
+- [ ] Freeroam uses normal running, stumbles and three-hit falls, while retaining unlimited turns and secrets
+- [ ] Anchor forest lights in the world instead of rotating with the player
+- [ ] Larger power-up orbs available from 100 m in every mode, still lasting 5 s; verify rules and live play
 - [x] Make hardware volume keys control game media and stop output in silent/vibrate mode; 10 audio lifecycle tests and 5 native policy checks pass; isolated browser playback suspends/restores
 - [ ] Verify speaker noise is absent on the installed update (requires physical phone)
 - [x] Silence audio output at zero device volume and when sound is off; verify automated lifecycle tests
