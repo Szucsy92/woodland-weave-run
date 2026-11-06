@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { beginRun, collectPowerUp, collide, collideObstacle, DARK_PAUSE, discoverSecret, canSpawnPowerUp, forestLightsAround, fixedForestLights, forestLightsFor, LIGHTS_DIE, makeSimulation, MAX_HEADING, placePowerUp, POWERUP_DURATION, POWERUP_GAP, POWERUP_START, secretsAround, stepSimulation, surviveStage, type PowerUp } from "@/lib/forest/simulation";
+import { beginRun, collectPowerUp, collide, collideObstacle, DARK_PAUSE, discoverSecret, canSpawnPowerUp, forestLightsAround, fixedForestLights, forestLightsFor, gatesAround, passGate, surviveOn, GATE_REARM, LIGHTS_DIE, makeSimulation, MAX_HEADING, placePowerUp, POWERUP_DURATION, POWERUP_GAP, POWERUP_START, SHOCKWAVE_AHEAD, shockwaveDelay, secretsAround, stepSimulation, surviveStage, type PowerUp } from "@/lib/forest/simulation";
 
 const orb = (type: PowerUp["type"], x = 0, z = 0): PowerUp => ({ x, z, type, id: `t-${type}` });
 
@@ -77,7 +77,7 @@ describe("Power-up wisps", () => {
   it("shockwave leaves obstacles outside the wave untouched", () => {
     const s = makeSimulation();
     s.phase = "running";
-    const far = { x: 1, z: -30, big: false, radius: 0.3, id: "o2" };
+    const far = { x: 1, z: -(SHOCKWAVE_AHEAD + 10), big: false, radius: 0.3, id: "o2" };
     s.obstacles = [far];
     collectPowerUp(s, orb("shockwave"));
     expect(s.cleared).not.toContain("o2");
@@ -276,10 +276,64 @@ describe("Earlier power-ups and fixed forest lights", () => {
   it("keeps lights fixed relative to the runner in classic and survive, world-anchored only in freeroam", () => {
     const a = fixedForestLights(0, 0, 0), b = fixedForestLights(500, -900, 0);
     a.forEach((l, i) => { expect(b[i]!.x - 500).toBeCloseTo(l.x); expect(b[i]!.z + 900).toBeCloseTo(l.z); });
+    expect(a).toHaveLength(1);
     expect(a.length).toBeLessThan(forestLightsAround(0, 0).length);
     expect(a.every(l => l.z < 0)).toBe(true);
     expect(forestLightsFor("classic", 30, 30, .3)).toEqual(fixedForestLights(30, 30, .3));
     expect(forestLightsFor("survive", 30, 30, .3)).toEqual(fixedForestLights(30, 30, .3));
     expect(forestLightsFor("freeroam", 30, 30, .3)).toEqual(forestLightsAround(30, 30));
+  });
+  it("shockwave clears trees out to the horizon in a widening wedge, rolling outward", () => {
+    const s = makeSimulation();
+    s.phase = "running";
+    const near = { x: 0, z: -6, scale: 1, id: "n" }, horizon = { x: 5, z: -40, scale: 1, id: "h" };
+    const wide = { x: 40, z: -40, scale: 1, id: "w" }, side = { x: 40, z: -10, scale: 1, id: "s" };
+    const beyond = { x: 0, z: -(SHOCKWAVE_AHEAD + 8), scale: 1, id: "b" }, behind = { x: 0, z: 20, scale: 1, id: "k" };
+    s.trees = [near, horizon, wide, side, beyond, behind];
+    collectPowerUp(s, orb("shockwave"));
+    expect(s.cleared).toEqual(expect.arrayContaining(["n", "h", "w"]));
+    expect(s.cleared).not.toContain("s");
+    expect(s.cleared).not.toContain("b");
+    expect(s.cleared).not.toContain("k");
+    expect(s.clearedAt["h"]!).toBeGreaterThan(s.clearedAt["n"]!);
+    expect(shockwaveDelay(s, 0, 0)).toBe(0);
+  });
+  it("red gates toggle the survive atmosphere in freeroam, once per pass", () => {
+    const s = makeSimulation(); s.mode = "freeroam"; s.phase = "running";
+    const gate = { x: 0, z: -30, angle: 0, id: "gt" };
+    expect(surviveStage(s)).toBe("lit");
+    // Off to the side of the opening: nothing happens.
+    s.x = 6; s.z = -30;
+    expect(passGate(s, gate)).toBe(false);
+    // Through the opening: the dying lights start, then dark, then red.
+    s.x = 0.5; s.z = -30;
+    expect(passGate(s, gate)).toBe(true);
+    expect(surviveOn(s)).toBe(true);
+    expect(surviveStage(s)).toBe("dying");
+    for (let i = 0; i < 70; i++) stepSimulation(s, 0, .05);
+    expect(surviveStage(s)).toBe("red");
+    // Standing in the gate does not retrigger it.
+    expect(passGate(s, gate)).toBe(false);
+    // Walk away, come back through: the atmosphere switches off again.
+    s.x = 0; s.z = -30 + GATE_REARM + 1;
+    expect(passGate(s, gate)).toBe(false);
+    s.x = 0.5; s.z = -30;
+    expect(passGate(s, gate)).toBe(true);
+    expect(surviveStage(s)).toBe("lit");
+    expect(surviveOn(s)).toBe(false);
+  });
+
+  it("gates exist only in freeroam, away from the start, and the pursuer flares on impacts once on", () => {
+    expect(gatesAround(0, 0).every(g => g.id !== "g0:0")).toBe(true);
+    expect(gatesAround(0, 0)).toEqual(gatesAround(10, 10));
+    const gate = { x: 0, z: 0, angle: 0, id: "gx" };
+    const c = makeSimulation(); c.mode = "classic"; c.phase = "running";
+    expect(passGate(c, gate)).toBe(false);
+    const f = makeSimulation(); f.mode = "freeroam"; f.phase = "running";
+    expect(collide(f, { x: 0, z: -0.3, scale: 1, id: "tt" })).toBe(true);
+    expect(f.threat).toBe(0);
+    f.surviveTime = 0; f.hits = 0; f.cooldown = 0; f.x = 0; f.z = 0; f.pushX = 0;
+    expect(collide(f, { x: 0, z: -0.3, scale: 1, id: "tu" })).toBe(true);
+    expect(f.threat).toBe(1);
   });
 });
