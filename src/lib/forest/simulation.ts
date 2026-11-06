@@ -30,9 +30,13 @@ export const SHOCKWAVE_AHEAD = FOG_END + 6;
 export const SHOCKWAVE_SIDE = 7;
 export const SHOCKWAVE_SPREAD = 1.25;
 // The wave front rolls out over this long; farther trees start dissolving later.
-export const SHOCKWAVE_WAVE = 0.7;
+export const SHOCKWAVE_WAVE = 1.5;
+// Sparse purple rings: one is sent every SHOCKWAVE_GAP seconds, each taking SHOCKWAVE_WAVE to run
+// all the way through the forest to the vanishing point (4 rings fit the 5 s power-up).
+export const SHOCKWAVE_GAP = 1.15;
+export const SHOCKWAVE_RINGS = 4;
 // Each tree is shoved forward into the depth and torn out over this long.
-export const SHOCKWAVE_DISSOLVE = 1.4;
+export const SHOCKWAVE_DISSOLVE = 0.8;
 export function canSpawnPowerUp(s: Simulation, lastSpawn: number, hasLiveOrb: boolean) {
   return s.phase === "running" && s.distance >= POWERUP_START && !s.powerUp && !hasLiveOrb
     && (lastSpawn === 0 || s.distance - lastSpawn >= POWERUP_GAP);
@@ -336,10 +340,20 @@ export function inShockwave(s: Simulation, x: number, z: number) {
   return along > -1 && along < SHOCKWAVE_AHEAD && Math.abs(lateral) < SHOCKWAVE_SIDE + Math.max(0, along) * SHOCKWAVE_SPREAD;
 }
 
-/** Seconds until the rolling wave front reaches a point (0 beside the runner). */
+/**
+ * Seconds until a ring front reaches a point (0 beside the runner). Rings run at a
+ * steady pace through the forest, so a tree is torn out the moment the next ring
+ * passes its depth; with no ring left to come it goes at once.
+ */
 export function shockwaveDelay(s: Simulation, x: number, z: number) {
   const along = -(x - s.x) * Math.sin(s.heading) - (z - s.z) * Math.cos(s.heading);
-  return Math.min(1, Math.max(0, along) / SHOCKWAVE_AHEAD) * SHOCKWAVE_WAVE;
+  const travel = Math.min(1, Math.max(0, along) / SHOCKWAVE_AHEAD) * SHOCKWAVE_WAVE;
+  const now = s.powerUp === "shockwave" ? s.powerUpTime : 0;
+  for (let i = 0; i < SHOCKWAVE_RINGS; i++) {
+    const reach = i * SHOCKWAVE_GAP + travel;
+    if (reach >= now - 1e-6) return reach - now;
+  }
+  return 0;
 }
 
 /** Marks everything inside the wave wedge as torn out; each piece starts when the front reaches it. */
