@@ -40,6 +40,18 @@ export function forestLightsAround(x: number, z: number) {
     return { x: gx * 84 + 20, z: gz * 84 + 42 };
   });
 }
+// Classic and survive keep the lights fixed relative to the runner: a few
+// far lights ahead that follow the heading, so nothing repeats or pops when
+// the world cell changes. Only freeroam uses the world-cell lattice above.
+const FIXED_LIGHTS = [{ ahead: 100, side: 0 }, { ahead: 85, side: -32 }, { ahead: 85, side: 32 }];
+export function fixedForestLights(x: number, z: number, heading: number) {
+  const fx = -Math.sin(heading), fz = -Math.cos(heading);
+  const rx = Math.cos(heading), rz = -Math.sin(heading);
+  return FIXED_LIGHTS.map(l => ({ x: x + fx * l.ahead + rx * l.side, z: z + fz * l.ahead + rz * l.side }));
+}
+export function forestLightsFor(mode: GameMode, x: number, z: number, heading: number) {
+  return mode === "freeroam" ? forestLightsAround(x, z) : fixedForestLights(x, z, heading);
+}
 export function placePowerUp(x: number, z: number, index: number, generation: number, heading = 0): PowerUp | null {
   if (hash(index, generation, 31) > 0.4) return null;
   const type = POWERUP_TYPES[Math.floor(hash(index, generation, 32) * 3)] ?? "freezer";
