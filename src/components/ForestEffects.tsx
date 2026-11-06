@@ -5,17 +5,21 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
-import { DARK_PAUSE, EXIT_TIME, IMPACT_DURATION, LIGHTS_DIE, PAUSE_SLOW, POWERUP_DURATION, RESUME_TIME, type Simulation } from "@/lib/forest/simulation";
+import { DARK_PAUSE, EXIT_TIME, IMPACT_DURATION, LIGHTS_DIE, PAUSE_SLOW, POWERUP_DURATION, RESUME_TIME, SHOCKWAVE_AHEAD, SHOCKWAVE_GAP, SHOCKWAVE_RINGS, SHOCKWAVE_WAVE, type Simulation } from "@/lib/forest/simulation";
 
 export function ForestEffects({ simulation }: { simulation: MutableRefObject<Simulation> }) {
   const { gl, scene, camera, size } = useThree();
   const { composer, effect } = useMemo(() => {
     const composer = new EffectComposer(gl);
     const effect = new ShaderPass({
-      uniforms: { tDiffuse: { value: null }, blur: { value: 0 }, glitch: { value: 0 }, frost: { value: 0 }, lens: { value: 0 }, wave: { value: 0 }, time: { value: 0 }, resolution: { value: new THREE.Vector2() } },
+      uniforms: { tDiffuse: { value: null }, blur: { value: 0 }, glitch: { value: 0 }, frost: { value: 0 }, lens: { value: 0 }, wave: { value: 0 }, waveT: { value: 0 }, time: { value: 0 }, resolution: { value: new THREE.Vector2() } },
       vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
       fragmentShader: `
-        varying vec2 vUv; uniform sampler2D tDiffuse; uniform float blur,glitch,frost,lens,wave,time; uniform vec2 resolution;
+        #define RINGS ${SHOCKWAVE_RINGS}
+        #define GAP ${SHOCKWAVE_GAP.toFixed(3)}
+        #define WAVE ${SHOCKWAVE_WAVE.toFixed(3)}
+        #define AHEAD ${SHOCKWAVE_AHEAD.toFixed(2)}
+        varying vec2 vUv; uniform sampler2D tDiffuse; uniform float blur,glitch,frost,lens,wave,waveT,time; uniform vec2 resolution;
         vec3 sampleBlur(vec2 uv) {
           vec2 d=vec2(blur*8.)/resolution;
           return (texture2D(tDiffuse,uv).rgb*4. + texture2D(tDiffuse,uv+d).rgb + texture2D(tDiffuse,uv-d).rgb + texture2D(tDiffuse,uv+vec2(d.x,-d.y)).rgb + texture2D(tDiffuse,uv+vec2(-d.x,d.y)).rgb)/8.;
@@ -27,9 +31,20 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
           float r=length(q);
           // Elastic fisheye on pickup: the picture bulges, then springs back and wobbles out.
           vec2 base=.5+d*(1.+lens*dot(q,q)*1.6);
-          // Shockwave: translucent purple wave fronts rush from the screen edge inward
-          // to the vanishing point, as if flying forward into the depth.
-          float w=pow(.5+.5*sin((r*2.6+time*1.15)*6.2832),3.)*smoothstep(.06,.4,r)*wave;
+          // Shockwave: a few sparse, translucent purple rings. Each is born at the screen edge
+          // and shrinks all the way to the vanishing point (perspective: radius ~ 1/depth),
+          // as if it ran through the whole forest.
+          float w=0.;
+          for(int i=0;i<RINGS;i++){
+            float a=waveT-float(i)*GAP;
+            if(a>0. && a<WAVE){
+              float p=a/WAVE;
+              float r0=1.25*3./(3.+p*AHEAD);
+              float e=(r-r0)/(.014+.06*r0);
+              w+=exp(-e*e)*smoothstep(0.,.07,p)*(1.-smoothstep(.82,1.,p));
+            }
+          }
+          w=min(1.,w)*wave;
           base+=q/max(r,.001)*w*.012*vec2(1./asp,1.);
           float band=sin(vUv.y*160.+time*14.)*sin(vUv.y*37.-time*6.);
           vec2 uv=base+vec2(band*glitch*.008,0.);
@@ -45,7 +60,7 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
           float rim=smoothstep(.3,.8,length(vUv-.5));
           float crystal=pow(max(0.,sin(vUv.x*210.+time*.4)*sin(vUv.y*190.-time*.3)),14.);
           c+=vec3(.55,.8,1.)*frost*(rim*.16+rim*crystal*.5);
-          c+=vec3(.6,.25,1.)*w*.34+vec3(.85,.7,1.)*pow(w,3.)*.22;
+          c+=vec3(.6,.25,1.)*w*.4+vec3(.85,.7,1.)*pow(w,3.)*.25;
           gl_FragColor=vec4(c,1.);
         }`,
     });
@@ -92,12 +107,20 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
       // The freezer stays calm: a soft cold bloom instead of a glitch tear.
       effect.uniforms["glitch"]!.value += s.powerUp === "freezer" ? surge * .3 : (s.powerUp === "shockwave" ? surge * .5 : surge) + fade + .05;
     }
-    // Elastic lens: a damped spring kicks in at pickup (bulge, overshoot, settle).
-    const lensT = s.powerUp ? s.powerUpTime : 99;
-    effect.uniforms["lens"]!.value = lensT < 2.4 ? .45 * Math.exp(-lensT * 3.2) * Math.cos(lensT * 14) : 0;
-    // Shockwave fronts run for the whole power-up, easing in and out.
+    // Elastic lens on every power-up: a damped spring kicks in at pickup (bulge, overshoot,
+    // settle). The shockwave repeats a milder kick as each ring is born.
+    let lens = 0;
+    if (s.powerUp) {
+      const a = s.powerUpTime;
+      const ring = s.powerUp === "shockwave" ? Math.min(SHOCKWAVE_RINGS - 1, Math.floor(a / SHOCKWAVE_GAP)) : 0;
+      const age = a - ring * SHOCKWAVE_GAP;
+      lens = (ring === 0 ? .6 : .3) * Math.exp(-age * 3.2) * Math.cos(age * 14);
+    }
+    effect.uniforms["lens"]!.value = lens;
+    // Shockwave rings run for the whole power-up, easing in and out.
+    effect.uniforms["waveT"]!.value = s.powerUp === "shockwave" ? s.powerUpTime : -1;
     effect.uniforms["wave"]!.value = s.powerUp === "shockwave"
-      ? Math.min(1, s.powerUpTime / .35) * Math.min(1, (POWERUP_DURATION - s.powerUpTime) / .5) : 0;
+      ? Math.min(1, s.powerUpTime / .2) * Math.min(1, (POWERUP_DURATION - s.powerUpTime) / .3) : 0;
     const frostTarget = s.powerUp === "freezer" ? Math.min(1, (POWERUP_DURATION - s.powerUpTime) / .9) : 0;
     frost.current += (frostTarget - frost.current) * Math.min(1, delta * 4);
     effect.uniforms["frost"]!.value = frost.current < .005 ? 0 : frost.current;

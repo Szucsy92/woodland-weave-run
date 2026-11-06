@@ -496,10 +496,10 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
       // The wave shoves it forward into the depth with growing speed, tips it
       // over and rips it up out of the ground; only at the very end it is gone.
       const fx = -Math.sin(s.heading), fz = -Math.cos(s.heading);
-      const push = k * k * (16 + hash(seed, 7, 404) * 8);
-      const lift = Math.sin(Math.min(1, k * 1.6) * Math.PI * .5) * (1.2 + hash(seed, 8, 405) * 1.6) * k;
-      const tip = k * (.5 + hash(seed, 9, 406) * .6);
-      const shrink = 1 - THREE.MathUtils.smoothstep(k, .72, 1);
+      const push = Math.pow(k, 1.4) * (34 + hash(seed, 7, 404) * 16);
+      const lift = Math.sin(Math.min(1, k * 2.6) * Math.PI * .5) * (1.6 + hash(seed, 8, 405) * 2.2) * Math.min(1, k * 1.8);
+      const tip = Math.min(1, k * 1.8) * (.7 + hash(seed, 9, 406) * .7);
+      const shrink = 1 - THREE.MathUtils.smoothstep(k, .8, 1);
       const [first] = slots;
       if (!first) continue;
       tmpM.copy(saved[0] ?? tmpM);
@@ -694,10 +694,10 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
       // Ghost wisp: trunks, roots and branches turn into pale, softly glowing,
       // see-through ghosts (the crowns only slightly), fading in and out.
       const ghostLeft = POWERUP_DURATION - s.powerUpTime;
-      const ghostTarget = s.powerUp === "ghost" ? (ghostLeft < .6 ? .6 + .4 * Math.sin(ghostLeft * 40) : 1) : 0;
-      ghostK.current += (ghostTarget - ghostK.current) * Math.min(1, raw * 7);
+      const ghostTarget = s.powerUp === "ghost" ? THREE.MathUtils.smootherstep(ghostLeft, 0, 1.6) : 0;
+      ghostK.current += (ghostTarget - ghostK.current) * Math.min(1, raw * (ghostTarget > ghostK.current ? 7 : 5));
       const g = ghostK.current < .01 ? 0 : ghostK.current;
-      ([[resources.trunkMaterial, .62, .95], [branchMat.current, .62, .95], [resources.crownMaterial, .3, .35]] as const).forEach(([mat, fade, glow]) => {
+      ([[resources.trunkMaterial, .34, .55], [branchMat.current, .34, .55], [resources.crownMaterial, .16, .2]] as const).forEach(([mat, fade, glow]) => {
         if (!mat) return;
         const on = g > 0;
         // Flipping transparency needs a recompile, otherwise three.js keeps the opaque shader and ignores opacity.
@@ -991,6 +991,10 @@ export function ForestRunner() {
   const [difficulty, setDifficulty] = useState<Difficulty>("easy");
   const [mode, setMode] = useState<GameMode>("classic");
   const [activePower, setActivePower] = useState<PowerUpType | null>(null);
+  // The frame and veil melt away instead of vanishing when a power-up ends.
+  const [leavingPower, setLeavingPower] = useState<PowerUpType | null>(null);
+  const lastPowerType = useRef<PowerUpType | null>(null);
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [mood, setMood] = useState<ForestMood>("night");
   const moodRef = useRef<ForestMood>("night");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1139,11 +1143,17 @@ export function ForestRunner() {
     if (hapticsRef.current) buzz(22);
   }, []);
   const onPowerUp = useCallback((type: PowerUpType) => {
+    if (leaveTimer.current) clearTimeout(leaveTimer.current);
+    setLeavingPower(null);
+    lastPowerType.current = type;
     setActivePower(type);
     if (hapticsRef.current) buzz([35, 30, 60]);
   }, []);
   const onPowerUpEnd = useCallback(() => {
     setActivePower(null);
+    setLeavingPower(lastPowerType.current);
+    if (leaveTimer.current) clearTimeout(leaveTimer.current);
+    leaveTimer.current = setTimeout(() => setLeavingPower(null), 1100);
     if (hapticsRef.current) buzz(25);
   }, []);
   const onThreat = useCallback(() => {
@@ -1352,7 +1362,7 @@ export function ForestRunner() {
       <DayCycle mood={moodRef} night={palette} red={red} />
     </Canvas>}
     {(phase === "running" || phase === "awakening" || phase === "falling") && <Hud simulation={simulation} secrets={mode === "freeroam" ? secretCount : null} />}
-    {activePower && <><div className="forest-power-veil" data-type={activePower} aria-hidden /><div className="forest-power-glow" data-type={activePower} aria-hidden /></>}
+    {(activePower ?? leavingPower) && <><div className={`forest-power-veil${activePower ? "" : " is-out"}`} data-type={activePower ?? leavingPower ?? undefined} aria-hidden /><div className={`forest-power-glow${activePower ? "" : " is-out"}`} data-type={activePower ?? leavingPower ?? undefined} aria-hidden /></>}
     {(phase === "running" || phase === "awakening") && pauseUi === "none" && (
       <button className="forest-pause" data-forest-ui onClick={pauseRun} aria-label="Pause"><Pause size={18} /></button>
     )}
