@@ -19,8 +19,8 @@ export type PowerUpType = "freezer" | "ghost" | "shockwave";
 export type PowerUp = { x: number; z: number; type: PowerUpType; id: string };
 export type Simulation = ReturnType<typeof makeSimulation>;
 
-// Lone wisps appear from 300 m, rare and one at a time.
-export const POWERUP_START = 300;
+// Lone wisps appear from 100 m, rare and one at a time.
+export const POWERUP_START = 100;
 export const POWERUP_DURATION = 5;
 export const POWERUP_GAP = 120;
 export const POWERUP_TYPES: PowerUpType[] = ["freezer", "ghost", "shockwave"];
@@ -28,12 +28,26 @@ export const POWERUP_TYPES: PowerUpType[] = ["freezer", "ghost", "shockwave"];
 export const SHOCKWAVE_AHEAD = 16;
 export const SHOCKWAVE_SIDE = 7;
 export const SHOCKWAVE_DISSOLVE = 0.9;
-export function placePowerUp(x: number, z: number, index: number, generation: number): PowerUp | null {
+export function canSpawnPowerUp(s: Simulation, lastSpawn: number, hasLiveOrb: boolean) {
+  return s.phase === "running" && s.distance >= POWERUP_START && !s.powerUp && !hasLiveOrb
+    && (lastSpawn === 0 || s.distance - lastSpawn >= POWERUP_GAP);
+}
+// Stable world cells: turning or moving inside a cell never moves its lights.
+export function forestLightsAround(x: number, z: number) {
+  const cx = Math.floor(x / 84), cz = Math.floor(z / 84);
+  return Array.from({ length: 9 }, (_, i) => {
+    const gx = cx + i % 3 - 1, gz = cz + Math.floor(i / 3) - 1;
+    return { x: gx * 84 + 20, z: gz * 84 + 42 };
+  });
+}
+export function placePowerUp(x: number, z: number, index: number, generation: number, heading = 0): PowerUp | null {
   if (hash(index, generation, 31) > 0.4) return null;
   const type = POWERUP_TYPES[Math.floor(hash(index, generation, 32) * 3)] ?? "freezer";
+  const side = (hash(index, generation, 33) - .5) * 14;
+  const ahead = 28 + hash(index, generation, 34) * 22;
   return {
-    x: x + (hash(index, generation, 33) - .5) * 14,
-    z: z - (28 + hash(index, generation, 34) * 22),
+    x: x + side * Math.cos(heading) - ahead * Math.sin(heading),
+    z: z - side * Math.sin(heading) - ahead * Math.cos(heading),
     type,
     id: `p${index}:${generation}`,
   };
@@ -52,8 +66,7 @@ export function surviveStage(s: Simulation): SurviveStage {
   return "red";
 }
 
-// Freeroam: an unhurried walk in any direction, no fatal impacts.
-export const FREEROAM_SPEED = 4.2;
+// Freeroam keeps normal running rules, with unlimited turning.
 export const FREEROAM_TURN = 1.5;
 
 // Hidden secrets for freeroam, one chance per large world cell.
@@ -208,13 +221,6 @@ export function collide(s: Simulation, tree: Tree) {
   const radius = 0.45 * tree.scale + 0.22;
   const distance = Math.hypot(dx, dz);
   if (distance >= radius) return false;
-  if (s.mode === "freeroam") {
-    // Wandering: simply slide around the trunk, never a hit.
-    const nx = distance > 0.001 ? dx / distance : 1, nz = distance > 0.001 ? dz / distance : 0;
-    s.x = tree.x + nx * (radius + 0.01);
-    s.z = tree.z + nz * (radius + 0.01);
-    return false;
-  }
   const side = dx === 0 ? (hash(Math.floor(tree.x), Math.floor(tree.z), 7) > 0.5 ? 1 : -1) : Math.sign(dx);
   const nz = distance > 0.001 ? dz / distance : 0;
   if (nz > 0) {
@@ -227,7 +233,8 @@ export function collide(s: Simulation, tree: Tree) {
     s.z += nz * (radius - distance + 0.01);
   }
   s.pushX = side * 3.5;
-  s.heading = Math.max(-MAX_HEADING, Math.min(MAX_HEADING, s.heading - side * 0.14));
+  s.heading = s.mode === "freeroam" ? s.heading - side * 0.14
+    : Math.max(-MAX_HEADING, Math.min(MAX_HEADING, s.heading - side * 0.14));
   if (s.cooldown > 0 || s.lastTree === tree.id) return false;
   s.hits += 1;
   s.cooldown = 0.9;
@@ -244,7 +251,7 @@ export function collide(s: Simulation, tree: Tree) {
 // speed) for big rocks, a brief drag (0.5 s at 85%) for undergrowth.
 export function collideObstacle(s: Simulation, obstacle: Obstacle) {
   if (s.phase !== "running" || s.stumble > 0) return false;
-  if (s.mode === "freeroam" || s.powerUp === "ghost") return false;
+  if (s.powerUp === "ghost") return false;
   // The shockwave flattened this patch of undergrowth earlier in the run.
   if (s.cleared.includes(obstacle.id)) return false;
   const distance = Math.hypot(s.x - obstacle.x, s.z - obstacle.z);
@@ -356,7 +363,7 @@ export function stepSimulation(s: Simulation, steering: number, delta: number) {
   for (let i = 0; i < count; i++) {
     if (s.phase !== "running") break;
     // The freezer slows the world's rush while steering stays fully responsive.
-    const speed = free ? FREEROAM_SPEED : Math.min(level.maxSpeed, BASE_SPEED + s.distance / level.accel)
+    const speed = Math.min(level.maxSpeed, BASE_SPEED + s.distance / level.accel)
       * (s.stumble > 0 ? s.speedMul : 1) * (s.powerUp === "freezer" ? 0.55 : 1);
     // Freeroam turns without limit, so the walker can head any way, even back.
     s.heading = free ? s.heading - steering * FREEROAM_TURN * sub
