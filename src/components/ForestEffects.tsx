@@ -18,6 +18,8 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
         #define RINGS ${SHOCKWAVE_RINGS}
         #define GAP ${SHOCKWAVE_GAP.toFixed(3)}
         #define WAVE ${SHOCKWAVE_WAVE.toFixed(3)}
+        // Ring see-through: 0.5 = twice as transparent as before.
+        #define RING_GLOW 0.5
         #define AHEAD ${SHOCKWAVE_AHEAD.toFixed(2)}
         varying vec2 vUv; uniform sampler2D tDiffuse; uniform float blur,glitch,frost,lens,wave,waveT,time; uniform vec2 resolution;
         vec3 sampleBlur(vec2 uv) {
@@ -60,7 +62,7 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
           float rim=smoothstep(.3,.8,length(vUv-.5));
           float crystal=pow(max(0.,sin(vUv.x*210.+time*.4)*sin(vUv.y*190.-time*.3)),14.);
           c+=vec3(.55,.8,1.)*frost*(rim*.16+rim*crystal*.5);
-          c+=vec3(.6,.25,1.)*w*.4+vec3(.85,.7,1.)*pow(w,3.)*.25;
+          c+=(vec3(.6,.25,1.)*w*.4+vec3(.85,.7,1.)*pow(w,3.)*.25)*RING_GLOW;
           gl_FragColor=vec4(c,1.);
         }`,
     });
@@ -114,7 +116,7 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
       const a = s.powerUpTime;
       const ring = s.powerUp === "shockwave" ? Math.min(SHOCKWAVE_RINGS - 1, Math.floor(a / SHOCKWAVE_GAP)) : 0;
       const age = a - ring * SHOCKWAVE_GAP;
-      lens = (ring === 0 ? .6 : .3) * Math.exp(-age * 3.2) * Math.cos(age * 14);
+      lens = (ring === 0 ? .95 : .5) * Math.exp(-age * 3.2) * Math.cos(age * 14);
     }
     effect.uniforms["lens"]!.value = lens;
     // Shockwave rings run for the whole power-up, easing in and out.
