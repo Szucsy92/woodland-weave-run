@@ -4,7 +4,7 @@ import { ArrowLeft, LogOut, Pause, Settings } from "lucide-react";
 import * as THREE from "three";
 import { ForestEffects } from "./ForestEffects";
 import { ForestDrone } from "@/lib/forest/drone";
-import { beginRun, canSpawnPowerUp, forestLightsFor, CELL, collectPowerUp, DIFFICULTIES, discoverSecret, LIGHTS_DIE, SECRET_CLEARING, SECRET_NAMES, secretsAround, SHOCKWAVE_AHEAD, SHOCKWAVE_DISSOLVE, surviveStage, type Secret, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, requestExit, requestPause, requestResume, obstaclesAround, orientationValue, placePowerUp, placeSpore, POWERUP_GAP, RADIUS, sporeOpacity, stepSimulation, treesAround, daylightFor, type Difficulty, type ForestMood, type GameMode, type Phase, type PowerUp, type PowerUpType, type Simulation } from "@/lib/forest/simulation";
+import { beginRun, canSpawnPowerUp, forestLightsFor, CELL, collectPowerUp, DIFFICULTIES, discoverSecret, GATE_CLEARING, GATE_HALF, gatesAround, type Gate, LIGHTS_DIE, passGate, SECRET_CLEARING, SECRET_NAMES, secretsAround, SHOCKWAVE_AHEAD, SHOCKWAVE_DISSOLVE, SHOCKWAVE_WAVE, surviveStage, type Secret, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, requestExit, requestPause, requestResume, obstaclesAround, orientationValue, placePowerUp, placeSpore, POWERUP_DURATION, POWERUP_GAP, RADIUS, sporeOpacity, stepSimulation, treesAround, daylightFor, type Difficulty, type ForestMood, type GameMode, type Phase, type PowerUp, type PowerUpType, type Simulation } from "@/lib/forest/simulation";
 import { checkForUpdate, nativeUpdater, type UpdateInfo } from "@/lib/forest/updater";
 import barkUrl from "@/assets/wet-bark.jpg";
 import floorUrl from "@/assets/wet-ground.jpg";
@@ -49,13 +49,14 @@ float groundHeight(float x, float z) {
 }`;
 
 const ORB_SLOTS = 2;
+const GHOST_GLOW = "#eaf6ff";
 const ORB_KEY: Record<PowerUpType, "freezer" | "ghost" | "shock"> = { freezer: "freezer", ghost: "ghost", shockwave: "shock" };
 const SECRET_SLOTS = 9;
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 /** Shared survive-mode red amount (0..1) read by the scene lights and fog. */
 export type RedRef = MutableRefObject<number>;
 
-function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, onPowerUp, onPowerUpEnd, onThreat, onDark, onSecret }: {
+function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, onPowerUp, onPowerUpEnd, onThreat, onDark, onLit, onGate, onSecret }: {
   simulation: MutableRefObject<Simulation>;
   input: MutableRefObject<Input>;
   palette: Palette;
@@ -66,6 +67,8 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
   onPowerUpEnd: () => void;
   onThreat: () => void;
   onDark: () => void;
+  onLit: () => void;
+  onGate: () => void;
   onSecret: (secret: Secret) => void;
   red: RedRef;
 }) {
@@ -90,6 +93,8 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
   const orbWorld = useRef<(PowerUp & { taken?: number })[]>([]);
   const lastOrbSpawn = useRef(0);
   const lastPowerUp = useRef<PowerUpType | null>(null);
+  // Smoothed 0..1 ghost amount, so trees fade into and out of their ghost look.
+  const ghostK = useRef(0);
   const redLight = useRef<THREE.PointLight>(null);
   const redFlood = useRef<THREE.DirectionalLight>(null);
   const redTarget = useMemo(() => new THREE.Object3D(), []);
@@ -97,6 +102,13 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
   const redMix = red;
   const ring = useRef<THREE.Mesh>(null);
   const secretGroup = useRef<THREE.Group>(null);
+  const gateGroup = useRef<THREE.Group>(null);
+  const gateWorld = useRef<Gate[]>([]);
+  // Smoothed share of the canopy lights that has gone out (0 lit .. 1 dead).
+  const dieRef = useRef(0);
+  // Shared by the trunk, crown and bush shaders: how much of the green/purple
+  // canopy light is left, and how far it has turned to the pursuer's red.
+  const glowUniforms = useMemo(() => ({ uLights: { value: 1 }, uRed: { value: 0 } }), []);
   const secretWorld = useRef<Secret[]>([]);
   // Instance slots per tree/obstacle id, and pristine matrices for the glitch dissolve.
   const slotMap = useRef(new Map<string, [THREE.InstancedMesh, number][]>());
@@ -243,12 +255,14 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
       map: bark, normalMap: barkN, roughnessMap: barkR, normalScale: new THREE.Vector2(.75, .75), color: palette.trunk, roughness: .8, metalness: 0,
     });
     trunkMaterial.onBeforeCompile = shader => {
+      shader.uniforms["uLights"] = glowUniforms.uLights;
+      shader.uniforms["uRed"] = glowUniforms.uRed;
       // Baked contact darkening and moss at the trunk foot instead of dynamic shadows.
       shader.vertexShader = shader.vertexShader
         .replace("#include <common>", `#include <common>\nvarying float vTH;`)
         .replace("#include <begin_vertex>", `#include <begin_vertex>\nvTH = position.y;`);
       shader.fragmentShader = shader.fragmentShader
-        .replace("#include <common>", `#include <common>\nvarying float vTH;`)
+        .replace("#include <common>", `#include <common>\nvarying float vTH;\nuniform float uLights;\nuniform float uRed;`)
         .replace("#include <map_fragment>", `#include <map_fragment>
           float foot = 1. - smoothstep(1.0, 3.2, vTH);
           diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(.75, 1.15, .72), foot * .55);
@@ -258,27 +272,31 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
           float near = 1. - smoothstep(4., 14., length(vViewPosition));
           float rim = pow(1. - abs(dot(normal, normalize(vViewPosition))), 3.);
           vec3 tint = mix(vec3(.18, .55, .35), vec3(.42, .26, .62), smoothstep(-.3, .3, sin(vTH * .35)));
-          totalEmissiveRadiance += tint * rim * near * .22 * smoothstep(.6, 2., vTH);`);
+          totalEmissiveRadiance += mix(tint, vec3(.95, .12, .06), uRed) * rim * near * .22 * smoothstep(.6, 2., vTH) * mix(uLights, .8, uRed);`);
     };
     // Bushes: a soft purple-green silhouette rim, as if caught by the canopy
     // glow and the headlamp, so undergrowth reads against the dark floor.
     const plantMaterial = new THREE.MeshStandardMaterial({ color: palette.plant, roughness: .9, metalness: 0 });
     plantMaterial.onBeforeCompile = shader => {
+      shader.uniforms["uLights"] = glowUniforms.uLights;
+      shader.uniforms["uRed"] = glowUniforms.uRed;
       shader.vertexShader = shader.vertexShader
         .replace("#include <common>", `#include <common>\nvarying vec3 vPN;\nvarying vec3 vPV;\nvarying vec3 vPW;`)
         .replace("#include <defaultnormal_vertex>", `#include <defaultnormal_vertex>\nvPN = normalize(transformedNormal);`)
         .replace("#include <project_vertex>", `#include <project_vertex>\nvPV = -mvPosition.xyz;\nvPW = (modelMatrix * instanceMatrix * vec4(transformed, 1.)).xyz;`);
       shader.fragmentShader = shader.fragmentShader
-        .replace("#include <common>", `#include <common>\nvarying vec3 vPN;\nvarying vec3 vPV;\nvarying vec3 vPW;`)
+        .replace("#include <common>", `#include <common>\nvarying vec3 vPN;\nvarying vec3 vPV;\nvarying vec3 vPW;\nuniform float uLights;\nuniform float uRed;`)
         .replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>
           float pd = length(vPV);
           float prim = pow(1. - abs(dot(normalize(vPN), normalize(vPV))), 2.4);
           float pfar = smoothstep(3., 9., pd) * (1. - smoothstep(26., 40., pd));
           vec3 pTint = mix(vec3(.2, .55, .34), vec3(.5, .32, .7), .5 + .5 * sin(vPW.x * .27 + vPW.z * .19));
-          totalEmissiveRadiance += pTint * prim * (.18 + .3 * pfar);`);
+          totalEmissiveRadiance += mix(pTint, vec3(.95, .12, .06), uRed) * prim * (.18 + .3 * pfar) * mix(uLights, .8, uRed);`);
     };
     const crownMaterial = new THREE.MeshStandardMaterial({ color: palette.crown, roughness: .9, metalness: 0 });
     crownMaterial.onBeforeCompile = shader => {
+      shader.uniforms["uLights"] = glowUniforms.uLights;
+      shader.uniforms["uRed"] = glowUniforms.uRed;
       // Soft purple-green shards of light catching the leaf undersides — a
       // constant, gentle glow that sketches the canopy vault from below.
       shader.vertexShader = shader.vertexShader
@@ -286,15 +304,15 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
         .replace("#include <defaultnormal_vertex>", `#include <defaultnormal_vertex>\nvCN = normalize(transformedNormal);`)
         .replace("#include <project_vertex>", `#include <project_vertex>\nvCW = (modelMatrix * instanceMatrix * vec4(transformed, 1.)).xyz;`);
       shader.fragmentShader = shader.fragmentShader
-        .replace("#include <common>", `#include <common>\nvarying vec3 vCN;\nvarying vec3 vCW;`)
+        .replace("#include <common>", `#include <common>\nvarying vec3 vCN;\nvarying vec3 vCW;\nuniform float uLights;\nuniform float uRed;`)
         .replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>
           float under = smoothstep(.15, -.75, vCN.y);
           float shard = .55 + .45 * sin(vCW.x * .8 + sin(vCW.z * .6) * 2.2) * sin(vCW.z * .7 - sin(vCW.x * .5) * 1.8);
           vec3 glowTint = mix(vec3(.16, .5, .3), vec3(.42, .25, .62), .5 + .5 * sin(vCW.x * .23 + vCW.z * .31));
-          totalEmissiveRadiance += glowTint * under * shard * .3;`);
+          totalEmissiveRadiance += mix(glowTint, vec3(.95, .12, .06), uRed) * under * shard * .3 * mix(uLights, .8, uRed);`);
     };
     return { bark, barkN, barkR, floor, floorN, floorR, trunkGeometry, rootGeometry, branchGeometry, crownGeometry, rockGeometry, plantGeometry, groundMaterial, trunkMaterial, crownMaterial, plantMaterial, shadowGeometry: new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), glowTexture: new THREE.CanvasTexture(canvas), sporeTexture: new THREE.CanvasTexture(sporeCanvas), dummy: new THREE.Object3D(), target: new THREE.Vector3() };
-  }, [palette]);
+  }, [palette, glowUniforms]);
   useEffect(() => () => {
     [resources.trunkGeometry, resources.rootGeometry, resources.branchGeometry, resources.crownGeometry, resources.rockGeometry, resources.plantGeometry, resources.glowTexture, resources.sporeTexture, resources.groundMaterial, resources.trunkMaterial, resources.crownMaterial, resources.plantMaterial, resources.shadowGeometry].forEach(g => g.dispose());
 
@@ -314,7 +332,11 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
         // Every secret sits in its own small clearing.
         const secrets = secretsAround(s.x, s.z);
         secretWorld.current = secrets;
-        const open = (o: { x: number; z: number }) => secrets.every(e => Math.hypot(o.x - e.x, o.z - e.z) > SECRET_CLEARING);
+        // Red gates need an open way through, too.
+        const gates = gatesAround(s.x, s.z);
+        gateWorld.current = gates;
+        const open = (o: { x: number; z: number }) => secrets.every(e => Math.hypot(o.x - e.x, o.z - e.z) > SECRET_CLEARING)
+          && gates.every(g => Math.hypot(o.x - g.x, o.z - g.z) > GATE_CLEARING);
         s.trees = s.trees.filter(open);
         s.obstacles = s.obstacles.filter(open);
       } else secretWorld.current = [];
@@ -464,7 +486,7 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
     for (const id of s.cleared) {
       const age = s.elapsed - (s.clearedAt[id] ?? -99);
       const slots = slotMap.current.get(id);
-      if (!slots || age > SHOCKWAVE_DISSOLVE + .1) continue;
+      if (!slots || age < 0 || age > SHOCKWAVE_DISSOLVE + .1) continue;
       let saved = pristine.current.get(id);
       if (!saved) {
         saved = slots.map(([mesh, index]) => { const m = new THREE.Matrix4(); mesh.getMatrixAt(index, m); return m; });
@@ -591,12 +613,20 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
     if (stage !== stageRef.current) {
       if (stage === "dying") onDark();
       if (stage === "red") onThreat();
+      // A second gate switches the atmosphere off again: the forest hum returns.
+      if (stage === "lit" && stageRef.current !== "lit") onLit();
       stageRef.current = stage;
     }
     const redOn = stage === "red";
     const redGoal = redOn ? (lying ? 1 : .8 + s.threat * .2) : 0;
     // Fast attack so the flood hits on the sound; gentle settle afterwards.
     redMix.current += (redGoal - redMix.current) * Math.min(1, raw * (redGoal > redMix.current ? 9 : 2.5));
+    // The canopy's green and purple light dies with the lights and never comes
+    // back as green/purple while the pursuer's red takes over the same surfaces.
+    const dieTarget = s.surviveTime >= 0 ? Math.min(1, s.surviveTime / LIGHTS_DIE) : 0;
+    dieRef.current = dieTarget >= dieRef.current ? dieTarget : dieRef.current + (dieTarget - dieRef.current) * Math.min(1, raw * 1.2);
+    glowUniforms.uLights.value = 1 - dieRef.current;
+    glowUniforms.uRed.value = redMix.current;
     const behindX = Math.sin(s.heading), behindZ = Math.cos(s.heading);
     if (redLight.current) {
       redLight.current.position.set(s.x + behindX * 5, groundHeight(s.x, s.z) + 3.4, s.z + behindZ * 5);
@@ -659,23 +689,43 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
       // The moment a power fades, the frame glow and the haptic follow.
       if (lastPowerUp.current && !s.powerUp) onPowerUpEnd();
       lastPowerUp.current = s.powerUp;
-      // Ghost wisp: the trunks turn translucent while the power lasts.
-      const ghost = s.powerUp === "ghost";
-      const trunkMat = resources.trunkMaterial;
-      trunkMat.transparent = ghost;
-      trunkMat.opacity = ghost ? .3 : 1;
-      trunkMat.needsUpdate = false;
-      const bMat = branchMat.current;
-      if (bMat) { bMat.transparent = ghost; bMat.opacity = ghost ? .3 : 1; }
+      // Ghost wisp: trunks, roots and branches turn into pale, softly glowing,
+      // see-through ghosts (the crowns only slightly), fading in and out.
+      const ghostLeft = POWERUP_DURATION - s.powerUpTime;
+      const ghostTarget = s.powerUp === "ghost" ? (ghostLeft < .6 ? .6 + .4 * Math.sin(ghostLeft * 40) : 1) : 0;
+      ghostK.current += (ghostTarget - ghostK.current) * Math.min(1, raw * 7);
+      const g = ghostK.current < .01 ? 0 : ghostK.current;
+      ([[resources.trunkMaterial, .62, .95], [branchMat.current, .62, .95], [resources.crownMaterial, .3, .35]] as const).forEach(([mat, fade, glow]) => {
+        if (!mat) return;
+        const on = g > 0;
+        // Flipping transparency needs a recompile, otherwise three.js keeps the opaque shader and ignores opacity.
+        if (mat.transparent !== on) { mat.transparent = on; mat.depthWrite = !on; mat.needsUpdate = true; }
+        mat.opacity = 1 - g * fade;
+        mat.emissive.set(GHOST_GLOW);
+        mat.emissiveIntensity = g * glow;
+      });
     }
     if (ring.current) {
       // The purple shockwave ring rolls out over the forest floor.
       const age = s.powerUp === "shockwave" ? s.powerUpTime : 99;
-      const k = Math.min(1, age / .7);
-      ring.current.visible = age < .7;
+      const k = Math.min(1, age / SHOCKWAVE_WAVE);
+      ring.current.visible = age < SHOCKWAVE_WAVE;
       ring.current.position.set(s.x, groundHeight(s.x, s.z) + .15, s.z);
       ring.current.scale.setScalar(.5 + k * SHOCKWAVE_AHEAD);
       (ring.current.material as THREE.MeshBasicMaterial).opacity = (1 - k) * .85;
+    }
+    if (gateGroup.current) {
+      const gates = s.mode === "freeroam" ? gateWorld.current : [];
+      gateGroup.current.children.forEach((slot, i) => {
+        const gate = gates[i];
+        slot.visible = !!gate;
+        if (!gate) return;
+        slot.position.set(gate.x, groundHeight(gate.x, gate.z), gate.z);
+        slot.rotation.y = gate.angle;
+        const veil = slot.children[0] as THREE.Mesh | undefined;
+        if (veil) (veil.material as THREE.MeshBasicMaterial).opacity = .16 + Math.sin(t * 1.7 + i * 2) * .06;
+        if (passGate(s, gate)) onGate();
+      });
     }
     if (secretGroup.current) {
       const list = secretWorld.current;
@@ -753,6 +803,32 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
       <ringGeometry args={[.86, 1, 64]} />
       <meshBasicMaterial color={palette.shock} transparent opacity={0} blending={THREE.AdditiveBlending} depthWrite={false} side={THREE.DoubleSide} fog={false} />
     </mesh>
+    <group ref={gateGroup}>
+      {Array.from({ length: SECRET_SLOTS }, (_, i) => (
+        <group key={i} visible={false}>
+          {/* The veil: a faint red curtain filling the opening. */}
+          <mesh position={[0, 2.2, 0]}>
+            <planeGeometry args={[GATE_HALF * 2, 4.4]} />
+            <meshBasicMaterial color={palette.pursuer} transparent opacity={.16} blending={THREE.AdditiveBlending} depthWrite={false} side={THREE.DoubleSide} />
+          </mesh>
+          {/* Two dark posts and a lintel with glowing red seams. */}
+          {[-1, 1].map(side => (
+            <mesh key={side} position={[side * (GATE_HALF + .2), 2.1, 0]}>
+              <boxGeometry args={[.4, 4.6, .4]} />
+              <meshStandardMaterial color={palette.rock} roughness={.4} metalness={.2} emissive={palette.ember} emissiveIntensity={.9} />
+            </mesh>
+          ))}
+          <mesh position={[0, 4.5, 0]}>
+            <boxGeometry args={[GATE_HALF * 2 + .8, .4, .4]} />
+            <meshStandardMaterial color={palette.rock} roughness={.4} metalness={.2} emissive={palette.ember} emissiveIntensity={.9} />
+          </mesh>
+          {/* A red beacon, visible through the fog from far away. */}
+          <sprite position={[0, 3, 0]} scale={[16, 16, 1]}>
+            <spriteMaterial map={resources.glowTexture} color={palette.ember} transparent opacity={.32} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} />
+          </sprite>
+        </group>
+      ))}
+    </group>
     <group ref={secretGroup}>
       {Array.from({ length: SECRET_SLOTS }, (_, i) => (
         <group key={i} visible={false}>
@@ -853,7 +929,7 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
     <instancedMesh ref={trunks} args={[resources.trunkGeometry, undefined, MAX_INSTANCES]} material={resources.trunkMaterial} frustumCulled={false} />
     <instancedMesh ref={roots} args={[resources.rootGeometry, undefined, MAX_INSTANCES * ROOTS_PER_TREE]} material={resources.trunkMaterial} frustumCulled={false} />
     <instancedMesh ref={branches} args={[resources.branchGeometry, undefined, MAX_INSTANCES * BRANCHES_PER_TREE]} frustumCulled={false}>
-      <meshStandardMaterial map={resources.bark} normalMap={resources.barkN} roughnessMap={resources.barkR} normalScale={new THREE.Vector2(.7, .7)} color={palette.trunk} roughness={.95} metalness={0} />
+      <meshStandardMaterial ref={branchMat} map={resources.bark} normalMap={resources.barkN} roughnessMap={resources.barkR} normalScale={new THREE.Vector2(.7, .7)} color={palette.trunk} roughness={.95} metalness={0} />
     </instancedMesh>
     <instancedMesh ref={crowns} args={[resources.crownGeometry, undefined, MAX_INSTANCES * CROWN_SLOTS]} material={resources.crownMaterial} frustumCulled={false} />
     <instancedMesh ref={rocks} args={[resources.rockGeometry, undefined, MAX_INSTANCES]} frustumCulled={false}>
@@ -1085,6 +1161,12 @@ export function ForestRunner() {
   const onDark = useCallback(() => {
     drone.current?.setMuffled(true);
   }, []);
+  const onLit = useCallback(() => {
+    drone.current?.setMuffled(false);
+  }, []);
+  const onGate = useCallback(() => {
+    if (hapticsRef.current) buzz([30, 40, 30]);
+  }, []);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onSecret = useCallback((secret: Secret) => {
     const found = simulation.current.found;
@@ -1277,7 +1359,7 @@ export function ForestRunner() {
       <fog attach="fog" args={[palette.fog, 7, FOG_END]} />
       <hemisphereLight args={[palette.moon, palette.fog, .85]} />
       <directionalLight position={[0, 24, -20]} color={palette.moon} intensity={.7} />
-      <World simulation={simulation} input={input} palette={palette} red={red} onDark={onDark} onSecret={onSecret} onPhase={onPhase} onImpact={onImpact} onStumble={onStumble} onPowerUp={onPowerUp} onPowerUpEnd={onPowerUpEnd} onThreat={onThreat} />
+      <World simulation={simulation} input={input} palette={palette} red={red} onDark={onDark} onLit={onLit} onGate={onGate} onSecret={onSecret} onPhase={onPhase} onImpact={onImpact} onStumble={onStumble} onPowerUp={onPowerUp} onPowerUpEnd={onPowerUpEnd} onThreat={onThreat} />
       <ForestEffects simulation={simulation} />
       <DayCycle mood={moodRef} night={palette} red={red} />
     </Canvas>}

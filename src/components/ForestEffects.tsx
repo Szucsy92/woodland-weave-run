@@ -1,5 +1,5 @@
 import { useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useMemo, type MutableRefObject } from "react";
+import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import * as THREE from "three";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
@@ -12,10 +12,10 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
   const { composer, effect } = useMemo(() => {
     const composer = new EffectComposer(gl);
     const effect = new ShaderPass({
-      uniforms: { tDiffuse: { value: null }, blur: { value: 0 }, glitch: { value: 0 }, time: { value: 0 }, resolution: { value: new THREE.Vector2() } },
+      uniforms: { tDiffuse: { value: null }, blur: { value: 0 }, glitch: { value: 0 }, frost: { value: 0 }, time: { value: 0 }, resolution: { value: new THREE.Vector2() } },
       vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
       fragmentShader: `
-        varying vec2 vUv; uniform sampler2D tDiffuse; uniform float blur,glitch,time; uniform vec2 resolution;
+        varying vec2 vUv; uniform sampler2D tDiffuse; uniform float blur,glitch,frost,time; uniform vec2 resolution;
         vec3 sampleBlur(vec2 uv) {
           vec2 d=vec2(blur*8.)/resolution;
           return (texture2D(tDiffuse,uv).rgb*4. + texture2D(tDiffuse,uv+d).rgb + texture2D(tDiffuse,uv-d).rgb + texture2D(tDiffuse,uv+vec2(d.x,-d.y)).rgb + texture2D(tDiffuse,uv+vec2(-d.x,d.y)).rgb)/8.;
@@ -29,6 +29,12 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
           c=mix(c,vec3(left.r,right.g,left.b),min(glitch*.85,.85));
           float vignette=1.-smoothstep(.28,.78,length(vUv-.5));
           c*=mix(.46,1.,vignette);
+          // Freezer: the world cools to a pale blue, with fine frost crystals creeping in from the screen edges.
+          float cold=dot(c,vec3(.3,.55,.15));
+          c=mix(c,mix(vec3(cold),c,.55)*vec3(.78,.95,1.18),frost*.7);
+          float rim=smoothstep(.3,.8,length(vUv-.5));
+          float crystal=pow(max(0.,sin(vUv.x*210.+time*.4)*sin(vUv.y*190.-time*.3)),14.);
+          c+=vec3(.55,.8,1.)*frost*(rim*.16+rim*crystal*.5);
           gl_FragColor=vec4(c,1.);
         }`,
     });
@@ -43,6 +49,8 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
     effect.uniforms["resolution"]!.value.set(size.width, size.height);
   }, [composer, effect, size, gl]);
   useEffect(() => () => composer.dispose(), [composer]);
+  // Smoothed 0..1 frost amount: eases in on pickup and melts away at the end.
+  const frost = useRef(0);
   useFrame((_, delta) => {
     const s = simulation.current;
     const lying = s.phase === "falling" || s.phase === "fallen";
@@ -71,8 +79,12 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
       const surge = a < .5 ? Math.sin((a / .5) * Math.PI) * .7 : 0;
       const tear = s.powerUp === "shockwave" && a < SHOCKWAVE_DISSOLVE ? Math.pow(Math.max(0, Math.sin(a * 31)), 3) * .9 * (1 - a / SHOCKWAVE_DISSOLVE) : 0;
       const fade = left < .6 ? Math.sin((left / .6) * Math.PI) * .45 : 0;
-      effect.uniforms["glitch"]!.value += surge + tear + fade + .05;
+      // The freezer stays calm: a soft cold bloom instead of a glitch tear.
+      effect.uniforms["glitch"]!.value += s.powerUp === "freezer" ? surge * .3 : surge + tear + fade + .05;
     }
+    const frostTarget = s.powerUp === "freezer" ? Math.min(1, (POWERUP_DURATION - s.powerUpTime) / .9) : 0;
+    frost.current += (frostTarget - frost.current) * Math.min(1, delta * 4);
+    effect.uniforms["frost"]!.value = frost.current < .005 ? 0 : frost.current;
     // Survive: the red onset hits with a short violent tear.
     if (s.mode === "survive" && s.surviveTime >= 0) {
       const r = s.surviveTime - LIGHTS_DIE - DARK_PAUSE;
