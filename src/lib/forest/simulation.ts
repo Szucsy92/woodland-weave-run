@@ -32,9 +32,9 @@ export const SHOCKWAVE_SPREAD = 1.25;
 // The wave front rolls out over this long; farther trees start dissolving later.
 export const SHOCKWAVE_WAVE = 1.5;
 // Sparse purple rings: one is sent every SHOCKWAVE_GAP seconds, each taking SHOCKWAVE_WAVE to run
-// all the way through the forest to the vanishing point (3 rings fit the 5 s power-up).
+// all the way through the forest to the vanishing point (2 rings fit the 5 s power-up).
 export const SHOCKWAVE_GAP = 1.7;
-export const SHOCKWAVE_RINGS = 3;
+export const SHOCKWAVE_RINGS = 2;
 // Each tree is shoved forward into the depth and torn out over this long.
 export const SHOCKWAVE_DISSOLVE = 0.8;
 export function canSpawnPowerUp(s: Simulation, lastSpawn: number, hasLiveOrb: boolean) {
