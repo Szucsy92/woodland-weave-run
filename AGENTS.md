@@ -26,3 +26,6 @@
 - Shockwave dissolve animates instanced trees/obstacles by caching their pristine instance matrices per id and zeroing them afterwards; rebuilds keep cleared ids hidden, so removal survives cell regeneration.
 
 - Anchor ambient light clusters to shared world-cell coordinates and place power-ups relative to heading in all modes; turning must not drag scenery around the player.
+- Distant lights: classic and survive use one fixed light ahead of the runner (fixedForestLights); only freeroam uses the world-cell lattice. The canopy's green/purple rim light lives in the trunk, crown and bush shaders and is driven by the shared uLights/uRed uniforms (lights die, then red takes over).
+- Freeroam red gates (gatesAround/passGate in simulation.ts) toggle surviveTime, which drives the same survive stages as survive mode; keep a gate re-armed only after the runner walks away.
+- Changing a material's `transparent` flag requires `material.needsUpdate = true`, otherwise three.js keeps the opaque shader and ignores opacity (ghost power).
