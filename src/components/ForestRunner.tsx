@@ -702,7 +702,12 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
         if (!mat) return;
         const on = g > 0;
         // Flipping transparency needs a recompile, otherwise three.js keeps the opaque shader and ignores opacity.
-        if (mat.transparent !== on) { mat.transparent = on; mat.depthWrite = !on; mat.needsUpdate = true; }
+        // Depth writing stays ON: instances are not sorted by distance, so with it off a far trunk
+        // drawn after a near one paints straight over it (silhouettes stuck in front, then a pop
+        // when the material turns opaque again). With it on, near trunks always cover far ones
+        // correctly and the fade-out converges smoothly to the solid look.
+        if (mat.transparent !== on) { mat.transparent = on; mat.needsUpdate = true; }
+        mat.depthWrite = true;
         mat.opacity = 1 - g * fade;
         mat.emissive.set(GHOST_GLOW);
         mat.emissiveIntensity = g * glow;
