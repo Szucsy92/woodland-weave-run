@@ -5,24 +5,34 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
-import { DARK_PAUSE, EXIT_TIME, IMPACT_DURATION, LIGHTS_DIE, PAUSE_SLOW, POWERUP_DURATION, RESUME_TIME, SHOCKWAVE_DISSOLVE, type Simulation } from "@/lib/forest/simulation";
+import { DARK_PAUSE, EXIT_TIME, IMPACT_DURATION, LIGHTS_DIE, PAUSE_SLOW, POWERUP_DURATION, RESUME_TIME, type Simulation } from "@/lib/forest/simulation";
 
 export function ForestEffects({ simulation }: { simulation: MutableRefObject<Simulation> }) {
   const { gl, scene, camera, size } = useThree();
   const { composer, effect } = useMemo(() => {
     const composer = new EffectComposer(gl);
     const effect = new ShaderPass({
-      uniforms: { tDiffuse: { value: null }, blur: { value: 0 }, glitch: { value: 0 }, frost: { value: 0 }, time: { value: 0 }, resolution: { value: new THREE.Vector2() } },
+      uniforms: { tDiffuse: { value: null }, blur: { value: 0 }, glitch: { value: 0 }, frost: { value: 0 }, lens: { value: 0 }, wave: { value: 0 }, time: { value: 0 }, resolution: { value: new THREE.Vector2() } },
       vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
       fragmentShader: `
-        varying vec2 vUv; uniform sampler2D tDiffuse; uniform float blur,glitch,frost,time; uniform vec2 resolution;
+        varying vec2 vUv; uniform sampler2D tDiffuse; uniform float blur,glitch,frost,lens,wave,time; uniform vec2 resolution;
         vec3 sampleBlur(vec2 uv) {
           vec2 d=vec2(blur*8.)/resolution;
           return (texture2D(tDiffuse,uv).rgb*4. + texture2D(tDiffuse,uv+d).rgb + texture2D(tDiffuse,uv-d).rgb + texture2D(tDiffuse,uv+vec2(d.x,-d.y)).rgb + texture2D(tDiffuse,uv+vec2(-d.x,d.y)).rgb)/8.;
         }
         void main(){
+          vec2 d=vUv-.5;
+          float asp=resolution.x/resolution.y;
+          vec2 q=d*vec2(asp,1.);
+          float r=length(q);
+          // Elastic fisheye on pickup: the picture bulges, then springs back and wobbles out.
+          vec2 base=.5+d*(1.+lens*dot(q,q)*1.6);
+          // Shockwave: translucent purple wave fronts rush from the screen edge inward
+          // to the vanishing point, as if flying forward into the depth.
+          float w=pow(.5+.5*sin((r*2.6+time*1.15)*6.2832),3.)*smoothstep(.06,.4,r)*wave;
+          base+=q/max(r,.001)*w*.012*vec2(1./asp,1.);
           float band=sin(vUv.y*160.+time*14.)*sin(vUv.y*37.-time*6.);
-          vec2 uv=vUv+vec2(band*glitch*.008,0.);
+          vec2 uv=base+vec2(band*glitch*.008,0.);
           vec2 split=vec2(glitch*.012,glitch*.002);
           vec3 c=sampleBlur(uv);
           vec3 left=sampleBlur(uv+split),right=sampleBlur(uv-split);
@@ -35,6 +45,7 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
           float rim=smoothstep(.3,.8,length(vUv-.5));
           float crystal=pow(max(0.,sin(vUv.x*210.+time*.4)*sin(vUv.y*190.-time*.3)),14.);
           c+=vec3(.55,.8,1.)*frost*(rim*.16+rim*crystal*.5);
+          c+=vec3(.6,.25,1.)*w*.34+vec3(.85,.7,1.)*pow(w,3.)*.22;
           gl_FragColor=vec4(c,1.);
         }`,
     });
@@ -73,15 +84,20 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
     effect.uniforms["blur"]!.value = Math.max(effect.uniforms["blur"]!.value + arrive, pb);
     effect.uniforms["glitch"]!.value += pg + arrive * .15;
     // Power-ups: a glitch surge on pickup, a faint shimmer while active and a
-    // last flutter as the effect fades; the shockwave tears hardest.
+    // last flutter as the effect fades.
     if (s.powerUp) {
       const a = s.powerUpTime, left = POWERUP_DURATION - a;
       const surge = a < .5 ? Math.sin((a / .5) * Math.PI) * .7 : 0;
-      const tear = s.powerUp === "shockwave" && a < SHOCKWAVE_DISSOLVE ? Math.pow(Math.max(0, Math.sin(a * 31)), 3) * .9 * (1 - a / SHOCKWAVE_DISSOLVE) : 0;
       const fade = left < .6 ? Math.sin((left / .6) * Math.PI) * .45 : 0;
       // The freezer stays calm: a soft cold bloom instead of a glitch tear.
-      effect.uniforms["glitch"]!.value += s.powerUp === "freezer" ? surge * .3 : surge + tear + fade + .05;
+      effect.uniforms["glitch"]!.value += s.powerUp === "freezer" ? surge * .3 : (s.powerUp === "shockwave" ? surge * .5 : surge) + fade + .05;
     }
+    // Elastic lens: a damped spring kicks in at pickup (bulge, overshoot, settle).
+    const lensT = s.powerUp ? s.powerUpTime : 99;
+    effect.uniforms["lens"]!.value = lensT < 2.4 ? .45 * Math.exp(-lensT * 3.2) * Math.cos(lensT * 14) : 0;
+    // Shockwave fronts run for the whole power-up, easing in and out.
+    effect.uniforms["wave"]!.value = s.powerUp === "shockwave"
+      ? Math.min(1, s.powerUpTime / .35) * Math.min(1, (POWERUP_DURATION - s.powerUpTime) / .5) : 0;
     const frostTarget = s.powerUp === "freezer" ? Math.min(1, (POWERUP_DURATION - s.powerUpTime) / .9) : 0;
     frost.current += (frostTarget - frost.current) * Math.min(1, delta * 4);
     effect.uniforms["frost"]!.value = frost.current < .005 ? 0 : frost.current;

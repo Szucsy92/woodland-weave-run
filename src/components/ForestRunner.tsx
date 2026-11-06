@@ -4,7 +4,7 @@ import { ArrowLeft, LogOut, Pause, Settings } from "lucide-react";
 import * as THREE from "three";
 import { ForestEffects } from "./ForestEffects";
 import { ForestDrone } from "@/lib/forest/drone";
-import { beginRun, canSpawnPowerUp, forestLightsFor, CELL, collectPowerUp, DIFFICULTIES, discoverSecret, GATE_CLEARING, GATE_HALF, gatesAround, type Gate, LIGHTS_DIE, passGate, SECRET_CLEARING, SECRET_NAMES, secretsAround, SHOCKWAVE_AHEAD, SHOCKWAVE_DISSOLVE, SHOCKWAVE_WAVE, surviveStage, type Secret, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, requestExit, requestPause, requestResume, obstaclesAround, orientationValue, placePowerUp, placeSpore, POWERUP_DURATION, POWERUP_GAP, RADIUS, sporeOpacity, stepSimulation, treesAround, daylightFor, type Difficulty, type ForestMood, type GameMode, type Phase, type PowerUp, type PowerUpType, type Simulation } from "@/lib/forest/simulation";
+import { beginRun, canSpawnPowerUp, forestLightsFor, CELL, collectPowerUp, DIFFICULTIES, discoverSecret, GATE_CLEARING, GATE_HALF, gatesAround, type Gate, LIGHTS_DIE, passGate, SECRET_CLEARING, secretsAround, SHOCKWAVE_DISSOLVE, surviveStage, type Secret, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, requestExit, requestPause, requestResume, obstaclesAround, orientationValue, makeTiltCal, resetTilt, updateTilt, type TiltCal, placePowerUp, placeSpore, POWERUP_DURATION, POWERUP_GAP, RADIUS, sporeOpacity, stepSimulation, treesAround, daylightFor, type Difficulty, type ForestMood, type GameMode, type Phase, type PowerUp, type PowerUpType, type Simulation } from "@/lib/forest/simulation";
 import { checkForUpdate, nativeUpdater, type UpdateInfo } from "@/lib/forest/updater";
 import barkUrl from "@/assets/wet-bark.jpg";
 import floorUrl from "@/assets/wet-ground.jpg";
@@ -15,7 +15,7 @@ import floorRough from "@/assets/ground-rough.jpg";
 
 const PALETTE_KEYS = ["fog", "moon", "lamp", "green", "purple", "lavender", "lemon", "trunk", "ground", "crown", "rock", "plant", "ember", "pursuer", "blood", "freezer", "ghost", "shock", "secret"] as const;
 type Palette = Record<typeof PALETTE_KEYS[number], THREE.Color>;
-type Input = { tilt: number; touch: number; touchMode: boolean; neutral: number | null; angle: number };
+type Input = { tilt: number; touch: number; touchMode: boolean; cal: TiltCal };
 const MAX_INSTANCES = (RADIUS * 2 + 1) ** 2;
 const BRANCHES_PER_TREE = 11;
 const ROOTS_PER_TREE = 5;
@@ -100,7 +100,6 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
   const redTarget = useMemo(() => new THREE.Object3D(), []);
   const stageRef = useRef("lit");
   const redMix = red;
-  const ring = useRef<THREE.Mesh>(null);
   const secretGroup = useRef<THREE.Group>(null);
   const gateGroup = useRef<THREE.Group>(null);
   const gateWorld = useRef<Gate[]>([]);
@@ -482,7 +481,7 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
     lastImpact.current = s.impact;
     if (s.stumble > 0 && lastStumble.current <= 0) onStumble();
     lastStumble.current = s.stumble;
-    // Shockwave: cleared trees and undergrowth glitch apart instead of popping out.
+    // Shockwave: cleared trees and undergrowth are shoved into the depth and torn out.
     for (const id of s.cleared) {
       const age = s.elapsed - (s.clearedAt[id] ?? -99);
       const slots = slotMap.current.get(id);
@@ -493,18 +492,21 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
         pristine.current.set(id, saved);
       }
       const k = Math.min(1, age / SHOCKWAVE_DISSOLVE);
-      const step = Math.floor(s.elapsed * 24);
       const seed = id.length * 31 + (id.charCodeAt(id.length - 1) || 0);
-      const flick = hash(step, seed, 400) > .55 + k * .3 ? .25 : 1;
-      const jx = (hash(step, seed, 401) - .5) * 1.4 * k, jz = (hash(step, seed, 402) - .5) * .8 * k;
-      const squash = Math.max(0, (1 - k * k)) * flick;
-      const thin = Math.max(0, 1 - k) * (.6 + hash(step, seed, 403) * .8);
+      // The wave shoves it forward into the depth with growing speed, tips it
+      // over and rips it up out of the ground; only at the very end it is gone.
+      const fx = -Math.sin(s.heading), fz = -Math.cos(s.heading);
+      const push = k * k * (16 + hash(seed, 7, 404) * 8);
+      const lift = Math.sin(Math.min(1, k * 1.6) * Math.PI * .5) * (1.2 + hash(seed, 8, 405) * 1.6) * k;
+      const tip = k * (.5 + hash(seed, 9, 406) * .6);
+      const shrink = 1 - THREE.MathUtils.smoothstep(k, .72, 1);
       const [first] = slots;
       if (!first) continue;
       tmpM.copy(saved[0] ?? tmpM);
       const bx = tmpM.elements[12] ?? 0, by = tmpM.elements[13] ?? 0, bz = tmpM.elements[14] ?? 0;
-      tmpG.makeTranslation(bx + jx, by, bz + jz)
-        .multiply(new THREE.Matrix4().makeScale(thin, squash, thin))
+      tmpG.makeTranslation(bx + fx * push, by + lift, bz + fz * push)
+        .multiply(new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(fz, 0, -fx), tip))
+        .multiply(new THREE.Matrix4().makeScale(shrink, shrink, shrink))
         .multiply(new THREE.Matrix4().makeTranslation(-bx, -by, -bz));
       slots.forEach(([mesh, index], n) => {
         const base = saved?.[n];
@@ -705,15 +707,6 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
         mat.emissiveIntensity = g * glow;
       });
     }
-    if (ring.current) {
-      // The purple shockwave ring rolls out over the forest floor.
-      const age = s.powerUp === "shockwave" ? s.powerUpTime : 99;
-      const k = Math.min(1, age / SHOCKWAVE_WAVE);
-      ring.current.visible = age < SHOCKWAVE_WAVE;
-      ring.current.position.set(s.x, groundHeight(s.x, s.z) + .15, s.z);
-      ring.current.scale.setScalar(.5 + k * SHOCKWAVE_AHEAD);
-      (ring.current.material as THREE.MeshBasicMaterial).opacity = (1 - k) * .85;
-    }
     if (gateGroup.current) {
       const gates = s.mode === "freeroam" ? gateWorld.current : [];
       gateGroup.current.children.forEach((slot, i) => {
@@ -762,13 +755,13 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
     }
     if (glow.current) {
       // Freeroam: lights stay anchored to world cells and move only when the
-      // cell changes. Classic and survive: a few fixed lights ahead of the
-      // runner, updated every frame so they follow the heading.
+      // cell changes. Classic and survive: one static light that keeps a fixed
+      // offset from the runner and ignores the heading (turning swings it).
       const free = s.mode === "freeroam";
       const cell = free ? `free:${Math.floor(s.x / 84)},${Math.floor(s.z / 84)}` : "fixed";
       if (!free || cell !== glowCell.current) {
         glowCell.current = cell;
-        const lights = forestLightsFor(s.mode, s.x, s.z, s.heading);
+        const lights = forestLightsFor(s.mode, s.x, s.z);
         glow.current.children.forEach((cluster, i) => {
           const light = lights[i];
           cluster.visible = !!light;
@@ -776,7 +769,7 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
         });
       }
       // Survive mode: the distant lights stutter and die one after another.
-      const die = s.mode === "survive" && s.surviveTime >= 0 ? Math.min(1, s.surviveTime / LIGHTS_DIE) : 0;
+      const die = dieRef.current;
       glow.current.children.forEach(cluster => cluster.children.forEach((child, i) => {
         const sprite = child as THREE.Sprite;
         // Staggered: each light gutters out a little after the previous one.
@@ -799,10 +792,6 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
     <pointLight ref={redLight} color={palette.pursuer} intensity={0} distance={70} decay={1.1} />
     <directionalLight ref={redFlood} color={palette.pursuer} intensity={0} target={redTarget} userData={{ survive: true }} />
     <primitive object={redTarget} />
-    <mesh ref={ring} rotation-x={-Math.PI / 2} visible={false} renderOrder={2}>
-      <ringGeometry args={[.86, 1, 64]} />
-      <meshBasicMaterial color={palette.shock} transparent opacity={0} blending={THREE.AdditiveBlending} depthWrite={false} side={THREE.DoubleSide} fog={false} />
-    </mesh>
     <group ref={gateGroup}>
       {Array.from({ length: SECRET_SLOTS }, (_, i) => (
         <group key={i} visible={false}>
@@ -989,9 +978,8 @@ function buzz(pattern: number | number[]) {
 export function ForestRunner() {
   const simulation = useRef(makeSimulation());
   const red = useRef(0);
-  const [secretToast, setSecretToast] = useState("");
   const [secretCount, setSecretCount] = useState(0);
-  const input = useRef<Input>({ tilt: 0, touch: 0, touchMode: false, neutral: null, angle: 0 });
+  const input = useRef<Input>({ tilt: 0, touch: 0, touchMode: false, cal: makeTiltCal() });
   const drone = useRef<ForestDrone | null>(null);
   const [phase, setPhase] = useState<Phase>("menu");
   const [best, setBest] = useState(0);
@@ -1023,7 +1011,7 @@ export function ForestRunner() {
   const pauseRef = useRef(pauseRun);
   pauseRef.current = pauseRun;
   const resumeRun = () => {
-    if (requestResume(simulation.current)) { setSettingsOpen(false); setPauseUi("none"); }
+    if (requestResume(simulation.current)) { setSettingsOpen(false); setPauseUi("none"); input.current.tilt = 0; resetTilt(input.current.cal, performance.now()); }
   };
   const exitRun = () => {
     if (requestExit(simulation.current)) { setSettingsOpen(false); setPauseUi("exiting"); }
@@ -1100,14 +1088,16 @@ export function ForestRunner() {
       if (e.gamma == null || e.beta == null) return;
       const angle = screen.orientation?.angle ?? (window as unknown as { orientation?: number }).orientation ?? 0;
       const raw = orientationValue(e.gamma, e.beta, angle);
-      if (input.current.neutral == null || input.current.angle !== angle) {
-        input.current.neutral = raw;
-        input.current.angle = angle;
-      }
-      input.current.tilt = THREE.MathUtils.clamp(raw - (input.current.neutral ?? 0), -1, 1);
+      input.current.tilt = updateTilt(input.current.cal, raw, angle, performance.now());
     };
+    // Re-centre whenever the screen turns or the app comes back: the phone is
+    // being moved, so the old neutral no longer means anything.
+    const recenter = () => { input.current.tilt = 0; resetTilt(input.current.cal, performance.now()); };
+    screen.orientation?.addEventListener?.("change", recenter);
+    window.addEventListener("orientationchange", recenter);
     const visibility = () => {
       input.current.touch = 0;
+      recenter();
       if (document.hidden) { pauseRef.current(); audio.suspend(); }
       else {
         let enabled = true;
@@ -1119,6 +1109,8 @@ export function ForestRunner() {
     document.addEventListener("visibilitychange", visibility);
     return () => {
       window.removeEventListener("deviceorientation", orientation);
+      screen.orientation?.removeEventListener?.("change", recenter);
+      window.removeEventListener("orientationchange", recenter);
       document.removeEventListener("visibilitychange", visibility);
       audio.dispose();
     };
@@ -1167,13 +1159,9 @@ export function ForestRunner() {
   const onGate = useCallback(() => {
     if (hapticsRef.current) buzz([30, 40, 30]);
   }, []);
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const onSecret = useCallback((secret: Secret) => {
+  const onSecret = useCallback((_secret: Secret) => {
     const found = simulation.current.found;
     setSecretCount(found.length);
-    setSecretToast(`Secret found: ${SECRET_NAMES[secret.type]}`);
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setSecretToast(""), 3200);
     if (hapticsRef.current) buzz([30, 50, 30, 50, 80]);
     try { localStorage.setItem("forest-secrets", JSON.stringify(found)); } catch { /* Local storage may be disabled. */ }
   }, []);
@@ -1198,7 +1186,7 @@ export function ForestRunner() {
         setNotice("Switch to touch controls.");
         return;
       }
-      input.current.neutral = null;
+      resetTilt(input.current.cal, performance.now());
     }
     input.current.touch = 0;
     beginRun(simulation.current);
@@ -1364,8 +1352,7 @@ export function ForestRunner() {
       <DayCycle mood={moodRef} night={palette} red={red} />
     </Canvas>}
     {(phase === "running" || phase === "awakening" || phase === "falling") && <Hud simulation={simulation} secrets={mode === "freeroam" ? secretCount : null} />}
-    {secretToast && phase === "running" && <div className="forest-secret-toast" role="status">{secretToast}</div>}
-    {activePower && <div className="forest-power-glow" data-type={activePower} aria-hidden />}
+    {activePower && <><div className="forest-power-veil" data-type={activePower} aria-hidden /><div className="forest-power-glow" data-type={activePower} aria-hidden /></>}
     {(phase === "running" || phase === "awakening") && pauseUi === "none" && (
       <button className="forest-pause" data-forest-ui onClick={pauseRun} aria-label="Pause"><Pause size={18} /></button>
     )}
