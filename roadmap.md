@@ -1,5 +1,5 @@
 # Roadmap
-- [x] Power-ups: shared inward frame + colour veil + elastic fisheye on pickup; shockwave is purple full-screen waves into the depth for 5 s, trees are shoved forward and ripped out (device check pending)
+- [x] Power-ups: shared inward frame + colour veil (slow fade-out) + elastic fisheye on all three; shockwave = four sparse purple rings running through the whole forest, trees ripped out fast as each ring passes; ghost x-ray weaker with smooth fade (device check pending)
 - [x] Classic/survive show a single fixed distant light; freeroam keeps the world-cell lattice. Survive: the canopy's green/purple light (trunks, crowns, bushes) dies with the lights and turns red under the pursuer. Freeroam: red gates toggle the survive atmosphere on/off. Power-ups: ghost trees glow pale and translucent, shockwave clears to the horizon, freezer frost look; rule tests pass (device check pending)
 - [x] Freeroam uses normal running, stumbles and three-hit falls, while retaining unlimited turns and secrets; rule tests and live run/turn checked
 - [x] Anchor forest lights in stable world cells instead of rotating with the player; rule tests and landscape screenshots checked
