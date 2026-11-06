@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { beginRun, collectPowerUp, collide, collideObstacle, DARK_PAUSE, discoverSecret, canSpawnPowerUp, forestLightsAround, fixedForestLights, forestLightsFor, gatesAround, passGate, surviveOn, GATE_REARM, LIGHTS_DIE, makeSimulation, MAX_HEADING, placePowerUp, POWERUP_DURATION, POWERUP_GAP, POWERUP_START, SHOCKWAVE_AHEAD, shockwaveDelay, sweepShockwave, secretsAround, stepSimulation, surviveStage, type PowerUp } from "@/lib/forest/simulation";
+import { beginRun, collectPowerUp, collide, collideObstacle, DARK_PAUSE, discoverSecret, canSpawnPowerUp, forestLightsAround, fixedForestLights, forestLightsFor, gatesAround, passGate, surviveOn, GATE_REARM, LIGHTS_DIE, makeSimulation, MAX_HEADING, placePowerUp, POWERUP_DURATION, POWERUP_GAP, POWERUP_START, SHOCKWAVE_AHEAD, SHOCKWAVE_GAP, SHOCKWAVE_RINGS, SHOCKWAVE_WAVE, shockwaveDelay, sweepShockwave, secretsAround, stepSimulation, surviveStage, type PowerUp } from "@/lib/forest/simulation";
 
 const orb = (type: PowerUp["type"], x = 0, z = 0): PowerUp => ({ x, z, type, id: `t-${type}` });
 
@@ -353,5 +353,22 @@ describe("Earlier power-ups and fixed forest lights", () => {
     stepSimulation(s, 0, .016);
     expect(s.cleared).not.toContain("after");
     sweepShockwave(s);
+  });
+  it("rings run through the whole forest and tear trees out as they pass", () => {
+    const s = makeSimulation();
+    s.phase = "running";
+    // Before pickup: the first ring reaches the horizon after one full ring trip.
+    expect(shockwaveDelay(s, 0, -SHOCKWAVE_AHEAD)).toBeCloseTo(SHOCKWAVE_WAVE, 5);
+    collectPowerUp(s, orb("shockwave"));
+    // Late in the power-up a far tree waits for the next ring that still has to pass it.
+    s.powerUpTime = SHOCKWAVE_GAP * 2 + .3;
+    const d = shockwaveDelay(s, 0, -SHOCKWAVE_AHEAD * .5);
+    expect(d).toBeGreaterThanOrEqual(0);
+    expect(d).toBeLessThanOrEqual(SHOCKWAVE_GAP);
+    // The last ring has long passed: tear it out at once.
+    s.powerUpTime = SHOCKWAVE_GAP * (SHOCKWAVE_RINGS - 1) + SHOCKWAVE_WAVE + .1;
+    expect(shockwaveDelay(s, 0, -4)).toBe(0);
+    // All rings fit inside the 5 s power-up.
+    expect(SHOCKWAVE_GAP * (SHOCKWAVE_RINGS - 1) + SHOCKWAVE_WAVE).toBeLessThanOrEqual(POWERUP_DURATION);
   });
 });
