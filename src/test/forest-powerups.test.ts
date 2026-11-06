@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { beginRun, collectPowerUp, collide, collideObstacle, DARK_PAUSE, discoverSecret, canSpawnPowerUp, forestLightsAround, LIGHTS_DIE, makeSimulation, MAX_HEADING, placePowerUp, POWERUP_DURATION, POWERUP_GAP, POWERUP_START, secretsAround, stepSimulation, surviveStage, type PowerUp } from "@/lib/forest/simulation";
+import { beginRun, collectPowerUp, collide, collideObstacle, DARK_PAUSE, discoverSecret, canSpawnPowerUp, forestLightsAround, fixedForestLights, forestLightsFor, LIGHTS_DIE, makeSimulation, MAX_HEADING, placePowerUp, POWERUP_DURATION, POWERUP_GAP, POWERUP_START, secretsAround, stepSimulation, surviveStage, type PowerUp } from "@/lib/forest/simulation";
 
 const orb = (type: PowerUp["type"], x = 0, z = 0): PowerUp => ({ x, z, type, id: `t-${type}` });
 
@@ -272,5 +272,14 @@ describe("Earlier power-ups and fixed forest lights", () => {
     const next = forestLightsAround(85, 0);
     expect(next).toContainEqual({ x: 20, z: 42 });
     expect(next.filter(p => lights.some(q => q.x === p.x && q.z === p.z))).toHaveLength(6);
+  });
+  it("keeps lights fixed relative to the runner in classic and survive, world-anchored only in freeroam", () => {
+    const a = fixedForestLights(0, 0, 0), b = fixedForestLights(500, -900, 0);
+    a.forEach((l, i) => { expect(b[i]!.x - 500).toBeCloseTo(l.x); expect(b[i]!.z + 900).toBeCloseTo(l.z); });
+    expect(a.length).toBeLessThan(forestLightsAround(0, 0).length);
+    expect(a.every(l => l.z < 0)).toBe(true);
+    expect(forestLightsFor("classic", 30, 30, .3)).toEqual(fixedForestLights(30, 30, .3));
+    expect(forestLightsFor("survive", 30, 30, .3)).toEqual(fixedForestLights(30, 30, .3));
+    expect(forestLightsFor("freeroam", 30, 30, .3)).toEqual(forestLightsAround(30, 30));
   });
 });
