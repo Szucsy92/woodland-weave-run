@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { beginRun, collectPowerUp, collide, collideObstacle, DARK_PAUSE, discoverSecret, canSpawnPowerUp, forestLightsAround, fixedForestLights, forestLightsFor, gatesAround, passGate, surviveOn, GATE_REARM, LIGHTS_DIE, makeSimulation, MAX_HEADING, placePowerUp, POWERUP_DURATION, POWERUP_GAP, POWERUP_START, SHOCKWAVE_AHEAD, SHOCKWAVE_GAP, SHOCKWAVE_RINGS, SHOCKWAVE_WAVE, shockwaveDelay, sweepShockwave, secretsAround, stepSimulation, surviveStage, type PowerUp } from "@/lib/forest/simulation";
+import { beginRun, collectPowerUp, collide, collideObstacle, DARK_PAUSE, discoverSecret, canSpawnPowerUp, forestLightsAround, fixedForestLights, forestLightsFor, gatesAround, passGate, surviveOn, GATE_REARM, LIGHTS_DIE, makeSimulation, MAX_HEADING, placePowerUp, POWERUP_DURATION, POWERUP_GAP, POWERUP_START, SHOCKWAVE_AHEAD, SHOCKWAVE_FULL, SHOCKWAVE_REACH, SHOCKWAVE_GAP, SHOCKWAVE_RINGS, SHOCKWAVE_WAVE, shockwaveDelay, sweepShockwave, secretsAround, stepSimulation, surviveStage, type PowerUp } from "@/lib/forest/simulation";
 
 const orb = (type: PowerUp["type"], x = 0, z = 0): PowerUp => ({ x, z, type, id: `t-${type}` });
 
@@ -283,11 +283,11 @@ describe("Earlier power-ups and fixed forest lights", () => {
     expect(forestLightsFor("survive", 30, 30)).toEqual(fixedForestLights(30, 30));
     expect(forestLightsFor("freeroam", 30, 30)).toEqual(forestLightsAround(30, 30));
   });
-  it("shockwave clears trees out to the horizon in a widening wedge, rolling outward", () => {
+  it("shockwave clears trees out to three quarters of the horizon in a widening wedge, rolling outward", () => {
     const s = makeSimulation();
     s.phase = "running";
-    const near = { x: 0, z: -6, scale: 1, id: "n" }, horizon = { x: 5, z: -40, scale: 1, id: "h" };
-    const wide = { x: 40, z: -40, scale: 1, id: "w" }, side = { x: 40, z: -10, scale: 1, id: "s" };
+    const near = { x: 0, z: -6, scale: 1, id: "n" }, horizon = { x: 5, z: -30, scale: 1, id: "h" };
+    const wide = { x: 40, z: -30, scale: 1, id: "w" }, side = { x: 40, z: -10, scale: 1, id: "s" };
     const beyond = { x: 0, z: -(SHOCKWAVE_AHEAD + 8), scale: 1, id: "b" }, behind = { x: 0, z: 20, scale: 1, id: "k" };
     s.trees = [near, horizon, wide, side, beyond, behind];
     collectPowerUp(s, orb("shockwave"));
@@ -370,5 +370,18 @@ describe("Earlier power-ups and fixed forest lights", () => {
     expect(shockwaveDelay(s, 0, -4)).toBe(0);
     // All rings fit inside the 5 s power-up.
     expect(SHOCKWAVE_GAP * (SHOCKWAVE_RINGS - 1) + SHOCKWAVE_WAVE).toBeLessThanOrEqual(POWERUP_DURATION);
+  });
+  it("sends three waves that only reach three quarters of the generated depth", () => {
+    expect(SHOCKWAVE_RINGS).toBe(3);
+    expect(SHOCKWAVE_AHEAD).toBeCloseTo(SHOCKWAVE_FULL * SHOCKWAVE_REACH, 5);
+    expect(SHOCKWAVE_REACH).toBe(0.75);
+    const s = makeSimulation();
+    s.phase = "running";
+    const inside = { x: 0, z: -SHOCKWAVE_FULL * 0.7, scale: 1, id: "in" };
+    const outside = { x: 0, z: -SHOCKWAVE_FULL * 0.8, scale: 1, id: "out" };
+    s.trees = [inside, outside];
+    collectPowerUp(s, orb("shockwave"));
+    expect(s.cleared).toContain("in");
+    expect(s.cleared).not.toContain("out");
   });
 });
