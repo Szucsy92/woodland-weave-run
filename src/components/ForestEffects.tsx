@@ -22,8 +22,8 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
         #define RINGS ${SHOCKWAVE_RINGS}
         #define GAP ${SHOCKWAVE_GAP.toFixed(3)}
         #define WAVE ${SHOCKWAVE_WAVE.toFixed(3)}
-        // Ring see-through: 0.5 = twice as transparent as before.
-        #define RING_GLOW 0.5
+        // Ring see-through: low glow plus a wide, soft band = a thin veil rather than a line.
+        #define RING_GLOW 0.28
         #define AHEAD ${SHOCKWAVE_AHEAD.toFixed(2)}
         varying vec2 vUv; uniform sampler2D tDiffuse; uniform float blur,glitch,frost,lens,wave,waveT,time; uniform vec2 resolution;
         vec3 sampleBlur(vec2 uv) {
@@ -37,21 +37,21 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
           float r=length(q);
           // Elastic fisheye on pickup: the picture bulges, then springs back and wobbles out.
           vec2 base=.5+d*(1.+lens*dot(q,q)*1.6);
-          // Shockwave: a few sparse, translucent purple rings. Each is born at the screen edge
-          // and shrinks all the way to the vanishing point (perspective: radius ~ 1/depth),
-          // as if it ran through the whole forest.
+          // Shockwave: three sparse, veil-like translucent purple rings. Each is born at the screen edge
+          // and shrinks towards the vanishing point (perspective: radius ~ 1/depth),
+          // fading out where the wave's reach ends (three quarters of the forest depth).
           float w=0.;
           for(int i=0;i<RINGS;i++){
             float a=waveT-float(i)*GAP;
             if(a>0. && a<WAVE){
               float p=a/WAVE;
               float r0=1.25*3./(3.+p*AHEAD);
-              float e=(r-r0)/(.014+.06*r0);
-              w+=exp(-e*e)*smoothstep(0.,.07,p)*(1.-smoothstep(.82,1.,p));
+              float e=(r-r0)/(.03+.11*r0);
+              w+=exp(-e*e*.7)*smoothstep(0.,.1,p)*(1.-smoothstep(.6,1.,p));
             }
           }
           w=min(1.,w)*wave;
-          base+=q/max(r,.001)*w*.012*vec2(1./asp,1.);
+          base+=q/max(r,.001)*w*.008*vec2(1./asp,1.);
           float band=sin(vUv.y*160.+time*14.)*sin(vUv.y*37.-time*6.);
           vec2 uv=base+vec2(band*glitch*.008,0.);
           vec2 split=vec2(glitch*.012,glitch*.002);
@@ -66,7 +66,7 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
           float rim=smoothstep(.3,.8,length(vUv-.5));
           float crystal=pow(max(0.,sin(vUv.x*210.+time*.4)*sin(vUv.y*190.-time*.3)),14.);
           c+=vec3(.55,.8,1.)*frost*(rim*.16+rim*crystal*.5);
-          c+=(vec3(.6,.25,1.)*w*.4+vec3(.85,.7,1.)*pow(w,3.)*.25)*RING_GLOW;
+          c+=(vec3(.6,.25,1.)*w*.4+vec3(.85,.7,1.)*pow(w,3.)*.1)*RING_GLOW;
           gl_FragColor=vec4(c,1.);
         }`,
     });
