@@ -3,6 +3,8 @@ const SOURCES = ["/audio/forest-loop.wav", "/audio/forest-loop.mp3"];
 // One-shot stings, decoded once per audio context.
 export const STINGS = { start: "/audio/run_start.wav", end: "/audio/run_end.wav", threat: "/audio/threat.wav" } as const;
 export type Sting = keyof typeof STINGS;
+// Start and end stings are dulled with a low-pass (cutoff in Hz); the threat sting stays untouched.
+const STING_TONE: Partial<Record<Sting, number>> = { start: 1200, end: 900 };
 // Short synthesized cues for moments that were silent (haptics only) until now.
 export type Cue = "freezer" | "ghost" | "shockwave" | "ring" | "end" | "stumble" | "gate" | "secret";
 // Survive: once the lights die the forest loop sinks to a dull, distant hum.
@@ -171,15 +173,15 @@ export class ForestDrone {
   play(name: Sting) {
     if (!this.context || !this.canPlay()) return;
     const ready = this.stings[name];
-    if (ready) { this.startSting(ready); return; }
+    if (ready) { this.startSting(ready, name); return; }
     const asked = Date.now();
     void this.loadSting(name).then(buffer => {
-      if (buffer && Date.now() - asked < 700) this.startSting(buffer);
+      if (buffer && Date.now() - asked < 700) this.startSting(buffer, name);
     });
   }
   playThreat() { this.play("threat"); }
 
-  private startSting(buffer: AudioBuffer) {
+  private startSting(buffer: AudioBuffer, name: Sting) {
     const ctx = this.context;
     if (!ctx || !this.canPlay()) return;
     try {
@@ -190,7 +192,18 @@ export class ForestDrone {
       gain.gain.setValueAtTime(0.9, ctx.currentTime);
       gain.gain.setValueAtTime(0.9, Math.max(ctx.currentTime, end - 0.35));
       gain.gain.linearRampToValueAtTime(0, end);
-      source.connect(gain);
+      const tone = STING_TONE[name];
+      if (tone) {
+        // Muffled start/end: roll the highs off before the fade-out gain.
+        const dull = ctx.createBiquadFilter();
+        dull.type = "lowpass";
+        dull.frequency.value = tone;
+        dull.Q.value = 0.5;
+        source.connect(dull);
+        dull.connect(gain);
+      } else {
+        source.connect(gain);
+      }
       gain.connect(ctx.destination);
       source.start();
     } catch { /* Never let a sting break the run. */ }
@@ -259,11 +272,11 @@ export class ForestDrone {
   /** Soft, short feedback for pickups, rings, stumbles, gates and secrets. */
   cue(name: Cue) {
     switch (name) {
-      case "freezer": this.blip(1320, 660, 0.6, 0.07); this.blip(1980, 990, 0.5, 0.04, "triangle", 0.04); break;
-      case "ghost": this.blip(440, 880, 0.7, 0.06); this.blip(660, 1320, 0.7, 0.035, "sine", 0.08); break;
-      case "shockwave": this.blip(120, 42, 0.8, 0.2); this.blip(220, 900, 0.45, 0.04, "triangle", 0.05); break;
-      case "ring": this.blip(150, 52, 0.55, 0.11); break;
-      case "end": this.blip(520, 260, 0.35, 0.045); break;
+      case "freezer": this.blip(660, 330, 0.65, 0.09); this.blip(990, 495, 0.55, 0.05, "triangle", 0.04); break;
+      case "ghost": this.blip(220, 440, 0.75, 0.08); this.blip(330, 660, 0.75, 0.045, "sine", 0.08); break;
+      case "shockwave": this.blip(110, 40, 0.85, 0.34); this.blip(150, 520, 0.5, 0.08, "triangle", 0.05); break;
+      case "ring": this.blip(140, 50, 0.6, 0.24); this.blip(210, 110, 0.4, 0.05, "triangle", 0.02); break;
+      case "end": this.blip(300, 150, 0.45, 0.065); break;
       case "stumble": this.blip(95, 52, 0.2, 0.15, "triangle"); break;
       case "gate": this.blip(72, 54, 0.7, 0.11); this.blip(144, 108, 0.6, 0.05, "sine", 0.05); break;
       case "secret":

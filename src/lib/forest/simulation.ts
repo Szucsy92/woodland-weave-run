@@ -24,17 +24,19 @@ export const POWERUP_START = 100;
 export const POWERUP_DURATION = 5;
 export const POWERUP_GAP = 120;
 export const POWERUP_TYPES: PowerUpType[] = ["freezer", "ghost", "shockwave"];
-// The shockwave sweeps a widening wedge out to the horizon (trees included):
-// FOG_END is where the forest fades into fog, so nothing visible is left standing.
-export const SHOCKWAVE_AHEAD = FOG_END + 6;
+// The shockwave sweeps a widening wedge ahead (trees included). FOG_END + 6 is the full
+// horizon, where the forest is generated; each wave only pushes out to three quarters of it.
+export const SHOCKWAVE_FULL = FOG_END + 6;
+export const SHOCKWAVE_REACH = 0.75;
+export const SHOCKWAVE_AHEAD = SHOCKWAVE_FULL * SHOCKWAVE_REACH;
 export const SHOCKWAVE_SIDE = 7;
 export const SHOCKWAVE_SPREAD = 1.25;
 // The wave front rolls out over this long; farther trees start dissolving later.
 export const SHOCKWAVE_WAVE = 1.5;
-// Sparse purple rings: one is sent every SHOCKWAVE_GAP seconds, each taking SHOCKWAVE_WAVE to run
-// all the way through the forest to the vanishing point (2 rings fit the 5 s power-up).
-export const SHOCKWAVE_GAP = 1.7;
-export const SHOCKWAVE_RINGS = 2;
+// Three evenly spaced rings: one is sent every SHOCKWAVE_GAP seconds, each taking SHOCKWAVE_WAVE to run
+// out to SHOCKWAVE_AHEAD (all 3 rings fit the 5 s power-up: 2 * 1.6 + 1.5 = 4.7 s).
+export const SHOCKWAVE_GAP = 1.6;
+export const SHOCKWAVE_RINGS = 3;
 // Each tree is shoved forward into the depth and torn out over this long.
 export const SHOCKWAVE_DISSOLVE = 0.8;
 export function canSpawnPowerUp(s: Simulation, lastSpawn: number, hasLiveOrb: boolean) {
