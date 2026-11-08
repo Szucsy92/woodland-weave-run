@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  CELL, collide, enterHole, exitWarp, HOLE_CORE, HOLE_CELL, holeExit, holesAround, makeSimulation, stepSimulation,
-  treesAround, warpEnvelope, warpLattice, WARP_DURATION, WARP_EXIT_TIME, WARP_PERIOD, type Simulation,
+  collide, enterHole, exitWarp, HOLE_CORE, HOLE_CELL, holeExit, holesAround, makeSimulation, stepSimulation,
+  treesAround, warpChaos, warpEnvelope, WARP_CHAOS_AT, WARP_DURATION, WARP_EXIT_TIME, WARP_SHUFFLE, type Simulation,
 } from "@/lib/forest/simulation";
 
 const running = (): Simulation => {
@@ -79,28 +79,23 @@ describe("Black holes in freeroam", () => {
     s.warp = WARP_DURATION - .3; expect(warpEnvelope(s)).toBeLessThan(1);
     s.warp = WARP_DURATION; expect(warpEnvelope(s)).toBe(0);
   });
-  it("fold the forest onto itself so the same trees come round again", () => {
+  it("keep the same track and re-pose it every few seconds, then go back to normal", () => {
     const s = running();
-    s.warp = 3;
-    expect(warpLattice(s)).toBe(true);
-    s.warp = -1;
-    expect(warpLattice(s)).toBe(false);
-    const trees = treesAround(40, 40, .6, WARP_PERIOD);
-    const byId = new Map(trees.map(t => [t.id, t]));
-    let repeats = 0;
-    for (const t of trees) {
-      const [gx, gz] = t.id.split(":").map(Number) as [number, number];
-      const twin = byId.get(`${gx + WARP_PERIOD}:${gz}`);
-      if (!twin) continue;
-      repeats++;
-      expect(twin.x - t.x).toBeCloseTo(WARP_PERIOD * CELL, 5);
-      expect(twin.z).toBeCloseTo(t.z, 5);
-      expect(twin.scale).toBeCloseTo(t.scale, 5);
-    }
-    expect(repeats).toBeGreaterThan(5);
-  });
-  it("leave the normal forest unchanged without a period", () => {
-    expect(treesAround(10, 10, .57)).toEqual(treesAround(10, 10, .57, 0));
+    expect(warpChaos(s)).toBe(-1);
+    s.warp = WARP_CHAOS_AT - .05;
+    expect(warpChaos(s)).toBe(-1);
+    s.warp = WARP_CHAOS_AT + .1;
+    expect(warpChaos(s)).toBe(0);
+    s.warp = WARP_CHAOS_AT + WARP_SHUFFLE + .1;
+    expect(warpChaos(s)).toBe(1);
+    s.warp = WARP_DURATION - .1;
+    expect(warpChaos(s)).toBeGreaterThanOrEqual(2);
+    s.warp = WARP_DURATION;
+    expect(warpChaos(s)).toBe(-1);
+    // The trees themselves are never moved or repeated: only their pose changes.
+    expect(treesAround(10, 10, .57)).toEqual(treesAround(10, 10, .57));
+    const ids = treesAround(10, 10, .57).map(t => t.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
   it("resets with a new run and exits cleanly when asked", () => {
     const s = running();
