@@ -28,3 +28,22 @@ export async function checkForUpdate(current: number): Promise<UpdateInfo | null
   if (!res.ok) throw new Error(`status ${res.status}`);
   return pickUpdate(await res.json(), current);
 }
+
+export type UpdateEvent = { state: "progress" | "permission" | "installing" | "error"; percent: number; message: string };
+
+/** The Android side reports download progress and failures through a window event. */
+export function subscribeUpdateEvents(listener: (e: UpdateEvent) => void): () => void {
+  if (typeof window === "undefined") return () => undefined;
+  const handler = (ev: Event) => listener((ev as CustomEvent<UpdateEvent>).detail);
+  window.addEventListener("forest-update", handler);
+  return () => window.removeEventListener("forest-update", handler);
+}
+
+export function describeUpdateEvent(e: UpdateEvent): string {
+  switch (e.state) {
+    case "progress": return `Downloading… ${e.percent}%`;
+    case "permission": return "Allow installing from this app, then come back.";
+    case "installing": return "Downloaded. Confirm the install.";
+    default: return `Update failed${e.message ? `: ${e.message}` : "."}`;
+  }
+}
