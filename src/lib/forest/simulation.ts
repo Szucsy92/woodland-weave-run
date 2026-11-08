@@ -25,20 +25,38 @@ export const POWERUP_DURATION = 5;
 export const POWERUP_GAP = 120;
 export const POWERUP_TYPES: PowerUpType[] = ["freezer", "ghost", "shockwave"];
 // The shockwave sweeps a widening wedge ahead (trees included). FOG_END + 6 is the full
-// horizon, where the forest is generated; each wave only pushes out to three quarters of it.
+// horizon, where the forest is generated; the biggest wave reaches three quarters of it.
 export const SHOCKWAVE_FULL = FOG_END + 6;
 export const SHOCKWAVE_REACH = 0.75;
 export const SHOCKWAVE_AHEAD = SHOCKWAVE_FULL * SHOCKWAVE_REACH;
 export const SHOCKWAVE_SIDE = 7;
 export const SHOCKWAVE_SPREAD = 1.25;
-// The wave front rolls out over this long; farther trees start dissolving later.
+// A standing runner would see the biggest ring run out to SHOCKWAVE_AHEAD in this long.
 export const SHOCKWAVE_WAVE = 1.5;
-// Three evenly spaced rings: one is sent every SHOCKWAVE_GAP seconds, each taking SHOCKWAVE_WAVE to run
-// out to SHOCKWAVE_AHEAD (all 3 rings fit the 5 s power-up: 2 * 1.6 + 1.5 = 4.7 s).
+// Ring fronts always travel at this pace relative to the runner.
+export const SHOCKWAVE_SPEED = SHOCKWAVE_AHEAD / SHOCKWAVE_WAVE;
+// Three rings: one is sent every SHOCKWAVE_GAP seconds (all 3 fit the 5 s power-up).
 export const SHOCKWAVE_GAP = 1.6;
 export const SHOCKWAVE_RINGS = 3;
+// How much forest each ring takes down, as a share of SHOCKWAVE_AHEAD, measured as the trees stand
+// when the ring is born. The first rings only bite off the near forest, so that every later ring
+// still finds a fresh band of trees to rip out; the last ring takes the full SHOCKWAVE_AHEAD.
+export const SHOCKWAVE_LOOKAHEAD = [0.45, 0.72, 1];
 // Each tree is shoved forward into the depth and torn out over this long.
 export const SHOCKWAVE_DISSOLVE = 0.8;
+// A tree is only marked torn out this shortly before its ring front reaches it, so trees that
+// have not been reached yet stay in the world and can still be taken by a nearer boundary.
+export const SHOCKWAVE_COMMIT = 0.35;
+/**
+ * How far out a ring's front runs (metres ahead of the runner) before it ends. The runner keeps
+ * running into the ring, so trees meet the front earlier: a ring takes everything that stood
+ * within reach * (1 + speed / SHOCKWAVE_SPEED) when it was born. Dividing that out keeps the
+ * torn-out depth the same for a slow jog and for a flat-out sprint.
+ */
+export function shockwaveReach(ring: number, speed: number) {
+  const share = SHOCKWAVE_LOOKAHEAD[Math.min(ring, SHOCKWAVE_LOOKAHEAD.length - 1)] ?? 1;
+  return (SHOCKWAVE_AHEAD * share) / (1 + Math.max(0, speed) / SHOCKWAVE_SPEED);
+}
 export function canSpawnPowerUp(s: Simulation, lastSpawn: number, hasLiveOrb: boolean) {
   return s.phase === "running" && s.distance >= POWERUP_START && !s.powerUp && !hasLiveOrb
     && (lastSpawn === 0 || s.distance - lastSpawn >= POWERUP_GAP);
@@ -271,7 +289,7 @@ export function makeSimulation() {
     pushX: 0, lastTree: "", cell: "", trees: [] as Tree[], obstacles: [] as Obstacle[],
     difficulty: "easy" as Difficulty, stumble: 0, speedMul: 1, lastObstacle: "", stride: 0,
     pause: "none" as PauseState, pauseTime: 0,
-    mode: "classic" as GameMode, powerUp: null as PowerUpType | null, powerUpTime: 0,
+    mode: "classic" as GameMode, powerUp: null as PowerUpType | null, powerUpTime: 0, waveSpeed: BASE_SPEED,
     threat: 0, cleared: [] as string[], clearedAt: {} as Record<string, number>,
     surviveTime: -1, lastGate: "", found: [] as string[] };
 }
@@ -334,37 +352,53 @@ export function collideObstacle(s: Simulation, obstacle: Obstacle) {
   return true;
 }
 
-/** True when a point lies in the stretch just ahead of the runner. */
+/** The pace the runner holds without stumbles or the freezer: it sets how far the waves reach. */
+export function runSpeed(s: Simulation) {
+  const level = DIFFICULTIES[s.difficulty];
+  return Math.min(level.maxSpeed, BASE_SPEED + s.distance / level.accel);
+}
+
+/** True when a point lies in the widening wedge ahead of the runner. */
 export function inShockwave(s: Simulation, x: number, z: number) {
   const dx = x - s.x, dz = z - s.z;
   const along = -dx * Math.sin(s.heading) - dz * Math.cos(s.heading);
   const lateral = dx * Math.cos(s.heading) - dz * Math.sin(s.heading);
-  return along > -1 && along < SHOCKWAVE_AHEAD && Math.abs(lateral) < SHOCKWAVE_SIDE + Math.max(0, along) * SHOCKWAVE_SPREAD;
+  return along > -1 && along < SHOCKWAVE_FULL && Math.abs(lateral) < SHOCKWAVE_SIDE + Math.max(0, along) * SHOCKWAVE_SPREAD;
 }
 
 /**
- * Seconds until a ring front reaches a point (0 beside the runner). Rings run at a
- * steady pace through the forest, so a tree is torn out the moment the next ring
- * passes its depth; with no ring left to come it goes at once.
+ * When a thing standing `along` metres ahead gets torn out, in power-up time, or null if no ring
+ * can take it yet. A ring front runs out at a steady pace while the thing rushes towards the
+ * runner, so they meet where front = depth - speed * time. Whatever lies inside the zone the
+ * waves already swept (the end of the last finished ring, or the running front) is torn out at once:
+ * trees keep ripping out right in front of the runner until the next, bigger ring arrives.
  */
-export function shockwaveDelay(s: Simulation, x: number, z: number) {
-  const along = -(x - s.x) * Math.sin(s.heading) - (z - s.z) * Math.cos(s.heading);
-  const travel = Math.min(1, Math.max(0, along) / SHOCKWAVE_AHEAD) * SHOCKWAVE_WAVE;
-  const now = s.powerUp === "shockwave" ? s.powerUpTime : 0;
+export function shockwaveHit(s: Simulation, along: number): { at: number; boundary: boolean } | null {
+  const v = s.waveSpeed, now = s.powerUp === "shockwave" ? s.powerUpTime : 0;
+  let best = Infinity, swept = 0;
   for (let i = 0; i < SHOCKWAVE_RINGS; i++) {
-    const reach = i * SHOCKWAVE_GAP + travel;
-    if (reach >= now - 1e-6) return reach - now;
+    const born = i * SHOCKWAVE_GAP, reach = shockwaveReach(i, v), end = born + reach / SHOCKWAVE_SPEED;
+    if (now >= end) { swept = Math.max(swept, reach); continue; }
+    if (now > born) swept = Math.max(swept, SHOCKWAVE_SPEED * (now - born));
+    const meet = (along + v * now + SHOCKWAVE_SPEED * born) / (SHOCKWAVE_SPEED + v);
+    if (meet >= Math.max(now, born) - 1e-9 && meet <= end) best = Math.min(best, meet);
   }
-  return 0;
+  if (along <= swept + 1e-9) return { at: now, boundary: true };
+  return Number.isFinite(best) ? { at: best, boundary: false } : null;
 }
 
-/** Marks everything inside the wave wedge as torn out; each piece starts when the front reaches it. */
+/** Marks what a ring front is about to reach as torn out; each piece starts when the front gets there. */
 export function sweepShockwave(s: Simulation) {
+  const now = s.powerUp === "shockwave" ? s.powerUpTime : 0;
   for (const o of [...s.obstacles, ...s.trees]) {
-    if (inShockwave(s, o.x, o.z) && !s.cleared.includes(o.id)) {
-      s.cleared.push(o.id);
-      s.clearedAt[o.id] = s.elapsed + shockwaveDelay(s, o.x, o.z);
-    }
+    if (s.cleared.includes(o.id) || !inShockwave(s, o.x, o.z)) continue;
+    const along = -(o.x - s.x) * Math.sin(s.heading) - (o.z - s.z) * Math.cos(s.heading);
+    const hit = shockwaveHit(s, along);
+    if (!hit || hit.at - now > SHOCKWAVE_COMMIT) continue;
+    // No two trunks give way in the same instant: a small spread in time, wider along the standing edge.
+    const spread = hash(Math.floor(o.x * 7), Math.floor(o.z * 7), 31) * (hit.boundary ? 0.25 : 0.08);
+    s.cleared.push(o.id);
+    s.clearedAt[o.id] = s.elapsed + Math.max(0, hit.at - now) + spread;
   }
 }
 
@@ -374,6 +408,7 @@ export function collectPowerUp(s: Simulation, p: PowerUp) {
   if (Math.hypot(s.x - p.x, s.z - p.z) > 1.1) return false;
   s.powerUp = p.type;
   s.powerUpTime = 0;
+  s.waveSpeed = runSpeed(s);
   if (p.type === "shockwave") sweepShockwave(s);
   return true;
 }
