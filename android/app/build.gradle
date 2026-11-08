@@ -7,18 +7,16 @@ android {
         applicationId "com.woodlandweave.run"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        // CI passes -PciVersionCode (GitHub run number) so every build can
-        // install over the previous one; local builds fall back to 1.
+        // -PciVersionCode=N / -PciVersionName=X override these; default is 1 / "1.0".
         versionCode (project.hasProperty('ciVersionCode') ? ciVersionCode.toInteger() : 1)
         versionName (project.hasProperty('ciVersionName') ? ciVersionName : "1.0")
-        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
-    // Credentials come only from the runner environment, never command arguments.
+    // Optional release signing; credentials come only from environment variables.
     signingConfigs {
         release {
             if (System.getenv('ANDROID_KEYSTORE_PASSWORD')) {
@@ -53,8 +51,6 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
-    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
-    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
 }
 
