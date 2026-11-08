@@ -295,9 +295,9 @@ export function exitWarp(s: Simulation) {
 // Speed comes from a gentler base with a stronger ramp; density decides how
 // much room the runner has to weave through. Easy is the original balance.
 export const DIFFICULTIES = {
-  easy: { treeGap: 0.57, accel: 100, maxSpeed: 17, obstacleGap: 0.84 },
-  normal: { treeGap: 0.66, accel: 66, maxSpeed: 20, obstacleGap: 0.76 },
-  hard: { treeGap: 0.75, accel: 46, maxSpeed: 23.5, obstacleGap: 0.66 },
+  easy: { treeGap: 0.57, accel: 140, maxSpeed: 14.5, obstacleGap: 0.84 },
+  normal: { treeGap: 0.66, accel: 95, maxSpeed: 17, obstacleGap: 0.76 },
+  hard: { treeGap: 0.75, accel: 70, maxSpeed: 19.5, obstacleGap: 0.66 },
 } satisfies Record<Difficulty, { treeGap: number; accel: number; maxSpeed: number; obstacleGap: number }>;
 
 // Every run starts at this pace, and the head movement covers one stride per
