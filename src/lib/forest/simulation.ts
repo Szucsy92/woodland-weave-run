@@ -197,16 +197,13 @@ export function passGate(s: Simulation, gate: Gate) {
 
 // Black holes for freeroam: dark bodies that bend the space around them. Running into one drops the
 // runner into a wormhole of warped space for WARP_DURATION seconds (chaotic drift, a forest that repeats
-// the same track re-posed upside down and sideways, impossible secrets) before the runner is thrown out far away.
+// the same track, but filled with impossible secrets and spores) before the runner is thrown out far away.
 export const HOLE_CELL = 170;
 export const HOLE_RADIUS = 2.2;
 export const HOLE_HEIGHT = 2.6;
 export const HOLE_CORE = 2.3;
 export const HOLE_CLEARING = 10;
 export const WARP_DURATION = 10;
-// The same forest, but everything is re-posed (upside down, sideways, slanted) every WARP_SHUFFLE seconds.
-export const WARP_CHAOS_AT = 0.35;
-export const WARP_SHUFFLE = 3.2;
 export const WARP_FADE_IN = 0.7;
 export const WARP_FADE_OUT = 1;
 // Flash and shock when the runner is thrown out again.
@@ -240,14 +237,6 @@ export function warpEnvelope(s: Simulation) {
   if (s.warp < 0 || s.warp >= WARP_DURATION) return 0;
   const k = (t: number) => t * t * (3 - 2 * t);
   return k(Math.min(1, s.warp / WARP_FADE_IN)) * k(Math.min(1, (WARP_DURATION - s.warp) / WARP_FADE_OUT));
-}
-/**
- * Which pose of the chaotic forest is showing: -1 while the world still stands normally (before the fall
- * has finished and after the exit), then 0, 1, 2... each time everything is thrown into new positions.
- */
-export function warpChaos(s: Simulation) {
-  if (s.warp < WARP_CHAOS_AT || s.warp >= WARP_DURATION) return -1;
-  return Math.floor((s.warp - WARP_CHAOS_AT) / WARP_SHUFFLE);
 }
 /** Running into the dark body drops the runner into the wormhole (freeroam only). */
 export function enterHole(s: Simulation, hole: BlackHole) {
