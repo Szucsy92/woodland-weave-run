@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   collide, enterHole, exitWarp, HOLE_CORE, HOLE_CELL, holeExit, holesAround, makeSimulation, stepSimulation,
-  treesAround, warpEnvelope, WARP_DURATION, WARP_EXIT_TIME, type Simulation,
+  treesAround, universeDensity, universeHue, universeSalt, universeScale, universeTime, HOLE_CHANCE, warpEnvelope, WARP_DURATION, WARP_EXIT_TIME, type Simulation,
 } from "@/lib/forest/simulation";
 
 const running = (): Simulation => {
@@ -91,5 +91,48 @@ describe("Black holes in freeroam", () => {
     expect(s.warp).toBe(-1);
     expect(s.warpOut).toBe(0);
     expect(makeSimulation().warp).toBe(-1);
+  });
+  it("are rare: a few per kilometre of running, never a crowd", () => {
+    let holes = 0, cells = 0;
+    for (let i = -20; i < 20; i++) for (let j = -20; j < 20; j++) {
+      if (i === 0 && j === 0) continue;
+      cells++;
+      if (holesAround(i * HOLE_CELL + HOLE_CELL / 2, j * HOLE_CELL + HOLE_CELL / 2).some(h => h.id === `h${i}:${j}`)) holes++;
+    }
+    expect(holes / cells).toBeLessThan(HOLE_CHANCE + .08);
+    expect(HOLE_CHANCE).toBeLessThanOrEqual(.3);
+  });
+  it("lead into a new universe each time, never back to the same one", () => {
+    const hole = someHole();
+    const s = running();
+    expect(s.universe).toBe(0);
+    for (let n = 1; n <= 3; n++) {
+      s.x = hole.x; s.z = hole.z; s.warp = -1;
+      expect(enterHole(s, hole)).toBe(true);
+      exitWarp(s);
+      expect(s.universe).toBe(n);
+      expect(universeTime(s)).toBe(0);
+    }
+    expect(makeSimulation().universe).toBe(0);
+  });
+  it("give every universe its own forest, colour cast, thickness and tree size", () => {
+    expect(universeSalt(0)).toBe(0);
+    expect(universeHue(0)).toBe(0);
+    expect(universeDensity(0)).toBe(1);
+    expect(universeScale(0)).toBe(1);
+    const home = treesAround(10, 10, .57, 0), other = treesAround(10, 10, .57, 1), another = treesAround(10, 10, .57, 2);
+    expect(treesAround(10, 10, .57, 1)).toEqual(other);
+    expect(other).not.toEqual(home);
+    expect(another).not.toEqual(other);
+    const ids = new Set(home.map(t => t.id));
+    expect(other.some(t => ids.has(t.id))).toBe(false);
+    for (let u = 1; u < 12; u++) {
+      expect(universeHue(u)).toBeGreaterThan(.8);
+      expect(universeDensity(u)).toBeGreaterThan(.7);
+      expect(universeDensity(u)).toBeLessThan(1.3);
+      expect(universeScale(u)).toBeGreaterThan(.8);
+    }
+    // The holes of another universe stand elsewhere.
+    expect(holesAround(500, 500, 1)).not.toEqual(holesAround(500, 500, 0));
   });
 });
