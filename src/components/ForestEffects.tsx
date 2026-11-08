@@ -7,6 +7,7 @@ import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { DARK_PAUSE, EXIT_TIME, IMPACT_DURATION, LIGHTS_DIE, PAUSE_SLOW, POWERUP_DURATION, RESUME_TIME, SHOCKWAVE_GAP, SHOCKWAVE_RINGS, SHOCKWAVE_SPEED, shockwaveReach, surviveOn, type Simulation } from "@/lib/forest/simulation";
 
+const LENS_PICKUP = .95 * 1.1, LENS_RING = .5 * 1.1, LENS_END = .45;
 export function ForestEffects({ simulation }: { simulation: MutableRefObject<Simulation> }) {
   const { gl, scene, camera, size } = useThree();
   const { composer, effect } = useMemo(() => {
@@ -88,6 +89,9 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
   // every run, and s.pauseTime resets at each pause step, so mixing them made the glitch bands
   // and frost crystals jump.
   const clock = useRef(0);
+  // Fisheye kick when a power fades: remembers whether one was active and when it ended.
+  const hadPower = useRef(false);
+  const powerEndedAt = useRef(-99);
   useFrame((_, delta) => {
     const s = simulation.current;
     const lying = s.phase === "falling" || s.phase === "fallen";
@@ -118,14 +122,20 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
       // The freezer stays calm: a soft cold bloom instead of a glitch tear.
       effect.uniforms["glitch"]!.value += s.powerUp === "freezer" ? surge * .3 : (s.powerUp === "shockwave" ? surge * .5 : surge) + fade + .05;
     }
-    // Elastic lens on every power-up: a damped spring kicks in at pickup (bulge, overshoot,
-    // settle). The shockwave repeats a milder kick as each ring is born.
+    // Elastic fisheye on every orb pickup (10% stronger than before): a damped spring kicks in
+    // (bulge, overshoot, settle). The shockwave repeats a milder kick as each ring is born, and
+    // when any power fades a weaker kick, well under the pickup one, closes it.
     let lens = 0;
     if (s.powerUp) {
       const a = s.powerUpTime;
       const ring = s.powerUp === "shockwave" ? Math.min(SHOCKWAVE_RINGS - 1, Math.floor(a / SHOCKWAVE_GAP)) : 0;
       const age = a - ring * SHOCKWAVE_GAP;
-      lens = (ring === 0 ? .95 : .5) * Math.exp(-age * 3.2) * Math.cos(age * 14);
+      lens = (ring === 0 ? LENS_PICKUP : LENS_RING) * Math.exp(-age * 3.2) * Math.cos(age * 14);
+      hadPower.current = true;
+    } else {
+      if (hadPower.current) { hadPower.current = false; powerEndedAt.current = clock.current; }
+      const age = clock.current - powerEndedAt.current;
+      if (age >= 0 && age < 2) lens = LENS_END * Math.exp(-age * 3.2) * Math.cos(age * 14);
     }
     effect.uniforms["lens"]!.value = lens;
     // Shockwave rings run for the whole power-up, easing in and out.
