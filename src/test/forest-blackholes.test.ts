@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   collide, enterHole, exitWarp, HOLE_CORE, HOLE_CELL, holeExit, holesAround, makeSimulation, stepSimulation,
-  treesAround, warpChaos, warpEnvelope, WARP_CHAOS_AT, WARP_DURATION, WARP_EXIT_TIME, WARP_SHUFFLE, type Simulation,
+  treesAround, warpEnvelope, WARP_DURATION, WARP_EXIT_TIME, type Simulation,
 } from "@/lib/forest/simulation";
 
 const running = (): Simulation => {
@@ -79,20 +79,7 @@ describe("Black holes in freeroam", () => {
     s.warp = WARP_DURATION - .3; expect(warpEnvelope(s)).toBeLessThan(1);
     s.warp = WARP_DURATION; expect(warpEnvelope(s)).toBe(0);
   });
-  it("keep the same track and re-pose it every few seconds, then go back to normal", () => {
-    const s = running();
-    expect(warpChaos(s)).toBe(-1);
-    s.warp = WARP_CHAOS_AT - .05;
-    expect(warpChaos(s)).toBe(-1);
-    s.warp = WARP_CHAOS_AT + .1;
-    expect(warpChaos(s)).toBe(0);
-    s.warp = WARP_CHAOS_AT + WARP_SHUFFLE + .1;
-    expect(warpChaos(s)).toBe(1);
-    s.warp = WARP_DURATION - .1;
-    expect(warpChaos(s)).toBeGreaterThanOrEqual(2);
-    s.warp = WARP_DURATION;
-    expect(warpChaos(s)).toBe(-1);
-    // The trees themselves are never moved or repeated: only their pose changes.
+  it("keep the very same forest: the trees are not moved or changed", () => {
     expect(treesAround(10, 10, .57)).toEqual(treesAround(10, 10, .57));
     const ids = treesAround(10, 10, .57).map(t => t.id);
     expect(new Set(ids).size).toBe(ids.length);
