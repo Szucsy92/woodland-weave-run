@@ -97,14 +97,30 @@ public class MainActivity extends BridgeActivity {
             }
             @JavascriptInterface
             public void download(String url) {
-                if (url == null || !url.startsWith("https://github.com/")) return;
-                new Thread(() -> downloadAndInstall(url)).start();
+                if (!isTrustedUpdateUrl(url)) return;
+                if (!downloading.compareAndSet(false, true)) return;
+                new Thread(() -> {
+                    try { downloadAndInstall(url); }
+                    finally { downloading.set(false); }
+                }).start();
             }
         }, "AndroidUpdater");
         super.load();
     }
 
     private File pendingApk;
+    private final java.util.concurrent.atomic.AtomicBoolean downloading = new java.util.concurrent.atomic.AtomicBoolean(false);
+    private static final String RELEASE_PATH_PREFIX = "/Szucsy92/woodland-weave-run/releases/download/";
+
+    /** Only this game's own GitHub release assets, over https, may be downloaded. */
+    private static boolean isTrustedUpdateUrl(String url) {
+        if (url == null) return false;
+        try {
+            URL u = new URL(url);
+            return "https".equals(u.getProtocol()) && "github.com".equals(u.getHost())
+                && u.getPath().startsWith(RELEASE_PATH_PREFIX);
+        } catch (Exception e) { return false; }
+    }
 
     private void notifyUpdate(String state, int percent, String message) {
         String detail = "{state:" + org.json.JSONObject.quote(state) + ",percent:" + percent
@@ -145,18 +161,23 @@ public class MainActivity extends BridgeActivity {
                 conn.setConnectTimeout(15000);
                 conn.setReadTimeout(30000);
                 conn.setRequestProperty("User-Agent", "WoodlandWeaveRun");
+                // No transparent gzip: it hides Content-Length and with it the integrity check.
+                conn.setRequestProperty("Accept-Encoding", "identity");
                 int code = conn.getResponseCode();
                 if (code >= 300 && code < 400) {
                     String next = conn.getHeaderField("Location");
                     conn.disconnect();
+                    conn = null;
                     if (next == null) throw new Exception("redirect without target");
-                    current = new URL(new URL(current), next).toString();
+                    URL target = new URL(new URL(current), next);
+                    if (!"https".equals(target.getProtocol())) throw new Exception("insecure redirect");
+                    current = target.toString();
                     continue;
                 }
-                if (code != 200) throw new Exception("HTTP " + code);
+                if (code != 200) { conn.disconnect(); throw new Exception("HTTP " + code); }
                 break;
             }
-            if (conn == null) throw new Exception("no connection");
+            if (conn == null) throw new Exception("too many redirects");
             long total = conn.getContentLengthLong();
             long done = 0;
             int lastPct = -1;
@@ -189,6 +210,7 @@ public class MainActivity extends BridgeActivity {
                 catch (Exception e) { notifyUpdate("error", 0, String.valueOf(e.getMessage())); }
             });
         } catch (Exception e) {
+            new File(new File(getCacheDir(), "updates"), "update.apk.part").delete();
             notifyUpdate("error", 0, String.valueOf(e.getMessage()));
         }
     }
