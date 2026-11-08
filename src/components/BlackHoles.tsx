@@ -50,6 +50,35 @@ function glowTexture() {
   return new THREE.CanvasTexture(canvas);
 }
 
+/** A soft, glowing ring profile with faint uneven streaks: no hard edge anywhere. */
+function ringTexture() {
+  const size = 256, canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const g = canvas.getContext("2d");
+  if (g) {
+    const c = size / 2;
+    const grad = g.createRadialGradient(c, c, 0, c, c, c);
+    grad.addColorStop(0, "rgba(255,255,255,0)");
+    grad.addColorStop(.4, "rgba(255,255,255,0)");
+    grad.addColorStop(.66, "rgba(255,255,255,.55)");
+    grad.addColorStop(.8, "rgba(255,255,255,.22)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = grad;
+    g.fillRect(0, 0, size, size);
+    // Uneven, hazy streaks so the turning is readable without any visible line.
+    g.globalCompositeOperation = "destination-out";
+    for (let k = 0; k < 14; k++) {
+      const a0 = rnd(k, 61) * Math.PI * 2, len = .3 + rnd(k, 62) * .9;
+      g.strokeStyle = `rgba(0,0,0,${.12 + rnd(k, 63) * .2})`;
+      g.lineWidth = 14 + rnd(k, 64) * 30;
+      g.beginPath();
+      g.arc(c, c, c * (.55 + rnd(k, 65) * .3), a0, a0 + len);
+      g.stroke();
+    }
+  }
+  return new THREE.CanvasTexture(canvas);
+}
+
 /**
  * Freeroam black holes and the wormhole they open. Each hole is a pure black body with a tilted,
  * turning accretion disk, a halo that shows through the fog and a few orbiting sparks; the screen-space
@@ -61,7 +90,8 @@ export function BlackHoles({ simulation, palette }: { simulation: MutableRefObje
   const holes = useRef<THREE.Group>(null);
   const swarm = useRef<THREE.Group>(null);
   const glow = useMemo(() => glowTexture(), []);
-  useEffect(() => () => glow.dispose(), [glow]);
+  const veil = useMemo(() => ringTexture(), []);
+  useEffect(() => () => { glow.dispose(); veil.dispose(); }, [glow, veil]);
   const tmp = useMemo(() => new THREE.Euler(), []);
   const vec = useMemo(() => new THREE.Vector3(), []);
   const eul = useMemo(() => new THREE.Euler(), []);
@@ -190,18 +220,18 @@ export function BlackHoles({ simulation, palette }: { simulation: MutableRefObje
             <sphereGeometry args={[HOLE_RADIUS, 28, 20]} />
             <meshBasicMaterial color="#000000" fog={false} />
           </mesh>
-          {/* A tilted accretion disk of three turning bands. */}
+          {/* A tilted accretion veil: three faint, soft glows that barely show, turning slowly. */}
           <group>
-            {[[2.7, 3.6, palette.lavender, .5], [3.7, 4.9, palette.purple, .38], [5, 6.4, palette.secret, .22]].map(([inner, outer, color, opacity], r) => (
+            {[[10, palette.lavender, .16], [13, palette.purple, .11], [17, palette.secret, .07]].map(([size, color, opacity], r) => (
               <mesh key={r}>
-                <ringGeometry args={[inner as number, outer as number, 48, 1, 0, Math.PI * (1.55 + r * .2)]} />
-                <meshBasicMaterial color={color as THREE.Color} transparent opacity={opacity as number} blending={THREE.AdditiveBlending} depthWrite={false} side={THREE.DoubleSide} fog={false} />
+                <planeGeometry args={[size as number, size as number]} />
+                <meshBasicMaterial map={veil} color={color as THREE.Color} transparent opacity={opacity as number} blending={THREE.AdditiveBlending} depthWrite={false} side={THREE.DoubleSide} fog={false} />
               </mesh>
             ))}
           </group>
           {/* A dim violet halo that carries through the fog like the gate beacons. */}
           <sprite scale={[22, 22, 1]}>
-            <spriteMaterial map={glow} color={palette.purple} transparent opacity={.4} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} />
+            <spriteMaterial map={glow} color={palette.purple} transparent opacity={.3} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} />
           </sprite>
           <group>
             {Array.from({ length: 9 }, (_, k) => (

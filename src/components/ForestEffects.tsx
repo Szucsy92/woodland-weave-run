@@ -55,7 +55,7 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
             vec2 dd=mat2(cos(tw),-sin(tw),sin(tw),cos(tw))*dh;
             vec2 src=hq+dd*max(0.,1.-pull/rh);
             q=src; d=vec2(q.x/asp,q.y);
-            hring=exp(-pow((rh-rs*1.1)/(rs*.13),2.))*hole.w;
+            hring=exp(-pow((rh-rs*1.15)/(rs*.3),2.))*hole.w;
           }
           // Elastic fisheye on pickup: the picture bulges, then springs back and wobbles out.
           vec2 base=.5+d*(1.+lens*dot(q,q)*1.6);
@@ -91,7 +91,7 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
           float crystal=pow(max(0.,sin(vUv.x*210.+time*.4)*sin(vUv.y*190.-time*.3)),14.);
           c+=vec3(.55,.8,1.)*frost*(rim*.16+rim*crystal*.5);
           c+=(vec3(.6,.25,1.)*w*.4+vec3(.85,.7,1.)*pow(w,3.)*.1)*RING_GLOW;
-          c+=vec3(.78,.5,1.)*hring*.6;
+          c+=vec3(.78,.5,1.)*hring*.16;
           // Wormhole colour: a faint violet cast, and a flash on the way in and out.
           c=mix(c,c*vec3(.88,.78,1.18)+vec3(0.,.015,.04),warp*.3);
           c*=1.-warp*.1*(.5+.5*sin(time*2.));
