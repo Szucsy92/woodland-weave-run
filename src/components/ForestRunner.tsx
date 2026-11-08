@@ -4,7 +4,8 @@ import { ArrowLeft, LogOut, Pause, Settings } from "lucide-react";
 import * as THREE from "three";
 import { ForestEffects } from "./ForestEffects";
 import { ForestDrone } from "@/lib/forest/drone";
-import { beginRun, canSpawnPowerUp, forestLightsFor, CELL, collectPowerUp, DIFFICULTIES, discoverSecret, GATE_CLEARING, GATE_HALF, gatesAround, type Gate, LIGHTS_DIE, passGate, SECRET_CLEARING, secretsAround, SHOCKWAVE_DISSOLVE, SHOCKWAVE_GAP, SHOCKWAVE_RINGS, surviveStage, type Secret, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, requestExit, requestPause, requestResume, obstaclesAround, orientationValue, makeTiltCal, resetTilt, updateTilt, type TiltCal, placePowerUp, placeSpore, POWERUP_DURATION, POWERUP_GAP, RADIUS, sporeOpacity, stepSimulation, treesAround, daylightFor, type Difficulty, type ForestMood, type GameMode, type Phase, type PowerUp, type PowerUpType, type Simulation } from "@/lib/forest/simulation";
+import { beginRun, holesAround, HOLE_CLEARING, warpEnvelope, warpLattice, WARP_PERIOD, canSpawnPowerUp, forestLightsFor, CELL, collectPowerUp, DIFFICULTIES, discoverSecret, GATE_CLEARING, GATE_HALF, gatesAround, type Gate, LIGHTS_DIE, passGate, SECRET_CLEARING, secretsAround, SHOCKWAVE_DISSOLVE, SHOCKWAVE_GAP, SHOCKWAVE_RINGS, surviveStage, type Secret, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, requestExit, requestPause, requestResume, obstaclesAround, orientationValue, makeTiltCal, resetTilt, updateTilt, type TiltCal, placePowerUp, placeSpore, POWERUP_DURATION, POWERUP_GAP, RADIUS, sporeOpacity, stepSimulation, treesAround, daylightFor, type Difficulty, type ForestMood, type GameMode, type Phase, type PowerUp, type PowerUpType, type Simulation } from "@/lib/forest/simulation";
+import { BlackHoles } from "@/components/BlackHoles";
 import { checkForUpdate, describeUpdateEvent, nativeUpdater, subscribeUpdateEvents, type UpdateInfo } from "@/lib/forest/updater";
 import barkUrl from "@/assets/wet-bark.jpg";
 import floorUrl from "@/assets/wet-ground.jpg";
@@ -58,7 +59,7 @@ const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 /** Shared survive-mode red amount (0..1) read by the scene lights and fog. */
 export type RedRef = MutableRefObject<number>;
 
-function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, onPowerUp, onPowerUpEnd, onRing, onThreat, onDark, onLit, onGate, onSecret }: {
+function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, onPowerUp, onPowerUpEnd, onRing, onThreat, onDark, onLit, onGate, onSecret, onWarp }: {
   simulation: MutableRefObject<Simulation>;
   input: MutableRefObject<Input>;
   palette: Palette;
@@ -73,6 +74,7 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
   onLit: () => void;
   onGate: () => void;
   onSecret: (secret: Secret) => void;
+  onWarp: (phase: "in" | "out") => void;
   red: RedRef;
 }) {
   const trunks = useRef<THREE.InstancedMesh>(null);
@@ -98,6 +100,8 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
   const lastPowerUp = useRef<PowerUpType | null>(null);
   // Index of the last shockwave ring whose birth already made its sound.
   const lastRing = useRef(-1);
+  const lastWarp = useRef(-1);
+  const lastWarpOut = useRef(-1);
   // Smoothed 0..1 ghost amount, so trees fade into and out of their ghost look.
   const ghostK = useRef(0);
   const redLight = useRef<THREE.PointLight>(null);
@@ -325,12 +329,15 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
   const previousPhase = useRef<Phase>("menu");
   useFrame((_, raw) => {
     const s = simulation.current;
-    const key = `${Math.floor(s.x / CELL)},${Math.floor(s.z / CELL)}`;
+    // While the wormhole is open the forest is folded onto itself and repeats; the trees are rebuilt
+    // when the fold appears and again when it is gone.
+    const lattice = s.mode === "freeroam" && warpLattice(s);
+    const key = `${Math.floor(s.x / CELL)},${Math.floor(s.z / CELL)}${lattice ? "w" : ""}`;
     const trunkMesh = trunks.current;
     if (trunkMesh && key !== s.cell) {
       s.cell = key;
       const level = DIFFICULTIES[s.difficulty];
-      s.trees = treesAround(Math.floor(s.x / CELL), Math.floor(s.z / CELL), level.treeGap);
+      s.trees = treesAround(Math.floor(s.x / CELL), Math.floor(s.z / CELL), level.treeGap, lattice ? WARP_PERIOD : 0);
       s.obstacles = obstaclesAround(Math.floor(s.x / CELL), Math.floor(s.z / CELL), level.obstacleGap);
       if (s.mode === "freeroam") {
         // Every secret sits in its own small clearing.
@@ -339,8 +346,11 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
         // Red gates need an open way through, too.
         const gates = gatesAround(s.x, s.z);
         gateWorld.current = gates;
+        // Black holes hang in a wide clearing of their own.
+        const holes = holesAround(s.x, s.z);
         const open = (o: { x: number; z: number }) => secrets.every(e => Math.hypot(o.x - e.x, o.z - e.z) > SECRET_CLEARING)
-          && gates.every(g => Math.hypot(o.x - g.x, o.z - g.z) > GATE_CLEARING);
+          && gates.every(g => Math.hypot(o.x - g.x, o.z - g.z) > GATE_CLEARING)
+          && holes.every(h => Math.hypot(o.x - h.x, o.z - h.z) > HOLE_CLEARING);
         s.trees = s.trees.filter(open);
         s.obstacles = s.obstacles.filter(open);
       } else secretWorld.current = [];
@@ -576,9 +586,11 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
       groundHeight(s.x, s.z) * .6 + groundHeight(s.x - Math.sin(viewHeading) * 18, s.z - Math.cos(viewHeading) * 18) * .4 + 1.62 + fall * 3,
       s.z - Math.cos(viewHeading) * 18 + stepZ);
     camera.lookAt(resources.target);
-    camera.rotateX(bump * .085 + waking * Math.sin(t * 5) * .045 + fall * .065 * Math.sin(t * .32) + tripping * Math.sin(t * 17) * .085 + (running ? Math.sin(s.stride) * .006 : 0));
+    // Wormhole: the horizon rolls and nods on its own.
+    const warpW = warpEnvelope(s);
+    camera.rotateX(warpW * Math.sin(t * 1.7) * .12 + bump * .085 + waking * Math.sin(t * 5) * .045 + fall * .065 * Math.sin(t * .32) + tripping * Math.sin(t * 17) * .085 + (running ? Math.sin(s.stride) * .006 : 0));
     camera.rotateY(-leanAmount * .06);
-    camera.rotateZ(-leanAmount * .065 + bump * .12 + fall * .72 + waking * Math.sin(t * 4) * .03 + (running ? Math.sin(s.stride * .5) * .007 : Math.sin(t * .4) * .008) + tripping * Math.sin(t * 13) * .07);
+    camera.rotateZ(warpW * (Math.sin(t * 1.1) * .5 + Math.sin(t * 2.7) * .18) - leanAmount * .065 + bump * .12 + fall * .72 + waking * Math.sin(t * 4) * .03 + (running ? Math.sin(s.stride * .5) * .007 : Math.sin(t * .4) * .008) + tripping * Math.sin(t * 13) * .07);
     if (lamp.current) {
       // Headlamp rides the step rhythm and leads gently into turns, like a
       // real lamp strapped to a turning head.
@@ -732,6 +744,11 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
       const ring = s.powerUp === "shockwave" ? Math.min(SHOCKWAVE_RINGS - 1, Math.floor(s.powerUpTime / SHOCKWAVE_GAP)) : -1;
       if (ring > lastRing.current && ring > 0) onRing();
       lastRing.current = ring;
+      // Falling into a black hole and being thrown out of the wormhole each get their own cue.
+      if (s.warp >= 0 && lastWarp.current < 0) onWarp("in");
+      if (s.warpOut >= 0 && lastWarpOut.current < 0) onWarp("out");
+      lastWarp.current = s.warp;
+      lastWarpOut.current = s.warpOut;
       // Ghost wisp: trunks, roots and branches (never the crowns: a see-through crown
       // would draw over the ghost trunks and hide their transparency) turn into pale, softly glowing,
       // see-through ghosts, fading in and out.
@@ -1245,6 +1262,10 @@ export function ForestRunner() {
     if (hapticsRef.current) buzz([30, 40, 30]);
     drone.current?.cue("gate");
   }, []);
+  const onWarp = useCallback((phase: "in" | "out") => {
+    if (hapticsRef.current) buzz(phase === "in" ? [60, 40, 120, 40, 60] : [120, 30, 40]);
+    drone.current?.cue(phase === "in" ? "hole" : "warpout");
+  }, []);
   const onSecret = useCallback((_secret: Secret) => {
     const found = simulation.current.found;
     setSecretCount(found.length);
@@ -1454,7 +1475,8 @@ export function ForestRunner() {
       <fog attach="fog" args={[palette.fog, 7, FOG_END]} />
       <hemisphereLight args={[palette.moon, palette.fog, .85]} />
       <directionalLight position={[0, 24, -20]} color={palette.moon} intensity={.7} />
-      <World simulation={simulation} input={input} palette={palette} red={red} onDark={onDark} onLit={onLit} onGate={onGate} onSecret={onSecret} onPhase={onPhase} onImpact={onImpact} onStumble={onStumble} onPowerUp={onPowerUp} onPowerUpEnd={onPowerUpEnd} onRing={onRing} onThreat={onThreat} />
+      <World simulation={simulation} input={input} palette={palette} red={red} onDark={onDark} onLit={onLit} onGate={onGate} onSecret={onSecret} onWarp={onWarp} onPhase={onPhase} onImpact={onImpact} onStumble={onStumble} onPowerUp={onPowerUp} onPowerUpEnd={onPowerUpEnd} onRing={onRing} onThreat={onThreat} />
+      <BlackHoles simulation={simulation} palette={palette} />
       <ForestEffects simulation={simulation} />
       <DayCycle mood={moodRef} night={palette} red={red} />
     </Canvas>}

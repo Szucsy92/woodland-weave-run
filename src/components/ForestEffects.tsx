@@ -5,7 +5,7 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
-import { DARK_PAUSE, EXIT_TIME, IMPACT_DURATION, LIGHTS_DIE, PAUSE_SLOW, POWERUP_DURATION, RESUME_TIME, SHOCKWAVE_GAP, SHOCKWAVE_RINGS, SHOCKWAVE_SPEED, shockwaveReach, surviveOn, type Simulation } from "@/lib/forest/simulation";
+import { DARK_PAUSE, EXIT_TIME, IMPACT_DURATION, LIGHTS_DIE, PAUSE_SLOW, POWERUP_DURATION, RESUME_TIME, SHOCKWAVE_GAP, SHOCKWAVE_RINGS, SHOCKWAVE_SPEED, shockwaveReach, surviveOn, warpEnvelope, holesAround, groundHeight, HOLE_HEIGHT, HOLE_RADIUS, WARP_EXIT_TIME, type Simulation } from "@/lib/forest/simulation";
 
 const LENS_PICKUP = .95 * 1.1, LENS_RING = .5 * 1.1, LENS_END = .45;
 export function ForestEffects({ simulation }: { simulation: MutableRefObject<Simulation> }) {
@@ -17,7 +17,7 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
     target.texture.name = "EffectComposer.rt1";
     const composer = new EffectComposer(gl, target);
     const effect = new ShaderPass({
-      uniforms: { tDiffuse: { value: null }, blur: { value: 0 }, glitch: { value: 0 }, frost: { value: 0 }, lens: { value: 0 }, wave: { value: 0 }, waveT: { value: 0 }, reach: { value: Array.from({ length: SHOCKWAVE_RINGS }, (_, i) => shockwaveReach(i, 8.4)) }, time: { value: 0 }, resolution: { value: new THREE.Vector2() } },
+      uniforms: { tDiffuse: { value: null }, blur: { value: 0 }, glitch: { value: 0 }, frost: { value: 0 }, lens: { value: 0 }, wave: { value: 0 }, waveT: { value: 0 }, warp: { value: 0 }, flash: { value: 0 }, hole: { value: new THREE.Vector4(.5, .5, .1, 0) }, reach: { value: Array.from({ length: SHOCKWAVE_RINGS }, (_, i) => shockwaveReach(i, 8.4)) }, time: { value: 0 }, resolution: { value: new THREE.Vector2() } },
       vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
       fragmentShader: `
         #define RINGS ${SHOCKWAVE_RINGS}
@@ -25,7 +25,7 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
         #define WSPEED ${SHOCKWAVE_SPEED.toFixed(3)}
         // Ring see-through: low glow plus a wide, soft band = a thin veil rather than a line.
         #define RING_GLOW 0.28
-        varying vec2 vUv; uniform sampler2D tDiffuse; uniform float blur,glitch,frost,lens,wave,waveT,time; uniform float reach[RINGS]; uniform vec2 resolution;
+        varying vec2 vUv; uniform sampler2D tDiffuse; uniform float blur,glitch,frost,lens,wave,waveT,warp,flash,time; uniform vec4 hole; uniform float reach[RINGS]; uniform vec2 resolution;
         vec3 sampleBlur(vec2 uv) {
           vec2 d=vec2(blur*8.)/resolution;
           return (texture2D(tDiffuse,uv).rgb*4. + texture2D(tDiffuse,uv+d).rgb + texture2D(tDiffuse,uv-d).rgb + texture2D(tDiffuse,uv+vec2(d.x,-d.y)).rgb + texture2D(tDiffuse,uv+vec2(-d.x,d.y)).rgb)/8.;
@@ -35,6 +35,33 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
           float asp=resolution.x/resolution.y;
           vec2 q=d*vec2(asp,1.);
           float r=length(q);
+          // Wormhole: the whole picture twists, ripples and folds back on itself in mirrored copies.
+          if(warp>.001){
+            float ang=warp*(1.6*sin(time*.8)+3.2*exp(-r*2.2));
+            vec2 qs=mat2(cos(ang),-sin(ang),sin(ang),cos(ang))*q;
+            qs*=1.+warp*.22*sin(length(qs)*9.-time*3.);
+            float k=2.4+1.8*(.5+.5*sin(time*.45));
+            vec2 x=qs*k;
+            vec2 cell=floor(x*.5+.5);
+            vec2 saw=(fract(x*.5+.5)*2.-1.)*(1.-2.*mod(cell,2.));
+            qs=mix(qs,saw/k,warp*.85);
+            q=qs; d=vec2(q.x/asp,q.y);
+          }
+          // Black hole: light is dragged around the dark body. Whatever lies within the shadow samples
+          // the centre of the body (black); outside, the picture is smeared and twisted around it.
+          float hring=0.;
+          if(hole.w>.001){
+            vec2 hq=(hole.xy-.5)*vec2(asp,1.);
+            vec2 dh=q-hq;
+            float rh=max(length(dh),.0001);
+            float rs=hole.z;
+            float pull=hole.w*1.15*rs*pow(rs/rh,1.5);
+            float tw=hole.w*1.1*exp(-rh/(rs*2.6));
+            vec2 dd=mat2(cos(tw),-sin(tw),sin(tw),cos(tw))*dh;
+            vec2 src=hq+dd*max(0.,1.-pull/rh);
+            q=src; d=vec2(q.x/asp,q.y);
+            hring=exp(-pow((rh-rs*1.1)/(rs*.13),2.))*hole.w;
+          }
           // Elastic fisheye on pickup: the picture bulges, then springs back and wobbles out.
           vec2 base=.5+d*(1.+lens*dot(q,q)*1.6);
           // Shockwave: three sparse, veil-like translucent purple rings. Each is born at the screen edge
@@ -69,6 +96,11 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
           float crystal=pow(max(0.,sin(vUv.x*210.+time*.4)*sin(vUv.y*190.-time*.3)),14.);
           c+=vec3(.55,.8,1.)*frost*(rim*.16+rim*crystal*.5);
           c+=(vec3(.6,.25,1.)*w*.4+vec3(.85,.7,1.)*pow(w,3.)*.1)*RING_GLOW;
+          c+=vec3(.78,.5,1.)*hring*.6;
+          // Wormhole colour: cold violet, a breathing vignette, and a flash on the way in and out.
+          c=mix(c,c*vec3(.85,.7,1.25)+vec3(0.,.02,.06),warp*.55);
+          c*=1.-warp*.22*(.5+.5*sin(time*2.));
+          c+=vec3(.82,.64,1.)*flash;
           gl_FragColor=vec4(c,1.);
         }`,
     });
@@ -137,6 +169,39 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
       const age = clock.current - powerEndedAt.current;
       if (age >= 0 && age < 2) lens = LENS_END * Math.exp(-age * 3.2) * Math.cos(age * 14);
     }
+    // Falling into a black hole and being thrown out: a hard fisheye kick each way plus a flash.
+    let flash = 0;
+    if (s.warp >= 0 && s.warp < 1.2) {
+      lens += 1.5 * Math.exp(-s.warp * 3.2) * Math.cos(s.warp * 14);
+      flash += Math.max(0, 1 - s.warp / .3) * .6;
+    }
+    if (s.warpOut >= 0) {
+      lens += 1.4 * Math.exp(-s.warpOut * 3) * Math.cos(s.warpOut * 14);
+      flash += Math.exp(-s.warpOut * 3.4) * Math.min(1, (WARP_EXIT_TIME - s.warpOut) / .5) * .9;
+    }
+    const warp = warpEnvelope(s);
+    effect.uniforms["warp"]!.value = warp;
+    effect.uniforms["flash"]!.value = flash;
+    // The nearest black hole in front of the camera bends the space around it.
+    const hole = effect.uniforms["hole"]!.value as THREE.Vector4;
+    hole.set(.5, .5, .1, 0);
+    if (s.mode === "freeroam" && s.warp < 0) {
+      let best: { x: number; z: number } | null = null, bestD = 90;
+      for (const h of holesAround(s.x, s.z)) {
+        const dist = Math.hypot(h.x - camera.position.x, h.z - camera.position.z);
+        if (dist < bestD) { best = h; bestD = dist; }
+      }
+      if (best) {
+        const center = new THREE.Vector3(best.x, groundHeight(best.x, best.z) + HOLE_HEIGHT, best.z);
+        const dist3 = Math.max(.5, center.distanceTo(camera.position));
+        center.project(camera);
+        if (center.z < 1) {
+          const fov = ((camera as THREE.PerspectiveCamera).fov ?? 72) * Math.PI / 180;
+          const rs = .5 * HOLE_RADIUS / dist3 / Math.tan(fov / 2);
+          hole.set(center.x * .5 + .5, center.y * .5 + .5, rs, THREE.MathUtils.clamp((85 - dist3) / 60, 0, 1));
+        }
+      }
+    }
     effect.uniforms["lens"]!.value = lens;
     // Shockwave rings run for the whole power-up, easing in and out.
     effect.uniforms["waveT"]!.value = s.powerUp === "shockwave" ? s.powerUpTime : -1;
@@ -153,6 +218,7 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
       const r = s.surviveTime - LIGHTS_DIE - DARK_PAUSE;
       if (r >= 0 && r < .45) effect.uniforms["glitch"]!.value += Math.sin((r / .45) * Math.PI) * 1.1;
     }
+    effect.uniforms["glitch"]!.value += warp * .7 * (.6 + .4 * Math.sin(clock.current * 3));
     clock.current += Math.min(delta, .1);
     effect.uniforms["time"]!.value = clock.current;
     composer.render(delta);
