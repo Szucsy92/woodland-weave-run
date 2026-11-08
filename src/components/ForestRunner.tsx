@@ -329,12 +329,12 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
   const previousPhase = useRef<Phase>("menu");
   useFrame((_, raw) => {
     const s = simulation.current;
-    const key = `${Math.floor(s.x / CELL)},${Math.floor(s.z / CELL)}`;
+    const key = `${Math.floor(s.x / CELL)},${Math.floor(s.z / CELL)}u${s.universe}`;
     const trunkMesh = trunks.current;
     if (trunkMesh && key !== s.cell) {
       s.cell = key;
       const level = DIFFICULTIES[s.difficulty];
-      s.trees = treesAround(Math.floor(s.x / CELL), Math.floor(s.z / CELL), level.treeGap);
+      s.trees = treesAround(Math.floor(s.x / CELL), Math.floor(s.z / CELL), level.treeGap, s.universe);
       s.obstacles = obstaclesAround(Math.floor(s.x / CELL), Math.floor(s.z / CELL), level.obstacleGap);
       if (s.mode === "freeroam") {
         // Every secret sits in its own small clearing.
@@ -344,7 +344,7 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
         const gates = gatesAround(s.x, s.z);
         gateWorld.current = gates;
         // Black holes hang in a wide clearing of their own.
-        const holes = holesAround(s.x, s.z);
+        const holes = holesAround(s.x, s.z, s.universe);
         const open = (o: { x: number; z: number }) => secrets.every(e => Math.hypot(o.x - e.x, o.z - e.z) > SECRET_CLEARING)
           && gates.every(g => Math.hypot(o.x - g.x, o.z - g.z) > GATE_CLEARING)
           && holes.every(h => Math.hypot(o.x - h.x, o.z - h.z) > HOLE_CLEARING);

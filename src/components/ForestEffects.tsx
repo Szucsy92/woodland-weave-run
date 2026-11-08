@@ -5,7 +5,7 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
-import { DARK_PAUSE, EXIT_TIME, IMPACT_DURATION, LIGHTS_DIE, PAUSE_SLOW, POWERUP_DURATION, RESUME_TIME, SHOCKWAVE_GAP, SHOCKWAVE_RINGS, SHOCKWAVE_SPEED, shockwaveReach, surviveOn, warpEnvelope, holesAround, groundHeight, HOLE_HEIGHT, HOLE_RADIUS, WARP_EXIT_TIME, type Simulation } from "@/lib/forest/simulation";
+import { DARK_PAUSE, EXIT_TIME, IMPACT_DURATION, LIGHTS_DIE, PAUSE_SLOW, POWERUP_DURATION, RESUME_TIME, SHOCKWAVE_GAP, SHOCKWAVE_RINGS, SHOCKWAVE_SPEED, shockwaveReach, surviveOn, warpEnvelope, universeHue, holesAround, groundHeight, HOLE_HEIGHT, HOLE_RADIUS, WARP_EXIT_TIME, type Simulation } from "@/lib/forest/simulation";
 
 const LENS_PICKUP = .95 * 1.1, LENS_RING = .5 * 1.1, LENS_END = .45;
 export function ForestEffects({ simulation }: { simulation: MutableRefObject<Simulation> }) {
@@ -17,7 +17,7 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
     target.texture.name = "EffectComposer.rt1";
     const composer = new EffectComposer(gl, target);
     const effect = new ShaderPass({
-      uniforms: { tDiffuse: { value: null }, blur: { value: 0 }, glitch: { value: 0 }, frost: { value: 0 }, lens: { value: 0 }, wave: { value: 0 }, waveT: { value: 0 }, warp: { value: 0 }, flash: { value: 0 }, hole: { value: new THREE.Vector4(.5, .5, .1, 0) }, reach: { value: Array.from({ length: SHOCKWAVE_RINGS }, (_, i) => shockwaveReach(i, 8.4)) }, time: { value: 0 }, resolution: { value: new THREE.Vector2() } },
+      uniforms: { tDiffuse: { value: null }, blur: { value: 0 }, glitch: { value: 0 }, frost: { value: 0 }, lens: { value: 0 }, wave: { value: 0 }, waveT: { value: 0 }, warp: { value: 0 }, flash: { value: 0 }, hue: { value: 0 }, hole: { value: new THREE.Vector4(.5, .5, .1, 0) }, reach: { value: Array.from({ length: SHOCKWAVE_RINGS }, (_, i) => shockwaveReach(i, 8.4)) }, time: { value: 0 }, resolution: { value: new THREE.Vector2() } },
       vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
       fragmentShader: `
         #define RINGS ${SHOCKWAVE_RINGS}
@@ -25,7 +25,7 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
         #define WSPEED ${SHOCKWAVE_SPEED.toFixed(3)}
         // Ring see-through: low glow plus a wide, soft band = a thin veil rather than a line.
         #define RING_GLOW 0.28
-        varying vec2 vUv; uniform sampler2D tDiffuse; uniform float blur,glitch,frost,lens,wave,waveT,warp,flash,time; uniform vec4 hole; uniform float reach[RINGS]; uniform vec2 resolution;
+        varying vec2 vUv; uniform sampler2D tDiffuse; uniform float blur,glitch,frost,lens,wave,waveT,warp,flash,hue,time; uniform vec4 hole; uniform float reach[RINGS]; uniform vec2 resolution;
         vec3 sampleBlur(vec2 uv) {
           vec2 d=vec2(blur*8.)/resolution;
           return (texture2D(tDiffuse,uv).rgb*4. + texture2D(tDiffuse,uv+d).rgb + texture2D(tDiffuse,uv-d).rgb + texture2D(tDiffuse,uv+vec2(d.x,-d.y)).rgb + texture2D(tDiffuse,uv+vec2(-d.x,d.y)).rgb)/8.;
@@ -95,6 +95,12 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
           // Wormhole colour: a faint violet cast, and a flash on the way in and out.
           c=mix(c,c*vec3(.88,.78,1.18)+vec3(0.,.015,.04),warp*.3);
           c*=1.-warp*.1*(.5+.5*sin(time*2.));
+          // Another universe, another colour cast: the whole picture turns around the grey axis.
+          if(abs(hue)>.001){
+            vec3 k=vec3(.57735);
+            float ch=cos(hue),sh=sin(hue);
+            c=max(c*ch+cross(k,c)*sh+k*dot(k,c)*(1.-ch),vec3(0.));
+          }
           c+=vec3(.82,.64,1.)*flash;
           gl_FragColor=vec4(c,1.);
         }`,
@@ -117,6 +123,7 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
   // and frost crystals jump.
   const clock = useRef(0);
   // Fisheye kick when a power fades: remembers whether one was active and when it ended.
+  const hueNow = useRef(0);
   const hadPower = useRef(false);
   const powerEndedAt = useRef(-99);
   useFrame((_, delta) => {
@@ -182,7 +189,7 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
     hole.set(.5, .5, .1, 0);
     if (s.mode === "freeroam" && s.warp < 0) {
       let best: { x: number; z: number } | null = null, bestD = 90;
-      for (const h of holesAround(s.x, s.z)) {
+      for (const h of holesAround(s.x, s.z, s.universe)) {
         const dist = Math.hypot(h.x - camera.position.x, h.z - camera.position.z);
         if (dist < bestD) { best = h; bestD = dist; }
       }
@@ -197,6 +204,10 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
         }
       }
     }
+    // The colour cast eases over to the universe's own (a rainbow sweep on the way through the wormhole).
+    const hueTarget = universeHue(s.universe) + warp * Math.sin(clock.current * 1.4) * .7;
+    hueNow.current += (hueTarget - hueNow.current) * Math.min(1, delta * 1.8);
+    effect.uniforms["hue"]!.value = hueNow.current;
     effect.uniforms["lens"]!.value = lens;
     // Shockwave rings run for the whole power-up, easing in and out.
     effect.uniforms["waveT"]!.value = s.powerUp === "shockwave" ? s.powerUpTime : -1;

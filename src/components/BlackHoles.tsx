@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { groundHeight, holesAround, HOLE_HEIGHT, HOLE_RADIUS, warpEnvelope, type Simulation } from "@/lib/forest/simulation";
+import { groundHeight, holesAround, HOLE_HEIGHT, HOLE_RADIUS, HOLE_SEE, universeTime, warpEnvelope, type Simulation } from "@/lib/forest/simulation";
 
 type HolePalette = Record<"secret" | "rock" | "purple" | "lavender" | "green" | "lamp" | "shock", THREE.Color>;
 
@@ -14,11 +14,16 @@ const KINDS = ["monolith", "ring", "lantern", "spheres", "totem", "gate"] as con
 // Odd, saturated colours the wormhole paints its secrets and spores with.
 const ODD = ["#ff6bd6", "#6bffe1", "#ffd36b", "#9b8cff", "#8dff6b", "#ff7a6b", "#6bb8ff", "#e2ff6b"];
 
-// Spores: three behaviours, each a formation of glowing dots.
-const RAIN = 260;            // fall from the air and bounce on the ground
-const SHEETS = 3, SHEET_N = 11; // rippling sheets
-const RINGS = 5, RING_N = 56;   // turning rings and helixes
-const SPORES = RAIN + SHEETS * SHEET_N * SHEET_N + RINGS * RING_N;
+// Remnants: what the wormholes leave behind in the universe they open into, arriving piece by piece.
+const REMNANTS = 26;
+const REMNANT_SPAN = 90; // seconds over which a universe's remnants drift in
+const smooth = (x: number) => { const k = Math.min(1, Math.max(0, x)); return k * k * (3 - 2 * k); };
+
+type SporeCounts = { rain: number; sheets: number; rings: number };
+const WORMHOLE_SPORES: SporeCounts = { rain: 260, sheets: 3, rings: 5 };
+const REMNANT_SPORES: SporeCounts = { rain: 70, sheets: 1, rings: 2 };
+const SHEET_N = 11, RING_N = 56;
+const sporeTotal = (c: SporeCounts) => c.rain + c.sheets * SHEET_N * SHEET_N + c.rings * RING_N;
 
 // Cheap deterministic noise: every item keeps its own character.
 const rnd = (i: number, k: number) => {
@@ -48,6 +53,141 @@ function glowTexture() {
     g.fillRect(0, 0, 64, 64);
   }
   return new THREE.CanvasTexture(canvas);
+}
+
+type Spores = { points: THREE.Points; geometry: THREE.BufferGeometry; material: THREE.PointsMaterial; base: Float32Array };
+/** Gives every spore a colour: some formations one strange colour, others every colour at once. */
+function paintSpores(sp: Spores, seed: number) {
+  const col = new THREE.Color();
+  const n = sp.base.length / 3;
+  for (let i = 0; i < n; i++) {
+    const group = Math.floor(i / 40);
+    const mono = rnd(group + seed * 17, 41) < .45;
+    col.set(ODD[Math.floor(rnd(mono ? group + seed * 17 : i + seed * 1000, 42) * ODD.length)] ?? "#ffffff");
+    sp.base.set([col.r, col.g, col.b], i * 3);
+  }
+}
+function makeSpores(glow: THREE.Texture, counts: SporeCounts, size: number): Spores {
+  const total = sporeTotal(counts);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(total * 3), 3));
+  geometry.setAttribute("color", new THREE.BufferAttribute(new Float32Array(total * 3), 3));
+  const material = new THREE.PointsMaterial({ map: glow, size, sizeAttenuation: true, vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+  const points = new THREE.Points(geometry, material);
+  points.frustumCulled = false;
+  points.visible = false;
+  const sp: Spores = { points, geometry, material, base: new Float32Array(total * 3) };
+  paintSpores(sp, 0);
+  return sp;
+}
+
+/** One secret of the wormhole: the kind and colours follow from its index. */
+function Relic({ i, palette, glow }: { i: number; palette: HolePalette; glow: THREE.Texture }) {
+  const kind = KINDS[i % KINDS.length]!;
+  const hue = ODD[(i * 3 + Math.floor(i / KINDS.length)) % ODD.length]!;
+  const alt = ODD[(i * 5 + 2) % ODD.length]!;
+  return (
+          <group>
+    {kind === "monolith" && <>
+      <mesh>
+        <boxGeometry args={[1, 4.4, .35]} />
+        <meshStandardMaterial color={palette.rock} roughness={.35} metalness={.2} emissive={hue} emissiveIntensity={.35} />
+      </mesh>
+      <mesh position={[.07, .1, .2]}>
+        <boxGeometry args={[.06, 3.2, .02]} />
+        <meshBasicMaterial color={hue} />
+      </mesh>
+    </>}
+    {kind === "ring" && <>
+      <mesh>
+        <torusGeometry args={[2.4, .14, 8, 40]} />
+        <meshBasicMaterial color={hue} />
+      </mesh>
+      <mesh rotation-x={Math.PI / 2}>
+        <torusGeometry args={[1.5, .08, 6, 28]} />
+        <meshBasicMaterial color={alt} />
+      </mesh>
+    </>}
+    {kind === "lantern" && <>
+      <mesh position={[0, -.8, 0]}>
+        <cylinderGeometry args={[.05, .07, 1.6, 6]} />
+        <meshStandardMaterial color={palette.rock} roughness={.9} />
+      </mesh>
+      <mesh position={[.06, .1, 0]}>
+        <boxGeometry args={[.24, .3, .24]} />
+        <meshBasicMaterial color={hue} />
+      </mesh>
+    </>}
+    {kind === "spheres" && <>
+      {/* A circle of glowing spheres, each its own colour. */}
+      {Array.from({ length: 12 }, (_, m) => {
+        const a = (m / 12) * Math.PI * 2;
+        return (
+          <mesh key={m} position={[Math.cos(a) * 2.4, 0, Math.sin(a) * 2.4]}>
+            <sphereGeometry args={[.26, 10, 8]} />
+            <meshBasicMaterial color={ODD[(m + i) % ODD.length]!} />
+          </mesh>
+        );
+      })}
+      {Array.from({ length: 6 }, (_, m) => {
+        const a = (m / 6) * Math.PI * 2 + .3;
+        return (
+          <mesh key={m} position={[Math.cos(a) * 1.2, 0, Math.sin(a) * 1.2]}>
+            <sphereGeometry args={[.16, 8, 6]} />
+            <meshBasicMaterial color={ODD[(m * 2 + i + 3) % ODD.length]!} />
+          </mesh>
+        );
+      })}
+    </>}
+    {kind === "totem" && <>
+      {/* A stack of odd shapes on a pole, with a glowing crown. */}
+      <mesh>
+        <cylinderGeometry args={[.12, .16, 6, 6]} />
+        <meshStandardMaterial color={palette.rock} roughness={.5} metalness={.2} />
+      </mesh>
+      <mesh position={[0, -2, 0]}>
+        <boxGeometry args={[.9, .7, .9]} />
+        <meshStandardMaterial color={palette.rock} emissive={hue} emissiveIntensity={.5} roughness={.4} />
+      </mesh>
+      <mesh position={[0, -.7, 0]}>
+        <sphereGeometry args={[.6, 12, 10]} />
+        <meshBasicMaterial color={alt} />
+      </mesh>
+      <mesh position={[0, .6, 0]} rotation-x={Math.PI / 2}>
+        <torusGeometry args={[.8, .1, 6, 24]} />
+        <meshBasicMaterial color={hue} />
+      </mesh>
+      <mesh position={[0, 1.8, 0]}>
+        <coneGeometry args={[.55, 1.2, 5]} />
+        <meshStandardMaterial color={palette.rock} emissive={alt} emissiveIntensity={.5} roughness={.4} />
+      </mesh>
+      <mesh position={[0, 3.3, 0]}>
+        <icosahedronGeometry args={[.4, 0]} />
+        <meshBasicMaterial color={hue} />
+      </mesh>
+    </>}
+    {kind === "gate" && <>
+      {/* A gate that opens onto nothing: two posts, a lintel and a faint veil. */}
+      {[-1, 1].map(side => (
+        <mesh key={side} position={[side * 2.2, 0, 0]}>
+          <boxGeometry args={[.4, 4.6, .4]} />
+          <meshStandardMaterial color={palette.rock} roughness={.4} metalness={.2} emissive={hue} emissiveIntensity={.9} />
+        </mesh>
+      ))}
+      <mesh position={[0, 2.4, 0]}>
+        <boxGeometry args={[5.2, .4, .4]} />
+        <meshStandardMaterial color={palette.rock} roughness={.4} metalness={.2} emissive={hue} emissiveIntensity={.9} />
+      </mesh>
+      <mesh>
+        <planeGeometry args={[4.4, 4.4]} />
+        <meshBasicMaterial color={alt} transparent opacity={.16} blending={THREE.AdditiveBlending} depthWrite={false} side={THREE.DoubleSide} />
+      </mesh>
+    </>}
+    <sprite scale={[kind === "lantern" ? 3.2 : 7, kind === "monolith" || kind === "totem" ? 8 : kind === "lantern" ? 3.2 : 7, 1]}>
+      <spriteMaterial map={glow} color={hue} transparent opacity={.38} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} />
+    </sprite>
+  </group>
+  );
 }
 
 /** A soft, glowing ring profile with faint uneven streaks: no hard edge anywhere. */
@@ -89,40 +229,78 @@ function ringTexture() {
 export function BlackHoles({ simulation, palette }: { simulation: MutableRefObject<Simulation>; palette: HolePalette }) {
   const holes = useRef<THREE.Group>(null);
   const swarm = useRef<THREE.Group>(null);
+  const remnants = useRef<THREE.Group>(null);
   const glow = useMemo(() => glowTexture(), []);
   const veil = useMemo(() => ringTexture(), []);
   useEffect(() => () => { glow.dispose(); veil.dispose(); }, [glow, veil]);
   const tmp = useMemo(() => new THREE.Euler(), []);
   const vec = useMemo(() => new THREE.Vector3(), []);
   const eul = useMemo(() => new THREE.Euler(), []);
-  // One Points object for every spore; positions and brightness are rewritten each frame.
-  const spores = useMemo(() => {
-    const geometry = new THREE.BufferGeometry();
-    const base = new Float32Array(SPORES * 3);
-    const col = new THREE.Color();
-    for (let i = 0; i < SPORES; i++) {
-      // Some formations are one strange colour, others are every colour at once.
-      const group = i < RAIN ? 0 : i < RAIN + SHEETS * SHEET_N * SHEET_N ? 1 + Math.floor((i - RAIN) / (SHEET_N * SHEET_N)) : 10 + Math.floor((i - RAIN - SHEETS * SHEET_N * SHEET_N) / RING_N);
-      const mono = rnd(group, 41) < .45;
-      col.set(ODD[Math.floor(rnd(mono ? group : i, 42) * ODD.length)] ?? "#ffffff");
-      base.set([col.r, col.g, col.b], i * 3);
+  // Two Points objects: the wormhole's own spores and the remnants that stay in a universe afterwards.
+  const wormSpores = useMemo(() => makeSpores(glow, WORMHOLE_SPORES, .85), [glow]);
+  const remSpores = useMemo(() => makeSpores(glow, REMNANT_SPORES, .6), [glow]);
+  const remnantSeed = useRef(-1);
+  useEffect(() => () => { for (const sp of [wormSpores, remSpores]) { sp.geometry.dispose(); sp.material.dispose(); } }, [wormSpores, remSpores]);
+
+  /** Writes every spore's place and brightness for this frame. */
+  const fillSpores = (sp: Spores, counts: SporeCounts, s: Simulation, t: number, w: number, seed: number, reveal: (group: number, index: number) => number) => {
+    const pos = sp.geometry.attributes["position"] as THREE.BufferAttribute;
+    const col = sp.geometry.attributes["color"] as THREE.BufferAttribute;
+    let n = 0;
+    const put = (x: number, y: number, z: number, light: number) => {
+      pos.setXYZ(n, x, y, z);
+      col.setXYZ(n, sp.base[n * 3]! * light * w, sp.base[n * 3 + 1]! * light * w, sp.base[n * 3 + 2]! * light * w);
+      n++;
+    };
+    const off = seed * 1000;
+    // Rain: drops out of the air, hits the ground and bounces lower and lower before fading.
+    for (let i = 0; i < counts.rain; i++) {
+      const period = 3.4 + rnd(i + off, 21) * 2.6, tau = t / period + rnd(i + off, 22) * 10;
+      const cycle = Math.floor(tau), u = tau - cycle;
+      const key = i * 7 + cycle * 131 + off;
+      const x = wrap(rnd(key, 23) * 4000, s.x) + Math.sin(t * 1.3 + i) * .4;
+      const z = wrap(rnd(key, 24) * 4000, s.z) + Math.cos(t * 1.1 + i) * .4;
+      const height = 5 + rnd(key, 25) * 11;
+      put(x, groundHeight(x, z) + .15 + bounce(u, height), z, Math.min(1, u * 10) * Math.min(1, (1 - u) * 6) * reveal(0, i));
     }
-    geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(SPORES * 3), 3));
-    geometry.setAttribute("color", new THREE.BufferAttribute(new Float32Array(SPORES * 3), 3));
-    const material = new THREE.PointsMaterial({ map: glow, size: .85, sizeAttenuation: true, vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
-    const points = new THREE.Points(geometry, material);
-    points.frustumCulled = false;
-    points.visible = false;
-    return { points, geometry, material, base };
-  }, [glow]);
-  useEffect(() => () => { spores.geometry.dispose(); spores.material.dispose(); }, [spores]);
+    // Sheets: grids of spores hanging in the air, rippling like cloth in a wind no one feels.
+    for (let sh = 0; sh < counts.sheets; sh++) {
+      const ax = wrap(rnd(sh + off, 31) * 4000, s.x), az = wrap(rnd(sh + off, 32) * 4000, s.z);
+      const ay = groundHeight(ax, az) + 3 + rnd(sh + off, 33) * 8;
+      eul.set(rnd(sh + off, 34) * 6.3 + t * .05, rnd(sh + off, 35) * 6.3, rnd(sh + off, 36) * 6.3 + t * .04);
+      const shown = reveal(1, sh);
+      for (let gx = 0; gx < SHEET_N; gx++) for (let gz = 0; gz < SHEET_N; gz++) {
+        const lx = (gx - (SHEET_N - 1) / 2) * 1.1, lz = (gz - (SHEET_N - 1) / 2) * 1.1;
+        const ripple = Math.sin(Math.hypot(lx, lz) * .9 - t * 2.4 + sh) * .8 + Math.sin(lx * .6 + t * 1.1) * .3;
+        vec.set(lx, ripple, lz).applyEuler(eul);
+        put(ax + vec.x, ay + vec.y, az + vec.z, (.75 + Math.sin(t * 2 + gx * .7 + gz * .5) * .25) * shown);
+      }
+    }
+    // Rings and helixes: dots circling in turning hoops that breathe in and out.
+    for (let r = 0; r < counts.rings; r++) {
+      const ax = wrap(rnd(r + off, 51) * 4000, s.x), az = wrap(rnd(r + off, 52) * 4000, s.z);
+      const ay = groundHeight(ax, az) + 2 + rnd(r + off, 53) * 10;
+      eul.set(rnd(r + off, 54) * 6.3, rnd(r + off, 55) * 6.3 + t * .1, rnd(r + off, 56) * 6.3);
+      const rad = 2.4 + rnd(r + off, 57) * 2 + Math.sin(t * .8 + r) * .9;
+      const shown = reveal(2, r);
+      for (let k = 0; k < RING_N; k++) {
+        const a = (k / RING_N) * Math.PI * 2 + t * (.6 + r * .15) * (r % 2 ? -1 : 1);
+        const rise = r % 2 ? (k / RING_N - .5) * 5 : Math.sin(k * .9 + t * 2) * .35;
+        vec.set(Math.cos(a) * rad, rise, Math.sin(a) * rad).applyEuler(eul);
+        put(ax + vec.x, ay + vec.y, az + vec.z, (.8 + Math.sin(t * 3 + k) * .2) * shown);
+      }
+    }
+    pos.needsUpdate = true;
+    col.needsUpdate = true;
+  };
 
   useFrame(() => {
     const s = simulation.current;
     const t = s.elapsed;
-    // ---- the black holes themselves ----
+    // ---- the black holes themselves (only those near enough to see) ----
     if (holes.current) {
-      const list = s.mode === "freeroam" && s.warp < 0 ? holesAround(s.x, s.z) : [];
+      const list = s.mode === "freeroam" && s.warp < 0
+        ? holesAround(s.x, s.z, s.universe).filter(h => Math.hypot(h.x - s.x, h.z - s.z) < HOLE_SEE) : [];
       holes.current.children.forEach((slot, i) => {
         const hole = list[i];
         slot.visible = !!hole;
@@ -160,54 +338,35 @@ export function BlackHoles({ simulation, palette }: { simulation: MutableRefObje
         item.scale.setScalar(Math.max(.001, (1 + rnd(i, 13) * 2.6) * w));
       });
     }
-    // ---- the spores ----
-    spores.points.visible = w > 0.002;
-    if (w > 0.002) {
-      const pos = spores.geometry.attributes["position"] as THREE.BufferAttribute;
-      const col = spores.geometry.attributes["color"] as THREE.BufferAttribute;
-      let n = 0;
-      const put = (x: number, y: number, z: number, light: number) => {
-        pos.setXYZ(n, x, y, z);
-        col.setXYZ(n, spores.base[n * 3]! * light * w, spores.base[n * 3 + 1]! * light * w, spores.base[n * 3 + 2]! * light * w);
-        n++;
-      };
-      // Rain: drops out of the air, hits the ground and bounces lower and lower before fading.
-      for (let i = 0; i < RAIN; i++) {
-        const period = 3.4 + rnd(i, 21) * 2.6, tau = t / period + rnd(i, 22) * 10;
-        const cycle = Math.floor(tau), u = tau - cycle;
-        const key = i * 7 + cycle * 131;
-        const x = wrap(rnd(key, 23) * 4000, s.x) + Math.sin(t * 1.3 + i) * .4;
-        const z = wrap(rnd(key, 24) * 4000, s.z) + Math.cos(t * 1.1 + i) * .4;
-        const height = 5 + rnd(key, 25) * 11;
-        put(x, groundHeight(x, z) + .15 + bounce(u, height), z, Math.min(1, u * 10) * Math.min(1, (1 - u) * 6));
-      }
-      // Sheets: grids of spores hanging in the air, rippling like cloth in a wind no one feels.
-      for (let sh = 0; sh < SHEETS; sh++) {
-        const ax = wrap(rnd(sh, 31) * 4000, s.x), az = wrap(rnd(sh, 32) * 4000, s.z);
-        const ay = groundHeight(ax, az) + 3 + rnd(sh, 33) * 8;
-        eul.set(rnd(sh, 34) * 6.3 + t * .05, rnd(sh, 35) * 6.3, rnd(sh, 36) * 6.3 + t * .04);
-        for (let gx = 0; gx < SHEET_N; gx++) for (let gz = 0; gz < SHEET_N; gz++) {
-          const lx = (gx - (SHEET_N - 1) / 2) * 1.1, lz = (gz - (SHEET_N - 1) / 2) * 1.1;
-          const ripple = Math.sin(Math.hypot(lx, lz) * .9 - t * 2.4 + sh) * .8 + Math.sin(lx * .6 + t * 1.1) * .3;
-          vec.set(lx, ripple, lz).applyEuler(eul);
-          put(ax + vec.x, ay + vec.y, az + vec.z, .75 + Math.sin(t * 2 + gx * .7 + gz * .5) * .25);
-        }
-      }
-      // Rings and helixes: dots circling in turning hoops that breathe in and out.
-      for (let r = 0; r < RINGS; r++) {
-        const ax = wrap(rnd(r, 51) * 4000, s.x), az = wrap(rnd(r, 52) * 4000, s.z);
-        const ay = groundHeight(ax, az) + 2 + rnd(r, 53) * 10;
-        eul.set(rnd(r, 54) * 6.3, rnd(r, 55) * 6.3 + t * .1, rnd(r, 56) * 6.3);
-        const rad = 2.4 + rnd(r, 57) * 2 + Math.sin(t * .8 + r) * .9;
-        for (let k = 0; k < RING_N; k++) {
-          const a = (k / RING_N) * Math.PI * 2 + t * (.6 + r * .15) * (r % 2 ? -1 : 1);
-          const rise = r % 2 ? (k / RING_N - .5) * 5 : Math.sin(k * .9 + t * 2) * .35;
-          vec.set(Math.cos(a) * rad, rise, Math.sin(a) * rad).applyEuler(eul);
-          put(ax + vec.x, ay + vec.y, az + vec.z, .8 + Math.sin(t * 3 + k) * .2);
-        }
-      }
-      pos.needsUpdate = true;
-      col.needsUpdate = true;
+    wormSpores.points.visible = w > 0.002;
+    if (w > 0.002) fillSpores(wormSpores, WORMHOLE_SPORES, s, t, w, 0, () => 1);
+    // ---- remnants: the wormholes' leftovers, a different mix in every universe, arriving one by one ----
+    const inUniverse = s.mode === "freeroam" && s.universe > 0 && s.warp < 0;
+    if (remnants.current) remnants.current.visible = inUniverse;
+    remSpores.points.visible = inUniverse;
+    if (inUniverse) {
+      const ut = universeTime(s), u = s.universe;
+      if (remnantSeed.current !== u) { remnantSeed.current = u; paintSpores(remSpores, u); }
+      if (remnants.current) remnants.current.children.forEach((item, i) => {
+        const key = u * 101 + i;
+        // Some slots stay empty in a given universe, so each one has its own mix of relics.
+        const alive = rnd(key, 71) < Math.min(.8, .3 + u * .1);
+        const grown = alive ? smooth((ut - rnd(key, 72) * REMNANT_SPAN) / 4) : 0;
+        item.visible = grown > .001;
+        if (!item.visible) return;
+        const x = wrap(rnd(key, 73) * 4000, s.x), z = wrap(rnd(key, 74) * 4000, s.z);
+        const gy = groundHeight(x, z);
+        const lift = rnd(key, 75) < .55 ? -.5 + rnd(key, 76) * 2 : 2 + rnd(key, 77) * 9;
+        item.position.set(x, gy + lift, z);
+        tmp.set(
+          rnd(key, 78) * 6.3 + t * (rnd(key, 79) - .5) * .2,
+          rnd(key, 80) * 6.3 + t * (rnd(key, 81) - .5) * .3,
+          rnd(key, 82) * 6.3 + t * (rnd(key, 83) - .5) * .15);
+        item.rotation.copy(tmp);
+        item.scale.setScalar(Math.max(.001, (.8 + rnd(key, 84) * 1.8) * grown));
+      });
+      const arrive = (group: number, index: number) => smooth((ut - rnd(u * 977 + group * 31 + index, 85) * REMNANT_SPAN) / 5);
+      fillSpores(remSpores, REMNANT_SPORES, s, t, .8, u, arrive);
     }
   });
 
@@ -243,115 +402,13 @@ export function BlackHoles({ simulation, palette }: { simulation: MutableRefObje
         </group>
       ))}
     </group>
-    <primitive object={spores.points} />
+    <primitive object={wormSpores.points} />
+    <primitive object={remSpores.points} />
     <group ref={swarm} visible={false}>
-      {Array.from({ length: SWARM }, (_, i) => {
-        const kind = KINDS[i % KINDS.length]!;
-        const hue = ODD[(i * 3 + Math.floor(i / KINDS.length)) % ODD.length]!;
-        const alt = ODD[(i * 5 + 2) % ODD.length]!;
-        return (
-          <group key={i}>
-            {kind === "monolith" && <>
-              <mesh>
-                <boxGeometry args={[1, 4.4, .35]} />
-                <meshStandardMaterial color={palette.rock} roughness={.35} metalness={.2} emissive={hue} emissiveIntensity={.35} />
-              </mesh>
-              <mesh position={[.07, .1, .2]}>
-                <boxGeometry args={[.06, 3.2, .02]} />
-                <meshBasicMaterial color={hue} />
-              </mesh>
-            </>}
-            {kind === "ring" && <>
-              <mesh>
-                <torusGeometry args={[2.4, .14, 8, 40]} />
-                <meshBasicMaterial color={hue} />
-              </mesh>
-              <mesh rotation-x={Math.PI / 2}>
-                <torusGeometry args={[1.5, .08, 6, 28]} />
-                <meshBasicMaterial color={alt} />
-              </mesh>
-            </>}
-            {kind === "lantern" && <>
-              <mesh position={[0, -.8, 0]}>
-                <cylinderGeometry args={[.05, .07, 1.6, 6]} />
-                <meshStandardMaterial color={palette.rock} roughness={.9} />
-              </mesh>
-              <mesh position={[.06, .1, 0]}>
-                <boxGeometry args={[.24, .3, .24]} />
-                <meshBasicMaterial color={hue} />
-              </mesh>
-            </>}
-            {kind === "spheres" && <>
-              {/* A circle of glowing spheres, each its own colour. */}
-              {Array.from({ length: 12 }, (_, m) => {
-                const a = (m / 12) * Math.PI * 2;
-                return (
-                  <mesh key={m} position={[Math.cos(a) * 2.4, 0, Math.sin(a) * 2.4]}>
-                    <sphereGeometry args={[.26, 10, 8]} />
-                    <meshBasicMaterial color={ODD[(m + i) % ODD.length]!} />
-                  </mesh>
-                );
-              })}
-              {Array.from({ length: 6 }, (_, m) => {
-                const a = (m / 6) * Math.PI * 2 + .3;
-                return (
-                  <mesh key={m} position={[Math.cos(a) * 1.2, 0, Math.sin(a) * 1.2]}>
-                    <sphereGeometry args={[.16, 8, 6]} />
-                    <meshBasicMaterial color={ODD[(m * 2 + i + 3) % ODD.length]!} />
-                  </mesh>
-                );
-              })}
-            </>}
-            {kind === "totem" && <>
-              {/* A stack of odd shapes on a pole, with a glowing crown. */}
-              <mesh>
-                <cylinderGeometry args={[.12, .16, 6, 6]} />
-                <meshStandardMaterial color={palette.rock} roughness={.5} metalness={.2} />
-              </mesh>
-              <mesh position={[0, -2, 0]}>
-                <boxGeometry args={[.9, .7, .9]} />
-                <meshStandardMaterial color={palette.rock} emissive={hue} emissiveIntensity={.5} roughness={.4} />
-              </mesh>
-              <mesh position={[0, -.7, 0]}>
-                <sphereGeometry args={[.6, 12, 10]} />
-                <meshBasicMaterial color={alt} />
-              </mesh>
-              <mesh position={[0, .6, 0]} rotation-x={Math.PI / 2}>
-                <torusGeometry args={[.8, .1, 6, 24]} />
-                <meshBasicMaterial color={hue} />
-              </mesh>
-              <mesh position={[0, 1.8, 0]}>
-                <coneGeometry args={[.55, 1.2, 5]} />
-                <meshStandardMaterial color={palette.rock} emissive={alt} emissiveIntensity={.5} roughness={.4} />
-              </mesh>
-              <mesh position={[0, 3.3, 0]}>
-                <icosahedronGeometry args={[.4, 0]} />
-                <meshBasicMaterial color={hue} />
-              </mesh>
-            </>}
-            {kind === "gate" && <>
-              {/* A gate that opens onto nothing: two posts, a lintel and a faint veil. */}
-              {[-1, 1].map(side => (
-                <mesh key={side} position={[side * 2.2, 0, 0]}>
-                  <boxGeometry args={[.4, 4.6, .4]} />
-                  <meshStandardMaterial color={palette.rock} roughness={.4} metalness={.2} emissive={hue} emissiveIntensity={.9} />
-                </mesh>
-              ))}
-              <mesh position={[0, 2.4, 0]}>
-                <boxGeometry args={[5.2, .4, .4]} />
-                <meshStandardMaterial color={palette.rock} roughness={.4} metalness={.2} emissive={hue} emissiveIntensity={.9} />
-              </mesh>
-              <mesh>
-                <planeGeometry args={[4.4, 4.4]} />
-                <meshBasicMaterial color={alt} transparent opacity={.16} blending={THREE.AdditiveBlending} depthWrite={false} side={THREE.DoubleSide} />
-              </mesh>
-            </>}
-            <sprite scale={[kind === "lantern" ? 3.2 : 7, kind === "monolith" || kind === "totem" ? 8 : kind === "lantern" ? 3.2 : 7, 1]}>
-              <spriteMaterial map={glow} color={hue} transparent opacity={.38} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} />
-            </sprite>
-          </group>
-        );
-      })}
+      {Array.from({ length: SWARM }, (_, i) => <Relic key={i} i={i} palette={palette} glow={glow} />)}
+    </group>
+    <group ref={remnants} visible={false}>
+      {Array.from({ length: REMNANTS }, (_, i) => <Relic key={i} i={i + 7} palette={palette} glow={glow} />)}
     </group>
   </>;
 }
