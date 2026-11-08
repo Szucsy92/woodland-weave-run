@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { ForestEffects } from "./ForestEffects";
 import { ForestDrone } from "@/lib/forest/drone";
 import { beginRun, canSpawnPowerUp, forestLightsFor, CELL, collectPowerUp, DIFFICULTIES, discoverSecret, GATE_CLEARING, GATE_HALF, gatesAround, type Gate, LIGHTS_DIE, passGate, SECRET_CLEARING, secretsAround, SHOCKWAVE_DISSOLVE, SHOCKWAVE_GAP, SHOCKWAVE_RINGS, surviveStage, type Secret, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, requestExit, requestPause, requestResume, obstaclesAround, orientationValue, makeTiltCal, resetTilt, updateTilt, type TiltCal, placePowerUp, placeSpore, POWERUP_DURATION, POWERUP_GAP, RADIUS, sporeOpacity, stepSimulation, treesAround, daylightFor, type Difficulty, type ForestMood, type GameMode, type Phase, type PowerUp, type PowerUpType, type Simulation } from "@/lib/forest/simulation";
-import { checkForUpdate, nativeUpdater, type UpdateInfo } from "@/lib/forest/updater";
+import { checkForUpdate, describeUpdateEvent, nativeUpdater, subscribeUpdateEvents, type UpdateInfo } from "@/lib/forest/updater";
 import barkUrl from "@/assets/wet-bark.jpg";
 import floorUrl from "@/assets/wet-ground.jpg";
 import barkNormal from "@/assets/bark-normal.jpg";
@@ -1073,6 +1073,11 @@ export function ForestRunner() {
   const [pendingUpdate, setPendingUpdate] = useState<UpdateInfo | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
   const [updateDownloading, setUpdateDownloading] = useState(false);
+  const [updateMsg, setUpdateMsg] = useState("");
+  useEffect(() => subscribeUpdateEvents(e => {
+    setUpdateMsg(describeUpdateEvent(e));
+    if (e.state === "error") setUpdateDownloading(false);
+  }), []);
 
   // Quietly look for a newer release on launch and each time the app returns to the foreground.
   useEffect(() => {
@@ -1484,9 +1489,9 @@ export function ForestRunner() {
               </div>
               {pendingUpdate && !updateDismissed && (
                 <div className="forest-row" data-forest-ui role="status" style={{ flexWrap: "wrap", marginTop: 10, pointerEvents: "auto" }} onPointerDown={e => e.stopPropagation()} onPointerUp={e => e.stopPropagation()}>
-                  <span>{updateDownloading ? "Downloading… then confirm the install." : "New update available!"}</span>
+                  <span>{updateDownloading ? (updateMsg || "Downloading…") : (updateMsg || "New update available!")}</span>
                   {!updateDownloading && <>
-                    <button className="forest-switch" aria-pressed onClick={e => { e.stopPropagation(); nativeUpdater()?.download(pendingUpdate.apkUrl); setUpdateDownloading(true); }}>Update</button>
+                    <button className="forest-switch" aria-pressed onClick={e => { e.stopPropagation(); setUpdateMsg("Downloading…"); setUpdateDownloading(true); nativeUpdater()?.download(pendingUpdate.apkUrl); }}>Update</button>
                     <button className="forest-switch" aria-pressed={false} onClick={e => { e.stopPropagation(); setUpdateDismissed(true); }}>Later</button>
                   </>}
                 </div>
@@ -1512,16 +1517,22 @@ function UpdateRow() {
       if (found) { setUpdate(found); setState("idle"); } else setState("latest");
     } catch { setState("error"); }
   };
+  const [detail, setDetail] = useState("");
+  useEffect(() => subscribeUpdateEvents(e => {
+    setDetail(describeUpdateEvent(e));
+    if (e.state === "error") setState("error");
+  }), []);
   const download = () => {
     const native = nativeUpdater();
     if (!native || !update) return;
-    native.download(update.apkUrl);
+    setDetail("Downloading…");
     setState("downloading");
+    native.download(update.apkUrl);
   };
   const label = {
     idle: "", checking: "Checking…", latest: "Latest version installed.",
     error: "Could not reach updates.", web: "Only available in the phone app.",
-    downloading: "Downloading… then confirm the install.",
+    downloading: detail || "Downloading…",
   }[state];
   return (
     <div className="forest-row" style={{ flexWrap: "wrap" }}>
@@ -1530,7 +1541,7 @@ function UpdateRow() {
         ? <button className="forest-switch" aria-pressed onClick={download}>Download</button>
         : <button className="forest-switch" aria-pressed={false} disabled={state === "checking" || state === "downloading"} onClick={check}>Check</button>}
       {(update && state !== "downloading") && <small style={{ width: "100%", opacity: .75 }}>New update available (build {update.build}).</small>}
-      {label && <small style={{ width: "100%", opacity: .75 }}>{label}</small>}
+      {(state === "error" && detail ? detail : label) && <small style={{ width: "100%", opacity: .75 }}>{state === "error" && detail ? detail : label}</small>}
     </div>
   );
 }
