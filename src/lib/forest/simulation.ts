@@ -195,10 +195,37 @@ export function passGate(s: Simulation, gate: Gate) {
   return true;
 }
 
+// The multiverse: every wormhole leads out into another universe, never back to the one before. A universe
+// is the same game with its own forest layout, density, tree size and colour cast; what the wormholes
+// leave behind (remnants) drifts into it a piece at a time.
+/** 0 for the home universe, otherwise a number that reshuffles every hash-made layout. */
+export function universeSalt(universe: number) {
+  return universe <= 0 ? 0 : universe * 7919 + 13;
+}
+/** Colour cast of a universe as a hue turn in radians (0 at home, never close to 0 elsewhere). */
+export function universeHue(universe: number) {
+  return universe <= 0 ? 0 : 0.9 + hash(universe, 3, 810) * 4.5;
+}
+/** How thick the forest is in a universe, as a factor on the usual density. */
+export function universeDensity(universe: number) {
+  return universe <= 0 ? 1 : 0.78 + hash(universe, 5, 811) * 0.5;
+}
+/** How big the trees grow in a universe. */
+export function universeScale(universe: number) {
+  return universe <= 0 ? 1 : 0.82 + hash(universe, 7, 812) * 0.5;
+}
+/** Seconds since the runner arrived in the current universe. */
+export function universeTime(s: Simulation) {
+  return Math.max(0, s.elapsed - s.universeAt);
+}
+
 // Black holes for freeroam: dark bodies that bend the space around them. Running into one drops the
 // runner into a wormhole of warped space for WARP_DURATION seconds (chaotic drift, a forest that repeats
 // the same track, but filled with impossible secrets and spores) before the runner is thrown out far away.
-export const HOLE_CELL = 170;
+export const HOLE_CELL = 220;
+// Chance that a cell holds a hole, and how far away a hole can be seen.
+export const HOLE_CHANCE = 0.3;
+export const HOLE_SEE = 160;
 export const HOLE_RADIUS = 2.2;
 export const HOLE_HEIGHT = 2.6;
 export const HOLE_CORE = 2.3;
@@ -209,18 +236,19 @@ export const WARP_FADE_OUT = 1;
 // Flash and shock when the runner is thrown out again.
 export const WARP_EXIT_TIME = 1.4;
 export type BlackHole = { x: number; z: number; id: string };
-export function holesAround(x: number, z: number): BlackHole[] {
+export function holesAround(x: number, z: number, universe = 0): BlackHole[] {
   const cx = Math.floor(x / HOLE_CELL), cz = Math.floor(z / HOLE_CELL);
+  const salt = universeSalt(universe);
   const out: BlackHole[] = [];
   for (let i = -1; i <= 1; i++) {
     for (let j = -1; j <= 1; j++) {
       const gx = cx + i, gz = cz + j;
       if (gx === 0 && gz === 0) continue;
-      if (hash(gx, gz, 700) > 0.5) continue;
+      if (hash(gx + salt, gz - salt, 700) > HOLE_CHANCE) continue;
       out.push({
-        x: gx * HOLE_CELL + 25 + hash(gx, gz, 701) * (HOLE_CELL - 50),
-        z: gz * HOLE_CELL + 25 + hash(gx, gz, 702) * (HOLE_CELL - 50),
-        id: `h${gx}:${gz}`,
+        x: gx * HOLE_CELL + 25 + hash(gx + salt, gz - salt, 701) * (HOLE_CELL - 50),
+        z: gz * HOLE_CELL + 25 + hash(gx + salt, gz - salt, 702) * (HOLE_CELL - 50),
+        id: `h${gx}:${gz}${salt ? `~${salt}` : ""}`,
       });
     }
   }
@@ -257,6 +285,10 @@ export function exitWarp(s: Simulation) {
   s.warpOut = 0;
   s.stumble = 0; s.speedMul = 1;
   s.pushX = 0;
+  // Out the other side is a different universe, not the one that was left.
+  s.universe += 1;
+  s.universeAt = s.elapsed;
+  s.cleared = []; s.clearedAt = {};
   s.cell = "";
 }
 
@@ -311,16 +343,18 @@ export function sporeOpacity(distance: number, twinkle: number) {
   return (.32 + twinkle * .1 + lamp * .12) * depth;
 }
 
-export function treesAround(cx: number, cz: number, keep = 0.57): Tree[] {
+export function treesAround(cx: number, cz: number, keep = 0.57, universe = 0): Tree[] {
   const trees: Tree[] = [];
+  const salt = universeSalt(universe), size = universeScale(universe);
   for (let i = -RADIUS; i <= RADIUS; i++) {
     for (let j = -RADIUS; j <= RADIUS; j++) {
       const gx = cx + i, gz = cz + j;
-      if (hash(gx, gz) > keep) continue;
-      const x = gx * CELL + hash(gx, gz, 1) * CELL;
-      const z = gz * CELL + hash(gx, gz, 2) * CELL;
+      const hx = gx + salt, hz = gz - salt;
+      if (hash(hx, hz) > keep * universeDensity(universe)) continue;
+      const x = gx * CELL + hash(hx, hz, 1) * CELL;
+      const z = gz * CELL + hash(hx, hz, 2) * CELL;
       if (x * x + z * z < 12 * 12) continue;
-      trees.push({ x, z, scale: 0.75 + hash(gx, gz, 3) * 0.9, id: `${gx}:${gz}` });
+      trees.push({ x, z, scale: (0.75 + hash(hx, hz, 3) * 0.9) * size, id: `${gx}:${gz}${salt ? `~${salt}` : ""}` });
     }
   }
   return trees;
@@ -357,7 +391,7 @@ export function makeSimulation() {
     mode: "classic" as GameMode, powerUp: null as PowerUpType | null, powerUpTime: 0, waveSpeed: BASE_SPEED,
     threat: 0, cleared: [] as string[], clearedAt: {} as Record<string, number>,
     surviveTime: -1, lastGate: "", found: [] as string[],
-    warp: -1, warpOut: -1, warpHole: "", warpFrom: { x: 0, z: 0 } };
+    warp: -1, warpOut: -1, warpHole: "", warpFrom: { x: 0, z: 0 }, universe: 0, universeAt: 0 };
 }
 
 export function beginRun(s: Simulation) {
@@ -585,7 +619,7 @@ export function stepSimulation(s: Simulation, steering: number, delta: number) {
   }
   // Running into a black hole's dark body drops the runner into the wormhole.
   if (free && s.warp < 0 && s.phase === "running") {
-    for (const hole of holesAround(s.x, s.z)) if (enterHole(s, hole)) break;
+    for (const hole of holesAround(s.x, s.z, s.universe)) if (enterHole(s, hole)) break;
   }
 }
 
