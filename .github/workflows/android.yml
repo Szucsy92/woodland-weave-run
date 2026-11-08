@@ -137,6 +137,27 @@ jobs:
           npx --no-install cap add ios
           npx --no-install cap sync ios
 
+      # Swift packages (the Capacitor binaries) are downloaded from GitHub, which
+      # sometimes drops the connection: resolve them first, retrying, and cache them.
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: build/SourcePackages
+          key: swiftpm-${{ hashFiles('package-lock.json') }}
+
+      - name: Resolve Swift packages
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if xcodebuild -resolvePackageDependencies \
+                -project ios/App/App.xcodeproj -scheme App \
+                -clonedSourcePackagesDirPath build/SourcePackages; then
+              exit 0
+            fi
+            echo "Attempt $attempt failed, retrying in 30s..."
+            sleep 30
+          done
+          exit 1
+
       - name: Build unsigned app
         run: |
           xcodebuild \
@@ -145,6 +166,8 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            -disableAutomaticPackageResolution \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             build
 
