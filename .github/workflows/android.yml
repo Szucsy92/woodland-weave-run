@@ -19,8 +19,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: oven-sh/setup-bun@v2
-
       # Capacitor CLI requires Node >= 22; the runner default is older.
       - uses: actions/setup-node@v4
         with:
@@ -38,23 +36,13 @@ jobs:
       # The GitHub ubuntu runner ships the Android SDK preinstalled (ANDROID_HOME).
 
       - name: Install dependencies
-        run: bun install
+        run: npm install
 
       - name: Build the static web bundle
-        run: bun run build
-
-      # Outside the Lovable sandbox nitro writes the static site to .output/public;
-      # Capacitor reads dist/client, so normalise the location.
-      - name: Move the static bundle to dist/client
-        run: |
-          if [ ! -f dist/client/index.html ] && [ -f .output/public/index.html ]; then
-            rm -rf dist/client
-            mkdir -p dist
-            cp -r .output/public dist/client
-          fi
+        run: npm run build
 
       - name: Verify the bundle has an index.html
-        run: test -f dist/client/index.html || (echo "dist/client/index.html missing" && exit 1)
+        run: test -f dist/index.html || (echo "dist/index.html missing" && exit 1)
 
       - name: Sync the bundle into the Android app
         run: npx --no-install cap sync android
