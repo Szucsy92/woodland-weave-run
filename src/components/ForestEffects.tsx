@@ -5,7 +5,7 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
-import { DARK_PAUSE, EXIT_TIME, IMPACT_DURATION, LIGHTS_DIE, PAUSE_SLOW, POWERUP_DURATION, RESUME_TIME, SHOCKWAVE_AHEAD, SHOCKWAVE_GAP, SHOCKWAVE_RINGS, SHOCKWAVE_WAVE, surviveOn, type Simulation } from "@/lib/forest/simulation";
+import { DARK_PAUSE, EXIT_TIME, IMPACT_DURATION, LIGHTS_DIE, PAUSE_SLOW, POWERUP_DURATION, RESUME_TIME, SHOCKWAVE_GAP, SHOCKWAVE_RINGS, SHOCKWAVE_SPEED, shockwaveReach, surviveOn, type Simulation } from "@/lib/forest/simulation";
 
 export function ForestEffects({ simulation }: { simulation: MutableRefObject<Simulation> }) {
   const { gl, scene, camera, size } = useThree();
@@ -16,16 +16,15 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
     target.texture.name = "EffectComposer.rt1";
     const composer = new EffectComposer(gl, target);
     const effect = new ShaderPass({
-      uniforms: { tDiffuse: { value: null }, blur: { value: 0 }, glitch: { value: 0 }, frost: { value: 0 }, lens: { value: 0 }, wave: { value: 0 }, waveT: { value: 0 }, time: { value: 0 }, resolution: { value: new THREE.Vector2() } },
+      uniforms: { tDiffuse: { value: null }, blur: { value: 0 }, glitch: { value: 0 }, frost: { value: 0 }, lens: { value: 0 }, wave: { value: 0 }, waveT: { value: 0 }, reach: { value: Array.from({ length: SHOCKWAVE_RINGS }, (_, i) => shockwaveReach(i, 8.4)) }, time: { value: 0 }, resolution: { value: new THREE.Vector2() } },
       vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
       fragmentShader: `
         #define RINGS ${SHOCKWAVE_RINGS}
         #define GAP ${SHOCKWAVE_GAP.toFixed(3)}
-        #define WAVE ${SHOCKWAVE_WAVE.toFixed(3)}
+        #define WSPEED ${SHOCKWAVE_SPEED.toFixed(3)}
         // Ring see-through: low glow plus a wide, soft band = a thin veil rather than a line.
         #define RING_GLOW 0.28
-        #define AHEAD ${SHOCKWAVE_AHEAD.toFixed(2)}
-        varying vec2 vUv; uniform sampler2D tDiffuse; uniform float blur,glitch,frost,lens,wave,waveT,time; uniform vec2 resolution;
+        varying vec2 vUv; uniform sampler2D tDiffuse; uniform float blur,glitch,frost,lens,wave,waveT,time; uniform float reach[RINGS]; uniform vec2 resolution;
         vec3 sampleBlur(vec2 uv) {
           vec2 d=vec2(blur*8.)/resolution;
           return (texture2D(tDiffuse,uv).rgb*4. + texture2D(tDiffuse,uv+d).rgb + texture2D(tDiffuse,uv-d).rgb + texture2D(tDiffuse,uv+vec2(d.x,-d.y)).rgb + texture2D(tDiffuse,uv+vec2(-d.x,d.y)).rgb)/8.;
@@ -43,9 +42,11 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
           float w=0.;
           for(int i=0;i<RINGS;i++){
             float a=waveT-float(i)*GAP;
-            if(a>0. && a<WAVE){
-              float p=a/WAVE;
-              float r0=1.25*3./(3.+p*AHEAD);
+            float rc=reach[i];
+            float life=rc/WSPEED;
+            if(a>0. && a<life){
+              float p=a/life;
+              float r0=1.25*3./(3.+p*rc);
               float e=(r-r0)/(.03+.11*r0);
               w+=exp(-e*e*.7)*smoothstep(0.,.1,p)*(1.-smoothstep(.6,1.,p));
             }
@@ -129,6 +130,8 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
     effect.uniforms["lens"]!.value = lens;
     // Shockwave rings run for the whole power-up, easing in and out.
     effect.uniforms["waveT"]!.value = s.powerUp === "shockwave" ? s.powerUpTime : -1;
+    // Every ring runs out as far as its own reach, which follows the pace the power was picked up at.
+    if (s.powerUp === "shockwave") effect.uniforms["reach"]!.value = Array.from({ length: SHOCKWAVE_RINGS }, (_, i) => shockwaveReach(i, s.waveSpeed));
     effect.uniforms["wave"]!.value = s.powerUp === "shockwave"
       ? Math.min(1, s.powerUpTime / .2) * Math.min(1, (POWERUP_DURATION - s.powerUpTime) / .3) : 0;
     const frostTarget = s.powerUp === "freezer" ? Math.min(1, (POWERUP_DURATION - s.powerUpTime) / .9) : 0;

@@ -519,7 +519,10 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
       if (!first) continue;
       tmpM.copy(saved[0] ?? tmpM);
       const bx = tmpM.elements[12] ?? 0, by = tmpM.elements[13] ?? 0, bz = tmpM.elements[14] ?? 0;
-      tmpG.makeTranslation(bx + fx * push, by + lift, bz + fz * push)
+      // The blast also throws the outer trees sideways, away from the runner's line.
+      const lat = (bx - s.x) * Math.cos(s.heading) - (bz - s.z) * Math.sin(s.heading);
+      const out = Math.max(-1, Math.min(1, lat / 9)) * push * .3;
+      tmpG.makeTranslation(bx + fx * push + Math.cos(s.heading) * out, by + lift, bz + fz * push - Math.sin(s.heading) * out)
         .multiply(new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(fz, 0, -fx), tip))
         .multiply(new THREE.Matrix4().makeScale(shrink, shrink, shrink))
         .multiply(new THREE.Matrix4().makeTranslation(-bx, -by, -bz));
