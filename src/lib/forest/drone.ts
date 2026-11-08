@@ -6,7 +6,7 @@ export type Sting = keyof typeof STINGS;
 // Start and end stings are dulled with a low-pass (cutoff in Hz); the threat sting stays untouched.
 const STING_TONE: Partial<Record<Sting, number>> = { start: 1200, end: 900 };
 // Short synthesized cues for moments that were silent (haptics only) until now.
-export type Cue = "freezer" | "ghost" | "shockwave" | "ring" | "end" | "stumble" | "gate" | "secret";
+export type Cue = "freezer" | "ghost" | "shockwave" | "ring" | "end" | "stumble" | "gate" | "secret" | "hole" | "warpout";
 // Survive: once the lights die the forest loop sinks to a dull, distant hum.
 const MUFFLED_HZ = 380;
 const MENU_HZ = 220;
@@ -279,6 +279,17 @@ export class ForestDrone {
       case "end": this.blip(300, 150, 0.45, 0.065); break;
       case "stumble": this.blip(95, 52, 0.2, 0.15, "triangle"); break;
       case "gate": this.blip(72, 54, 0.7, 0.11); this.blip(144, 108, 0.6, 0.05, "sine", 0.05); break;
+      case "hole":
+        // Falling in: a deep pull downwards under a thin, bending whine.
+        this.blip(90, 28, 1.6, 0.3);
+        this.blip(520, 70, 1.4, 0.07, "triangle", 0.05);
+        this.blip(330, 1200, 1.2, 0.035, "sine", 0.25);
+        break;
+      case "warpout":
+        // Thrown out: a sharp rising tear, then a low thump.
+        this.blip(60, 1500, 0.5, 0.09, "sawtooth");
+        this.blip(140, 38, 1.1, 0.32, "sine", 0.18);
+        break;
       case "secret":
         this.blip(880, 880, 0.9, 0.055);
         this.blip(1320, 1320, 0.9, 0.04, "sine", 0.12);
