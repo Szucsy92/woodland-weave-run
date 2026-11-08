@@ -1,0 +1,51 @@
+name: iOS IPA (unsigned)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: |
+          npm install
+          npm install --no-save @capacitor/ios@^8.5.3
+
+      - name: Build the static web bundle
+        run: npm run build
+
+      - name: Create and sync the iOS project
+        run: |
+          npx --no-install cap add ios
+          npx --no-install cap sync ios
+
+      - name: Build unsigned app
+        run: |
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package IPA
+        run: |
+          mkdir -p Payload ipa-out
+          cp -R build/Build/Products/Release-iphoneos/App.app Payload/
+          zip -qry ipa-out/woodland-weave-run-unsigned.ipa Payload
+
+      # Not a Release on purpose: the Android updater reads releases/latest.
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: woodland-weave-run-ios-unsigned
+          path: ipa-out/*.ipa
