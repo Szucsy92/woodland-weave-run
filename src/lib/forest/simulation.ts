@@ -197,15 +197,16 @@ export function passGate(s: Simulation, gate: Gate) {
 
 // Black holes for freeroam: dark bodies that bend the space around them. Running into one drops the
 // runner into a wormhole of warped space for WARP_DURATION seconds (chaotic drift, a forest that repeats
-// itself, impossible secrets everywhere) before the runner is thrown out far away.
+// the same track re-posed upside down and sideways, impossible secrets) before the runner is thrown out far away.
 export const HOLE_CELL = 170;
 export const HOLE_RADIUS = 2.2;
 export const HOLE_HEIGHT = 2.6;
 export const HOLE_CORE = 2.3;
 export const HOLE_CLEARING = 10;
 export const WARP_DURATION = 10;
-// The forest repeats every WARP_PERIOD cells while the space is warped.
-export const WARP_PERIOD = 3;
+// The same forest, but everything is re-posed (upside down, sideways, slanted) every WARP_SHUFFLE seconds.
+export const WARP_CHAOS_AT = 0.35;
+export const WARP_SHUFFLE = 3.2;
 export const WARP_FADE_IN = 0.7;
 export const WARP_FADE_OUT = 1;
 // Flash and shock when the runner is thrown out again.
@@ -240,9 +241,13 @@ export function warpEnvelope(s: Simulation) {
   const k = (t: number) => t * t * (3 - 2 * t);
   return k(Math.min(1, s.warp / WARP_FADE_IN)) * k(Math.min(1, (WARP_DURATION - s.warp) / WARP_FADE_OUT));
 }
-/** The forest is folded onto itself while the wormhole is fully open. */
-export function warpLattice(s: Simulation) {
-  return s.warp >= WARP_FADE_IN * 0.5 && s.warp < WARP_DURATION;
+/**
+ * Which pose of the chaotic forest is showing: -1 while the world still stands normally (before the fall
+ * has finished and after the exit), then 0, 1, 2... each time everything is thrown into new positions.
+ */
+export function warpChaos(s: Simulation) {
+  if (s.warp < WARP_CHAOS_AT || s.warp >= WARP_DURATION) return -1;
+  return Math.floor((s.warp - WARP_CHAOS_AT) / WARP_SHUFFLE);
 }
 /** Running into the dark body drops the runner into the wormhole (freeroam only). */
 export function enterHole(s: Simulation, hole: BlackHole) {
@@ -317,18 +322,16 @@ export function sporeOpacity(distance: number, twinkle: number) {
   return (.32 + twinkle * .1 + lamp * .12) * depth;
 }
 
-export function treesAround(cx: number, cz: number, keep = 0.57, period = 0): Tree[] {
+export function treesAround(cx: number, cz: number, keep = 0.57): Tree[] {
   const trees: Tree[] = [];
   for (let i = -RADIUS; i <= RADIUS; i++) {
     for (let j = -RADIUS; j <= RADIUS; j++) {
       const gx = cx + i, gz = cz + j;
-      // A period folds the forest onto itself: the same few cells come round again and again.
-      const wx = period ? ((gx % period) + period) % period : gx, wz = period ? ((gz % period) + period) % period : gz;
-      if (hash(wx, wz) > keep) continue;
-      const x = gx * CELL + hash(wx, wz, 1) * CELL;
-      const z = gz * CELL + hash(wx, wz, 2) * CELL;
-      if (!period && x * x + z * z < 12 * 12) continue;
-      trees.push({ x, z, scale: 0.75 + hash(wx, wz, 3) * 0.9, id: `${gx}:${gz}` });
+      if (hash(gx, gz) > keep) continue;
+      const x = gx * CELL + hash(gx, gz, 1) * CELL;
+      const z = gz * CELL + hash(gx, gz, 2) * CELL;
+      if (x * x + z * z < 12 * 12) continue;
+      trees.push({ x, z, scale: 0.75 + hash(gx, gz, 3) * 0.9, id: `${gx}:${gz}` });
     }
   }
   return trees;
@@ -578,8 +581,8 @@ export function stepSimulation(s: Simulation, steering: number, delta: number) {
     const chaos = warpEnvelope(s);
     const speed = Math.min(level.maxSpeed, BASE_SPEED + s.distance / level.accel)
       * (s.stumble > 0 ? s.speedMul : 1) * (s.powerUp === "freezer" ? 0.55 : 1)
-      * (1 + chaos * 0.35 * Math.sin(s.warp * 3.1));
-    if (chaos > 0) s.heading += chaos * (Math.sin(s.warp * 2.1) * Math.cos(s.warp * 0.73 + 1.3) * 1.6 + Math.sin(s.warp * 5.3) * 0.5) * sub;
+      * (1 + chaos * 0.2 * Math.sin(s.warp * 3.1));
+    if (chaos > 0) s.heading += chaos * (Math.sin(s.warp * 2.1) * Math.cos(s.warp * 0.73 + 1.3) * 0.7 + Math.sin(s.warp * 5.3) * 0.25) * sub;
     // Freeroam turns without limit, so the walker can head any way, even back.
     s.heading = free ? s.heading - steering * FREEROAM_TURN * sub
       : Math.max(-MAX_HEADING, Math.min(MAX_HEADING, s.heading - steering * 1.7 * sub));
