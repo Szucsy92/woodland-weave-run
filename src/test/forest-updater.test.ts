@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildFromTag, pickUpdate } from "@/lib/forest/updater";
+import { buildFromTag, describeUpdateEvent, pickUpdate } from "@/lib/forest/updater";
 
 const rel = (tag: string) => ({ tag_name: tag, assets: [{ name: "app-debug.apk", browser_download_url: "https://x/app.apk" }] });
 
@@ -13,5 +13,9 @@ describe("update check", () => {
   it("does not offer the same or older build", () => {
     expect(pickUpdate(rel("v1.0.0-build12"), 12)).toBeNull();
     expect(pickUpdate(rel("v1.0.0-build5"), 12)).toBeNull();
+  });
+  it("describes download progress and failures for the player", () => {
+    expect(describeUpdateEvent({ state: "progress", percent: 42, message: "" })).toBe("Downloading… 42%");
+    expect(describeUpdateEvent({ state: "error", percent: 0, message: "HTTP 404" })).toBe("Update failed: HTTP 404");
   });
 });
