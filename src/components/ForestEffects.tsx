@@ -76,8 +76,8 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
           }
           w=min(1.,w)*wave;
           base+=q/max(r,.001)*w*.008*vec2(1./asp,1.);
-          float band=sin(vUv.y*160.+time*14.)*sin(vUv.y*37.-time*6.);
-          vec2 uv=base+vec2(band*glitch*.008,0.);
+          // The glitch is colour separation only: no sideways tearing, so trunk edges never ripple.
+          vec2 uv=base;
           vec2 split=vec2(glitch*.012,glitch*.002);
           vec3 c=sampleBlur(uv);
           vec3 left=sampleBlur(uv+split),right=sampleBlur(uv-split);
