@@ -7,7 +7,9 @@ type HolePalette = Record<"secret" | "rock" | "purple" | "lavender" | "green" | 
 
 const HOLE_SLOTS = 6;
 // Impossible secrets that fill the space while the wormhole is open.
-const SWARM = 36;
+const SWARM = 30;
+// Side of the wrapped square the secrets live in (wider than the fog, so a wrap is never seen).
+const WINDOW = 110;
 const KINDS = ["monolith", "ring", "lantern"] as const;
 
 // Cheap deterministic noise for the swarm: every item keeps its own character.
@@ -68,31 +70,26 @@ export function BlackHoles({ simulation, palette }: { simulation: MutableRefObje
       });
     }
     // ---- the wormhole's impossible secrets ----
+    // They stand in the world itself (fixed places that slide past as the runner moves) in poses nothing
+    // real could hold: upside down, edge-on, floating, sunk into the ground, all slowly turning.
     if (swarm.current) {
       const w = warpEnvelope(s);
       swarm.current.visible = w > 0.002;
       if (w <= 0.002) return;
-      const camY = groundHeight(s.x, s.z) + 1.6;
       swarm.current.children.forEach((item, i) => {
-        // Every item circles the runner on its own orbit, sliding in and out of reach.
-        const life = (rnd(i, 1) + t * (.035 + rnd(i, 2) * .06)) % 1;
-        const near = 5 + life * 44;
-        const az = s.heading + (rnd(i, 3) - .5) * Math.PI * 2.2 + Math.sin(t * (.3 + rnd(i, 4)) + i) * .8;
-        const el = (rnd(i, 5) - .5) * Math.PI * 1.1 + Math.sin(t * .5 + i * 1.3) * .35;
-        item.position.set(
-          s.x - Math.sin(az) * Math.cos(el) * near,
-          camY + Math.sin(el) * near * .7,
-          s.z - Math.cos(az) * Math.cos(el) * near);
-        // Tumbling on every axis: upside down, edge-on, spinning in place, never at rest.
+        // Each item lives in one big wrapped window around the runner, so it is recycled unseen beyond the fog.
+        const wrap = (anchor: number, centre: number) => centre + ((((anchor - centre) % WINDOW) + WINDOW * 1.5) % WINDOW) - WINDOW / 2;
+        const x = wrap(rnd(i, 1) * 4000, s.x), z = wrap(rnd(i, 2) * 4000, s.z);
+        const gy = groundHeight(x, z);
+        const lift = rnd(i, 3) < .3 ? -1 + rnd(i, 4) * 1.5 : rnd(i, 4) < .5 ? 1 + rnd(i, 5) * 5 : 4 + rnd(i, 6) * 14;
+        item.position.set(x, gy + lift, z);
+        // Fixed odd stance per item, drifting round very slowly.
         tmp.set(
-          rnd(i, 6) * 6.3 + t * (rnd(i, 7) - .5) * 2.4,
-          rnd(i, 8) * 6.3 + t * (rnd(i, 9) - .5) * 3.1,
-          rnd(i, 10) * 6.3 + t * (rnd(i, 11) - .5) * 1.7);
+          rnd(i, 7) * 6.3 + t * (rnd(i, 8) - .5) * .5,
+          rnd(i, 9) * 6.3 + t * (rnd(i, 10) - .5) * .7,
+          rnd(i, 11) * 6.3 + t * (rnd(i, 12) - .5) * .4);
         item.rotation.copy(tmp);
-        // Sizes jump from a thumb to a house, and swell in and out of existence.
-        const size = (.5 + Math.pow(rnd(i, 12), 2.2) * 4.5) * (.75 + Math.sin(t * 1.3 + i * 2.1) * .25);
-        const born = Math.min(1, life * 6) * Math.min(1, (1 - life) * 6);
-        item.scale.setScalar(Math.max(.001, size * w * born));
+        item.scale.setScalar(Math.max(.001, (.7 + rnd(i, 13) * 2.4) * w));
       });
     }
   });

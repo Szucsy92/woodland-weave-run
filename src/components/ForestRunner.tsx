@@ -4,7 +4,7 @@ import { ArrowLeft, LogOut, Pause, Settings } from "lucide-react";
 import * as THREE from "three";
 import { ForestEffects } from "./ForestEffects";
 import { ForestDrone } from "@/lib/forest/drone";
-import { beginRun, holesAround, HOLE_CLEARING, warpEnvelope, warpLattice, WARP_PERIOD, canSpawnPowerUp, forestLightsFor, CELL, collectPowerUp, DIFFICULTIES, discoverSecret, GATE_CLEARING, GATE_HALF, gatesAround, type Gate, LIGHTS_DIE, passGate, SECRET_CLEARING, secretsAround, SHOCKWAVE_DISSOLVE, SHOCKWAVE_GAP, SHOCKWAVE_RINGS, surviveStage, type Secret, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, requestExit, requestPause, requestResume, obstaclesAround, orientationValue, makeTiltCal, resetTilt, updateTilt, type TiltCal, placePowerUp, placeSpore, POWERUP_DURATION, POWERUP_GAP, RADIUS, sporeOpacity, stepSimulation, treesAround, daylightFor, type Difficulty, type ForestMood, type GameMode, type Phase, type PowerUp, type PowerUpType, type Simulation } from "@/lib/forest/simulation";
+import { beginRun, holesAround, HOLE_CLEARING, warpEnvelope, warpChaos, canSpawnPowerUp, forestLightsFor, CELL, collectPowerUp, DIFFICULTIES, discoverSecret, GATE_CLEARING, GATE_HALF, gatesAround, type Gate, LIGHTS_DIE, passGate, SECRET_CLEARING, secretsAround, SHOCKWAVE_DISSOLVE, SHOCKWAVE_GAP, SHOCKWAVE_RINGS, surviveStage, type Secret, FOG_END, getSteering, groundHeight, hash, IMPACT_DURATION, makeSimulation, requestExit, requestPause, requestResume, obstaclesAround, orientationValue, makeTiltCal, resetTilt, updateTilt, type TiltCal, placePowerUp, placeSpore, POWERUP_DURATION, POWERUP_GAP, RADIUS, sporeOpacity, stepSimulation, treesAround, daylightFor, type Difficulty, type ForestMood, type GameMode, type Phase, type PowerUp, type PowerUpType, type Simulation } from "@/lib/forest/simulation";
 import { BlackHoles } from "@/components/BlackHoles";
 import { checkForUpdate, describeUpdateEvent, nativeUpdater, subscribeUpdateEvents, type UpdateInfo } from "@/lib/forest/updater";
 import barkUrl from "@/assets/wet-bark.jpg";
@@ -329,15 +329,15 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
   const previousPhase = useRef<Phase>("menu");
   useFrame((_, raw) => {
     const s = simulation.current;
-    // While the wormhole is open the forest is folded onto itself and repeats; the trees are rebuilt
-    // when the fold appears and again when it is gone.
-    const lattice = s.mode === "freeroam" && warpLattice(s);
-    const key = `${Math.floor(s.x / CELL)},${Math.floor(s.z / CELL)}${lattice ? "w" : ""}`;
+    // While the wormhole is open the same forest is thrown into new poses every few seconds
+    // (upside down, sideways, slanted): the trees are rebuilt for each pose and again at the exit.
+    const chaos = s.mode === "freeroam" ? warpChaos(s) : -1;
+    const key = `${Math.floor(s.x / CELL)},${Math.floor(s.z / CELL)}${chaos >= 0 ? `w${chaos}` : ""}`;
     const trunkMesh = trunks.current;
     if (trunkMesh && key !== s.cell) {
       s.cell = key;
       const level = DIFFICULTIES[s.difficulty];
-      s.trees = treesAround(Math.floor(s.x / CELL), Math.floor(s.z / CELL), level.treeGap, lattice ? WARP_PERIOD : 0);
+      s.trees = treesAround(Math.floor(s.x / CELL), Math.floor(s.z / CELL), level.treeGap);
       s.obstacles = obstaclesAround(Math.floor(s.x / CELL), Math.floor(s.z / CELL), level.obstacleGap);
       if (s.mode === "freeroam") {
         // Every secret sits in its own small clearing.
@@ -472,6 +472,35 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
           plantMesh?.setMatrixAt(plantCount++, resources.dummy.matrix);
         }
       });
+      // Wormhole: every tree, rock and bush is re-posed around its own pivot, so the forest is the same
+      // one, but things hang from the sky, grow sideways or lean at any angle.
+      if (chaos >= 0) {
+        const pivotM = new THREE.Matrix4(), rotM = new THREE.Matrix4(), unM = new THREE.Matrix4(), mm = new THREE.Matrix4();
+        const axis = new THREE.Vector3(), quat = new THREE.Quaternion();
+        const reorient = (id: string, x: number, z: number, tree: boolean) => {
+          const sx = Math.floor(x), sz = Math.floor(z), e = chaos * 7;
+          const pick = hash(sx, sz, 400 + e), gy = groundHeight(x, z);
+          if (pick < (tree ? .3 : .45)) return;
+          let angle: number, pivot: number;
+          const sign = hash(sx, sz, 403 + e) < .5 ? -1 : 1;
+          if (pick < (tree ? .62 : .75)) { angle = Math.PI; pivot = gy + 6 + hash(sx, sz, 401 + e) * 8; }
+          else if (pick < (tree ? .84 : .9)) { angle = sign * Math.PI / 2; pivot = gy + 1 + hash(sx, sz, 404 + e) * 2; }
+          else { angle = sign * (.5 + hash(sx, sz, 405 + e) * .7); pivot = gy + hash(sx, sz, 406 + e) * 10; }
+          const az = hash(sx, sz, 402 + e) * Math.PI * 2;
+          axis.set(Math.cos(az), 0, Math.sin(az));
+          quat.setFromAxisAngle(axis, angle);
+          rotM.makeRotationFromQuaternion(quat);
+          pivotM.makeTranslation(x, pivot, z).multiply(rotM).multiply(unM.makeTranslation(-x, -pivot, -z));
+          slotMap.current.get(id)?.forEach(([mesh, index]) => {
+            // The ground patch under a trunk has nothing to sit on any more.
+            if (mesh === shadows.current) { mesh.setMatrixAt(index, ZERO); return; }
+            mesh.getMatrixAt(index, mm);
+            mesh.setMatrixAt(index, mm.premultiply(pivotM));
+          });
+        };
+        for (const tree of s.trees) reorient(tree.id, tree.x, tree.z, true);
+        for (const o of s.obstacles) reorient(o.id, o.x, o.z, false);
+      }
       // Anything the shockwave already dissolved stays gone across rebuilds.
       for (const id of s.cleared) {
         if (s.elapsed - (s.clearedAt[id] ?? -99) < SHOCKWAVE_DISSOLVE) continue;
@@ -588,9 +617,9 @@ function World({ simulation, input, palette, red, onPhase, onImpact, onStumble, 
     camera.lookAt(resources.target);
     // Wormhole: the horizon rolls and nods on its own.
     const warpW = warpEnvelope(s);
-    camera.rotateX(warpW * Math.sin(t * 1.7) * .12 + bump * .085 + waking * Math.sin(t * 5) * .045 + fall * .065 * Math.sin(t * .32) + tripping * Math.sin(t * 17) * .085 + (running ? Math.sin(s.stride) * .006 : 0));
+    camera.rotateX(warpW * Math.sin(t * 1.7) * .035 + bump * .085 + waking * Math.sin(t * 5) * .045 + fall * .065 * Math.sin(t * .32) + tripping * Math.sin(t * 17) * .085 + (running ? Math.sin(s.stride) * .006 : 0));
     camera.rotateY(-leanAmount * .06);
-    camera.rotateZ(warpW * (Math.sin(t * 1.1) * .5 + Math.sin(t * 2.7) * .18) - leanAmount * .065 + bump * .12 + fall * .72 + waking * Math.sin(t * 4) * .03 + (running ? Math.sin(s.stride * .5) * .007 : Math.sin(t * .4) * .008) + tripping * Math.sin(t * 13) * .07);
+    camera.rotateZ(warpW * (Math.sin(t * 1.1) * .12 + Math.sin(t * 2.7) * .04) - leanAmount * .065 + bump * .12 + fall * .72 + waking * Math.sin(t * 4) * .03 + (running ? Math.sin(s.stride * .5) * .007 : Math.sin(t * .4) * .008) + tripping * Math.sin(t * 13) * .07);
     if (lamp.current) {
       // Headlamp rides the step rhythm and leads gently into turns, like a
       // real lamp strapped to a turning head.

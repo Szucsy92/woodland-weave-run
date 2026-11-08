@@ -5,7 +5,7 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
-import { DARK_PAUSE, EXIT_TIME, IMPACT_DURATION, LIGHTS_DIE, PAUSE_SLOW, POWERUP_DURATION, RESUME_TIME, SHOCKWAVE_GAP, SHOCKWAVE_RINGS, SHOCKWAVE_SPEED, shockwaveReach, surviveOn, warpEnvelope, holesAround, groundHeight, HOLE_HEIGHT, HOLE_RADIUS, WARP_EXIT_TIME, type Simulation } from "@/lib/forest/simulation";
+import { DARK_PAUSE, EXIT_TIME, IMPACT_DURATION, LIGHTS_DIE, PAUSE_SLOW, POWERUP_DURATION, RESUME_TIME, SHOCKWAVE_GAP, SHOCKWAVE_RINGS, SHOCKWAVE_SPEED, shockwaveReach, surviveOn, warpEnvelope, holesAround, groundHeight, HOLE_HEIGHT, HOLE_RADIUS, WARP_EXIT_TIME, WARP_CHAOS_AT, WARP_SHUFFLE, type Simulation } from "@/lib/forest/simulation";
 
 const LENS_PICKUP = .95 * 1.1, LENS_RING = .5 * 1.1, LENS_END = .45;
 export function ForestEffects({ simulation }: { simulation: MutableRefObject<Simulation> }) {
@@ -35,17 +35,12 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
           float asp=resolution.x/resolution.y;
           vec2 q=d*vec2(asp,1.);
           float r=length(q);
-          // Wormhole: the whole picture twists, ripples and folds back on itself in mirrored copies.
+          // Wormhole: space only sways a little, like a slow jelly; the picture stays the same picture.
           if(warp>.001){
-            float ang=warp*(1.6*sin(time*.8)+3.2*exp(-r*2.2));
-            vec2 qs=mat2(cos(ang),-sin(ang),sin(ang),cos(ang))*q;
-            qs*=1.+warp*.22*sin(length(qs)*9.-time*3.);
-            float k=2.4+1.8*(.5+.5*sin(time*.45));
-            vec2 x=qs*k;
-            vec2 cell=floor(x*.5+.5);
-            vec2 saw=(fract(x*.5+.5)*2.-1.)*(1.-2.*mod(cell,2.));
-            qs=mix(qs,saw/k,warp*.85);
-            q=qs; d=vec2(q.x/asp,q.y);
+            vec2 sway=vec2(sin(q.y*4.2+time*1.1)+.6*sin(q.y*9.+time*1.9+q.x*3.),cos(q.x*3.6-time*.9)+.6*cos(q.x*8.+time*1.6-q.y*2.5));
+            q+=sway*warp*.011;
+            q*=1.+warp*.025*sin(time*1.3);
+            d=vec2(q.x/asp,q.y);
           }
           // Black hole: light is dragged around the dark body. Whatever lies within the shadow samples
           // the centre of the body (black); outside, the picture is smeared and twisted around it.
@@ -97,9 +92,9 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
           c+=vec3(.55,.8,1.)*frost*(rim*.16+rim*crystal*.5);
           c+=(vec3(.6,.25,1.)*w*.4+vec3(.85,.7,1.)*pow(w,3.)*.1)*RING_GLOW;
           c+=vec3(.78,.5,1.)*hring*.6;
-          // Wormhole colour: cold violet, a breathing vignette, and a flash on the way in and out.
-          c=mix(c,c*vec3(.85,.7,1.25)+vec3(0.,.02,.06),warp*.55);
-          c*=1.-warp*.22*(.5+.5*sin(time*2.));
+          // Wormhole colour: a faint violet cast, and a flash on the way in and out.
+          c=mix(c,c*vec3(.88,.78,1.18)+vec3(0.,.015,.04),warp*.3);
+          c*=1.-warp*.1*(.5+.5*sin(time*2.));
           c+=vec3(.82,.64,1.)*flash;
           gl_FragColor=vec4(c,1.);
         }`,
@@ -169,14 +164,19 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
       const age = clock.current - powerEndedAt.current;
       if (age >= 0 && age < 2) lens = LENS_END * Math.exp(-age * 3.2) * Math.cos(age * 14);
     }
-    // Falling into a black hole and being thrown out: a hard fisheye kick each way plus a flash.
+    // Falling into a black hole: one big fisheye heave, then a smaller one each time the forest is
+    // thrown into a new pose; being thrown out again heaves once more, with a flash.
     let flash = 0;
-    if (s.warp >= 0 && s.warp < 1.2) {
-      lens += 1.5 * Math.exp(-s.warp * 3.2) * Math.cos(s.warp * 14);
+    if (s.warp >= 0 && s.warp < 1.6) {
+      lens += 2.2 * Math.exp(-s.warp * 2.2) * Math.cos(s.warp * 11);
       flash += Math.max(0, 1 - s.warp / .3) * .6;
     }
+    if (s.warp >= WARP_CHAOS_AT + WARP_SHUFFLE) {
+      const a = (s.warp - WARP_CHAOS_AT) % WARP_SHUFFLE;
+      if (a < 1) { lens += .7 * Math.exp(-a * 4) * Math.cos(a * 14); flash += Math.max(0, 1 - a / .2) * .25; }
+    }
     if (s.warpOut >= 0) {
-      lens += 1.4 * Math.exp(-s.warpOut * 3) * Math.cos(s.warpOut * 14);
+      lens += 1.9 * Math.exp(-s.warpOut * 2.6) * Math.cos(s.warpOut * 12);
       flash += Math.exp(-s.warpOut * 3.4) * Math.min(1, (WARP_EXIT_TIME - s.warpOut) / .5) * .9;
     }
     const warp = warpEnvelope(s);
@@ -218,7 +218,7 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
       const r = s.surviveTime - LIGHTS_DIE - DARK_PAUSE;
       if (r >= 0 && r < .45) effect.uniforms["glitch"]!.value += Math.sin((r / .45) * Math.PI) * 1.1;
     }
-    effect.uniforms["glitch"]!.value += warp * .7 * (.6 + .4 * Math.sin(clock.current * 3));
+    effect.uniforms["glitch"]!.value += warp * .12;
     clock.current += Math.min(delta, .1);
     effect.uniforms["time"]!.value = clock.current;
     composer.render(delta);
