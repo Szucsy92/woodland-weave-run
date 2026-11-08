@@ -1076,7 +1076,8 @@ export function ForestRunner() {
   const [updateMsg, setUpdateMsg] = useState("");
   useEffect(() => subscribeUpdateEvents(e => {
     setUpdateMsg(describeUpdateEvent(e));
-    if (e.state === "error") setUpdateDownloading(false);
+    // After the install prompt or the permission screen the player may back out: let them retry.
+    if (e.state !== "progress") setUpdateDownloading(false);
   }), []);
 
   // Quietly look for a newer release on launch and each time the app returns to the foreground.
@@ -1511,7 +1512,7 @@ function UpdateRow() {
   const check = async () => {
     const native = nativeUpdater();
     if (!native) { setState("web"); return; }
-    setState("checking"); setUpdate(null);
+    setState("checking"); setUpdate(null); setDetail("");
     try {
       const found = await checkForUpdate(native.versionCode());
       if (found) { setUpdate(found); setState("idle"); } else setState("latest");
@@ -1521,6 +1522,7 @@ function UpdateRow() {
   useEffect(() => subscribeUpdateEvents(e => {
     setDetail(describeUpdateEvent(e));
     if (e.state === "error") setState("error");
+    else if (e.state !== "progress") setState("idle");
   }), []);
   const download = () => {
     const native = nativeUpdater();
@@ -1541,7 +1543,7 @@ function UpdateRow() {
         ? <button className="forest-switch" aria-pressed onClick={download}>Download</button>
         : <button className="forest-switch" aria-pressed={false} disabled={state === "checking" || state === "downloading"} onClick={check}>Check</button>}
       {(update && state !== "downloading") && <small style={{ width: "100%", opacity: .75 }}>New update available (build {update.build}).</small>}
-      {(state === "error" && detail ? detail : label) && <small style={{ width: "100%", opacity: .75 }}>{state === "error" && detail ? detail : label}</small>}
+      {((state === "error" || state === "idle") && detail ? detail : label) && <small style={{ width: "100%", opacity: .75 }}>{(state === "error" || state === "idle") && detail ? detail : label}</small>}
     </div>
   );
 }
