@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { beginRun, collectPowerUp, collide, collideObstacle, DARK_PAUSE, discoverSecret, canSpawnPowerUp, forestLightsAround, fixedForestLights, forestLightsFor, gatesAround, passGate, surviveOn, GATE_REARM, LIGHTS_DIE, makeSimulation, MAX_HEADING, placePowerUp, POWERUP_DURATION, POWERUP_GAP, POWERUP_START, SHOCKWAVE_AHEAD, SHOCKWAVE_FULL, SHOCKWAVE_REACH, SHOCKWAVE_GAP, SHOCKWAVE_RINGS, SHOCKWAVE_WAVE, shockwaveDelay, sweepShockwave, secretsAround, stepSimulation, surviveStage, type PowerUp } from "@/lib/forest/simulation";
+import { beginRun, collectPowerUp, collide, collideObstacle, DARK_PAUSE, discoverSecret, canSpawnPowerUp, forestLightsAround, fixedForestLights, forestLightsFor, gatesAround, passGate, surviveOn, GATE_REARM, LIGHTS_DIE, makeSimulation, MAX_HEADING, placePowerUp, POWERUP_DURATION, POWERUP_GAP, POWERUP_START, SHOCKWAVE_AHEAD, SHOCKWAVE_GAP, SHOCKWAVE_RINGS, SHOCKWAVE_SPEED, SHOCKWAVE_COMMIT, shockwaveReach, shockwaveHit, sweepShockwave, runSpeed, secretsAround, stepSimulation, surviveStage, type PowerUp } from "@/lib/forest/simulation";
 
 const orb = (type: PowerUp["type"], x = 0, z = 0): PowerUp => ({ x, z, type, id: `t-${type}` });
 
@@ -283,20 +283,19 @@ describe("Earlier power-ups and fixed forest lights", () => {
     expect(forestLightsFor("survive", 30, 30)).toEqual(fixedForestLights(30, 30));
     expect(forestLightsFor("freeroam", 30, 30)).toEqual(forestLightsAround(30, 30));
   });
-  it("shockwave clears trees out to three quarters of the horizon in a widening wedge, rolling outward", () => {
+  it("shockwave takes the near forest at pickup, in a widening wedge, rolling outward", () => {
     const s = makeSimulation();
     s.phase = "running";
-    const near = { x: 0, z: -6, scale: 1, id: "n" }, horizon = { x: 5, z: -30, scale: 1, id: "h" };
-    const wide = { x: 40, z: -30, scale: 1, id: "w" }, side = { x: 40, z: -10, scale: 1, id: "s" };
-    const beyond = { x: 0, z: -(SHOCKWAVE_AHEAD + 8), scale: 1, id: "b" }, behind = { x: 0, z: 20, scale: 1, id: "k" };
-    s.trees = [near, horizon, wide, side, beyond, behind];
+    const near = { x: 0, z: -2, scale: 1, id: "n" }, mid = { x: 1, z: -8, scale: 1, id: "m" };
+    const wide = { x: 12, z: -9, scale: 1, id: "w" }, side = { x: 40, z: -10, scale: 1, id: "s" };
+    const far = { x: 0, z: -(SHOCKWAVE_AHEAD + 8), scale: 1, id: "b" }, behind = { x: 0, z: 20, scale: 1, id: "k" };
+    s.trees = [near, mid, wide, side, far, behind];
     collectPowerUp(s, orb("shockwave"));
-    expect(s.cleared).toEqual(expect.arrayContaining(["n", "h", "w"]));
+    expect(s.cleared).toEqual(expect.arrayContaining(["n", "m"]));
     expect(s.cleared).not.toContain("s");
     expect(s.cleared).not.toContain("b");
     expect(s.cleared).not.toContain("k");
-    expect(s.clearedAt["h"]!).toBeGreaterThan(s.clearedAt["n"]!);
-    expect(shockwaveDelay(s, 0, 0)).toBe(0);
+    expect(s.clearedAt["m"]!).toBeGreaterThan(s.clearedAt["n"]!);
   });
   it("red gates toggle the survive atmosphere in freeroam, once per pass", () => {
     const s = makeSimulation(); s.mode = "freeroam"; s.phase = "running";
@@ -341,47 +340,69 @@ describe("Earlier power-ups and fixed forest lights", () => {
     s.phase = "running";
     collectPowerUp(s, orb("shockwave"));
     expect(s.powerUp).toBe("shockwave");
-    const late = { x: 0, z: -30, scale: 1, id: "late" };
+    // Between two rings the edge of the swept zone still takes trees as they come into it.
+    s.powerUpTime = shockwaveReach(0, s.waveSpeed) / SHOCKWAVE_SPEED + .05;
+    const late = { x: 0, z: -4, scale: 1, id: "late" };
     s.trees = [late];
     stepSimulation(s, 0, .016);
     expect(s.cleared).toContain("late");
     expect(s.clearedAt["late"]!).toBeGreaterThanOrEqual(s.elapsed);
     // After the power-up ends nothing new is cleared.
     s.powerUp = null;
-    const after = { x: 0, z: -30, scale: 1, id: "after" };
+    const after = { x: 0, z: -4, scale: 1, id: "after" };
     s.trees = [after];
     stepSimulation(s, 0, .016);
     expect(s.cleared).not.toContain("after");
     sweepShockwave(s);
   });
-  it("rings run through the whole forest and tear trees out as they pass", () => {
-    const s = makeSimulation();
-    s.phase = "running";
-    // Before pickup: the first ring reaches the horizon after one full ring trip.
-    expect(shockwaveDelay(s, 0, -SHOCKWAVE_AHEAD)).toBeCloseTo(SHOCKWAVE_WAVE, 5);
-    collectPowerUp(s, orb("shockwave"));
-    // Late in the power-up a far tree waits for the next ring that still has to pass it.
-    s.powerUpTime = SHOCKWAVE_GAP * 2 + .3;
-    const d = shockwaveDelay(s, 0, -SHOCKWAVE_AHEAD * .5);
-    expect(d).toBeGreaterThanOrEqual(0);
-    expect(d).toBeLessThanOrEqual(SHOCKWAVE_GAP);
-    // The last ring has long passed: tear it out at once.
-    s.powerUpTime = SHOCKWAVE_GAP * (SHOCKWAVE_RINGS - 1) + SHOCKWAVE_WAVE + .1;
-    expect(shockwaveDelay(s, 0, -4)).toBe(0);
-    // All rings fit inside the 5 s power-up.
-    expect(SHOCKWAVE_GAP * (SHOCKWAVE_RINGS - 1) + SHOCKWAVE_WAVE).toBeLessThanOrEqual(POWERUP_DURATION);
+  it("each ring is timed so the front and the tree meet exactly when the tree is torn out", () => {
+    for (const v of [8.4, 14, 23.5]) {
+      const s = makeSimulation();
+      s.phase = "running";
+      s.waveSpeed = v;
+      s.powerUp = "shockwave";
+      for (const along of [3, 8, 14]) {
+        s.powerUpTime = 0;
+        const hit = shockwaveHit(s, along);
+        if (!hit || hit.boundary) continue;
+        // Front depth equals the tree's depth at that moment.
+        expect(SHOCKWAVE_SPEED * hit.at).toBeCloseTo(along - v * hit.at, 5);
+      }
+    }
   });
-  it("sends three waves that only reach three quarters of the generated depth", () => {
-    expect(SHOCKWAVE_RINGS).toBe(3);
-    expect(SHOCKWAVE_AHEAD).toBeCloseTo(SHOCKWAVE_FULL * SHOCKWAVE_REACH, 5);
-    expect(SHOCKWAVE_REACH).toBe(0.75);
+  it("the biggest ring takes everything inside the set reach, slow or fast", () => {
+    for (const v of [8.4, 14, 23.5]) {
+      const last = SHOCKWAVE_RINGS - 1;
+      // Depth of the trees it can take, as they stand when the ring is born.
+      expect(shockwaveReach(last, v) * (1 + v / SHOCKWAVE_SPEED)).toBeCloseTo(SHOCKWAVE_AHEAD, 5);
+      const s = makeSimulation();
+      s.phase = "running";
+      s.waveSpeed = v;
+      s.powerUp = "shockwave";
+      s.powerUpTime = last * SHOCKWAVE_GAP;
+      const inside = shockwaveHit(s, SHOCKWAVE_AHEAD - .5);
+      expect(inside && !inside.boundary).toBe(true);
+      const end = last * SHOCKWAVE_GAP + shockwaveReach(last, v) / SHOCKWAVE_SPEED;
+      expect(inside!.at).toBeLessThanOrEqual(end);
+      expect(shockwaveHit(s, SHOCKWAVE_AHEAD + 3)).toBeNull();
+    }
+  });
+  it("earlier rings are smaller, so each new ring still finds trees to tear out", () => {
+    for (const v of [8.4, 14, 23.5]) {
+      const reaches = Array.from({ length: SHOCKWAVE_RINGS }, (_, i) => shockwaveReach(i, v));
+      for (let i = 1; i < reaches.length; i++) expect(reaches[i]!).toBeGreaterThan(reaches[i - 1]! + 2);
+      // All rings finish inside the power-up.
+      const end = (SHOCKWAVE_RINGS - 1) * SHOCKWAVE_GAP + reaches[SHOCKWAVE_RINGS - 1]! / SHOCKWAVE_SPEED;
+      expect(end).toBeLessThanOrEqual(POWERUP_DURATION);
+    }
+  });
+  it("a tree far ahead is not torn at pickup, only when a ring is about to reach it", () => {
     const s = makeSimulation();
     s.phase = "running";
-    const inside = { x: 0, z: -SHOCKWAVE_FULL * 0.7, scale: 1, id: "in" };
-    const outside = { x: 0, z: -SHOCKWAVE_FULL * 0.8, scale: 1, id: "out" };
-    s.trees = [inside, outside];
+    s.trees = [{ x: 0, z: -30, scale: 1, id: "f" }];
     collectPowerUp(s, orb("shockwave"));
-    expect(s.cleared).toContain("in");
-    expect(s.cleared).not.toContain("out");
+    expect(s.cleared).not.toContain("f");
+    expect(runSpeed(s)).toBeCloseTo(8.4, 5);
+    expect(SHOCKWAVE_COMMIT).toBeGreaterThan(0);
   });
 });
