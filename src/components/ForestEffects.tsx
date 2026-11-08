@@ -5,7 +5,7 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
-import { DARK_PAUSE, EXIT_TIME, IMPACT_DURATION, LIGHTS_DIE, PAUSE_SLOW, POWERUP_DURATION, RESUME_TIME, SHOCKWAVE_GAP, SHOCKWAVE_RINGS, SHOCKWAVE_SPEED, shockwaveReach, surviveOn, warpEnvelope, holesAround, groundHeight, HOLE_HEIGHT, HOLE_RADIUS, WARP_EXIT_TIME, WARP_CHAOS_AT, WARP_SHUFFLE, type Simulation } from "@/lib/forest/simulation";
+import { DARK_PAUSE, EXIT_TIME, IMPACT_DURATION, LIGHTS_DIE, PAUSE_SLOW, POWERUP_DURATION, RESUME_TIME, SHOCKWAVE_GAP, SHOCKWAVE_RINGS, SHOCKWAVE_SPEED, shockwaveReach, surviveOn, warpEnvelope, holesAround, groundHeight, HOLE_HEIGHT, HOLE_RADIUS, WARP_EXIT_TIME, type Simulation } from "@/lib/forest/simulation";
 
 const LENS_PICKUP = .95 * 1.1, LENS_RING = .5 * 1.1, LENS_END = .45;
 export function ForestEffects({ simulation }: { simulation: MutableRefObject<Simulation> }) {
@@ -164,16 +164,11 @@ export function ForestEffects({ simulation }: { simulation: MutableRefObject<Sim
       const age = clock.current - powerEndedAt.current;
       if (age >= 0 && age < 2) lens = LENS_END * Math.exp(-age * 3.2) * Math.cos(age * 14);
     }
-    // Falling into a black hole: one big fisheye heave, then a smaller one each time the forest is
-    // thrown into a new pose; being thrown out again heaves once more, with a flash.
+    // Falling into a black hole: one big fisheye heave; being thrown out again heaves once more, with a flash.
     let flash = 0;
     if (s.warp >= 0 && s.warp < 1.6) {
       lens += 2.2 * Math.exp(-s.warp * 2.2) * Math.cos(s.warp * 11);
       flash += Math.max(0, 1 - s.warp / .3) * .6;
-    }
-    if (s.warp >= WARP_CHAOS_AT + WARP_SHUFFLE) {
-      const a = (s.warp - WARP_CHAOS_AT) % WARP_SHUFFLE;
-      if (a < 1) { lens += .7 * Math.exp(-a * 4) * Math.cos(a * 14); flash += Math.max(0, 1 - a / .2) * .25; }
     }
     if (s.warpOut >= 0) {
       lens += 1.9 * Math.exp(-s.warpOut * 2.6) * Math.cos(s.warpOut * 12);
