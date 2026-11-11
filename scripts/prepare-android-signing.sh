@@ -9,7 +9,7 @@ for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS 
 done
 
 umask 077
-key=android/app/release.keystore
+key=app/release.keystore
 cleanup_on_error() { rm -f "$key"; }
 trap cleanup_on_error ERR
 printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$key"
