@@ -20,7 +20,6 @@ data class Settings(
     val haptics: Boolean = true,
     val touch: Boolean = false,
     val anyOrientation: Boolean = false,
-    val kiosk: Boolean = false,
     val difficulty: Difficulty = Difficulty.EASY,
     val mode: GameMode = GameMode.CLASSIC,
     val mood: ForestMood = ForestMood.NIGHT,
@@ -38,7 +37,6 @@ class SettingsRepo(private val context: Context) {
         val haptics = booleanPreferencesKey("haptics")
         val touch = booleanPreferencesKey("touch")
         val orient = booleanPreferencesKey("any_orientation")
-        val kiosk = booleanPreferencesKey("kiosk")
         val difficulty = stringPreferencesKey("difficulty")
         val mode = stringPreferencesKey("mode")
         val mood = stringPreferencesKey("mood")
@@ -57,7 +55,6 @@ class SettingsRepo(private val context: Context) {
             haptics = p[K.haptics] ?: true,
             touch = p[K.touch] ?: false,
             anyOrientation = p[K.orient] ?: false,
-            kiosk = p[K.kiosk] ?: false,
             difficulty = p.enumOf(K.difficulty, Difficulty.EASY),
             mode = p.enumOf(K.mode, GameMode.CLASSIC),
             mood = p.enumOf(K.mood, ForestMood.NIGHT),
@@ -71,7 +68,6 @@ class SettingsRepo(private val context: Context) {
     suspend fun setHaptics(v: Boolean) = context.store.edit { it[K.haptics] = v }
     suspend fun setTouch(v: Boolean) = context.store.edit { it[K.touch] = v }
     suspend fun setAnyOrientation(v: Boolean) = context.store.edit { it[K.orient] = v }
-    suspend fun setKiosk(v: Boolean) = context.store.edit { it[K.kiosk] = v }
     suspend fun setDifficulty(v: Difficulty) = context.store.edit { it[K.difficulty] = v.name }
     suspend fun setMode(v: GameMode) = context.store.edit { it[K.mode] = v.name }
     suspend fun setMood(v: ForestMood) = context.store.edit { it[K.mood] = v.name }
