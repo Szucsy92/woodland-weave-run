@@ -56,7 +56,6 @@ class Actions(
     val setHaptics: (Boolean) -> Unit,
     val setTouch: (Boolean) -> Unit,
     val setAnyOrientation: (Boolean) -> Unit,
-    val setKiosk: (Boolean) -> Unit,
     val setDifficulty: (Difficulty) -> Unit,
     val setMode: (GameMode) -> Unit,
     val setMood: (ForestMood) -> Unit,
@@ -79,7 +78,7 @@ fun ForestApp(engine: GameEngine, gameView: GameView, actions: Actions, updates:
             settingsOpen -> settingsOpen = false
             running && ui.pause == PauseState.NONE -> engine.pause()
             paused -> engine.resume()
-            !s.kiosk -> actions.finish()
+            else -> actions.finish()
         }
     }
 
@@ -137,11 +136,11 @@ fun ForestApp(engine: GameEngine, gameView: GameView, actions: Actions, updates:
 private fun Glass(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier
-            .widthIn(max = 340.dp)
+            .widthIn(max = 356.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(GlassC)
             .border(1.dp, Edge, RoundedCornerShape(10.dp))
-            .padding(horizontal = 18.dp, vertical = 14.dp),
+            .padding(horizontal = 18.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         content = content,
     )
@@ -214,7 +213,7 @@ private fun PowerFrame(type: PowerUpType, active: Boolean) {
 private fun MenuPanel(ui: UiState, updates: UpdateController, onSettings: () -> Unit) {
     val s = ui.settings
     Box(Modifier.fillMaxSize().safeDrawingPadding().padding(18.dp), contentAlignment = Alignment.Center) {
-        Glass(Modifier.fillMaxWidth(.9f)) {
+        Glass(Modifier.fillMaxWidth(.95f)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { Title(if (ui.phase == Phase.FALLEN) "tap and run again!" else "tap and run!") }
                 IconBtn("⚙", onSettings)
@@ -244,7 +243,7 @@ private fun Score(label: String, value: Int, modifier: Modifier) {
 @Composable
 private fun PausePanel(onResume: () -> Unit, onSettings: () -> Unit, onExit: () -> Unit) {
     Box(Modifier.fillMaxSize().safeDrawingPadding().padding(18.dp), contentAlignment = Alignment.Center) {
-        Glass(Modifier.fillMaxWidth(.8f)) {
+        Glass(Modifier.fillMaxWidth(.95f)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f).heightIn(min = 44.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onResume).padding(horizontal = 6.dp), contentAlignment = Alignment.CenterStart) { Title("resume") }
                 Box(Modifier.width(1.dp).height(34.dp).background(Edge))
@@ -267,9 +266,9 @@ private fun SettingsPanel(ui: UiState, a: Actions, updates: UpdateController, on
         Glass(Modifier.fillMaxWidth(.9f).clickable(indication = null, interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }) {}) {
             Box(Modifier.fillMaxWidth()) {
                 Box(Modifier.align(Alignment.CenterStart)) { IconBtn("←", onClose) }
-                Text("SETTINGS", color = Muted, fontSize = 11.sp, letterSpacing = 1.sp, fontWeight = FontWeight.Medium, modifier = Modifier.align(Alignment.Center))
+                Text("Settings", color = Muted, fontSize = 11.sp, letterSpacing = 1.sp, fontWeight = FontWeight.Medium, modifier = Modifier.align(Alignment.Center))
             }
-            Column(Modifier.heightIn(max = 250.dp).verticalScroll(rememberScrollState())) {
+            Column(Modifier.heightIn(max = 340.dp).verticalScroll(rememberScrollState())) {
                 SettingRow("Difficulty", hint = if (!inMenu) "Applies from the next run." else null) {
                     Seg(listOf(Difficulty.EASY to "Easy", Difficulty.NORMAL to "Normal", Difficulty.HARD to "Hard"), s.difficulty, a.setDifficulty)
                 }
@@ -281,7 +280,6 @@ private fun SettingsPanel(ui: UiState, a: Actions, updates: UpdateController, on
                 SettingRow("Orientation") { Seg(listOf(false to "Landscape", true to "Any"), s.anyOrientation, a.setAnyOrientation) }
                 SettingRow("Audio") { OnOff(s.sound, a.setSound) }
                 SettingRow("Haptics") { OnOff(s.haptics, a.setHaptics) }
-                SettingRow("Lock app (kiosk)") { OnOff(s.kiosk, a.setKiosk) }
                 UpdateRow(updates)
             }
         }
