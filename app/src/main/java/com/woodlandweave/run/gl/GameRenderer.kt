@@ -10,7 +10,7 @@ import com.woodlandweave.run.sim.*
 import java.nio.FloatBuffer
 import java.util.Calendar
 import javax.microedition.khronos.egl.EGLConfig
-import javax.microedition.khronos.opengl.GL10
+import javax.microedition.khronos.opengles.GL10
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.floor
@@ -404,7 +404,12 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         if (pw <= 0f || pz / pw >= 1f) return null
         val rs = .5 * HOLE_RADIUS / dist3 / tan(Math.toRadians(FOV / 2.0))
         val strength = ((85 - dist3) / 60).coerceIn(0.0, 1.0)
-        return floatArrayOf(px / pw * .5f + .5f, py / pw * .5f + .5f, rs.toFloat(), strength.toFloat())
+        return floatArrayOf(
+            (px / pw * .5 + .5).toFloat(),
+            (py / pw * .5 + .5).toFloat(),
+            rs.toFloat(),
+            strength.toFloat()
+        )
     }
 
     // ---- single primitives ----
