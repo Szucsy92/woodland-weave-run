@@ -33,7 +33,6 @@ class MainActivity : ComponentActivity() {
     private lateinit var gameView: GameView
     private lateinit var tilt: TiltSensor
     private lateinit var updates: UpdateController
-    private var kiosk = false
 
     private val audioReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) { audio.refreshMute() }
@@ -64,8 +63,6 @@ class MainActivity : ComponentActivity() {
                 engine.applySettings(s)
                 requestedOrientation = if (s.anyOrientation) ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
                 else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                kiosk = s.kiosk
-                applyKiosk()
             }
         }
 
@@ -74,26 +71,12 @@ class MainActivity : ComponentActivity() {
             setHaptics = { v -> lifecycleScope.launch { repo.setHaptics(v) } },
             setTouch = { v -> lifecycleScope.launch { repo.setTouch(v) } },
             setAnyOrientation = { v -> lifecycleScope.launch { repo.setAnyOrientation(v) } },
-            setKiosk = { v -> lifecycleScope.launch { repo.setKiosk(v) } },
             setDifficulty = { v -> lifecycleScope.launch { repo.setDifficulty(v) } },
             setMode = { v -> lifecycleScope.launch { repo.setMode(v) } },
             setMood = { v -> lifecycleScope.launch { repo.setMood(v) } },
             finish = { finish() },
         )
         setContent { ForestApp(engine, gameView, actions, updates) }
-    }
-
-    /**
-     * Screen pinning. Without Device Owner rights Android asks the person to confirm and lets
-     * them leave with the system gesture; with it (dpm set-lock-task-packages) it is a true kiosk.
-     */
-    private fun applyKiosk() {
-        try {
-            val am = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-            val locked = am.lockTaskModeState != android.app.ActivityManager.LOCK_TASK_MODE_NONE
-            if (kiosk && !locked) startLockTask()
-            if (!kiosk && locked) stopLockTask()
-        } catch (_: Exception) { }
     }
 
     private fun hideSystemBars() {
@@ -116,7 +99,6 @@ class MainActivity : ComponentActivity() {
         audio.onForeground()
         tilt.start()
         engine.recenterTilt()
-        applyKiosk()
         // Back from the "install unknown apps" screen, and a quiet look for a newer release.
         updates.resumePending()
         updates.lookQuietly()
