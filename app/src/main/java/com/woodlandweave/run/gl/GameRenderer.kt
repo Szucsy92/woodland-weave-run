@@ -30,8 +30,7 @@ import kotlin.math.tan
 class GameRenderer(private val context: Context, private val engine: GameEngine) : GLSurfaceView.Renderer {
     private companion object {
         const val CROWN_NEAR_SUBDIVISIONS = 2     // same canopy detail as the web build, close to the runner
-        const val CROWN_FAR_SUBDIVISIONS = 1      // cheaper canopy where the fog is already thick
-        const val CROWN_LOD_DISTANCE = 22.0
+        const val CROWN_FAR_SUBDIVISIONS = 2      // preserve full web-renderer canopy detail at every distance
         const val MAX_PROPS = (RADIUS * 2 + 1) * (RADIUS * 2 + 1)
         const val GROUND_STEP = 200f / 160f
         const val K_TRUNK = 0; const val K_SHADOW = 1; const val K_ROOT = 2; const val K_BRANCH = 3
@@ -354,7 +353,14 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         scene(litProg)
         val g = e.ghostK.toFloat()
         bindMaps(barkTex, barkN, barkR)
-        if (g > 0f) { GL.glEnable(GL.GL_BLEND); GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA) }
+        if (g > 0f) {
+            // Match the web renderer: blend ghost silhouettes but KEEP depth writes enabled.
+            // The forest is instanced and not back-to-front sorted; disabling depth writes lets a
+            // farther tree overwrite a nearer one and creates overlapping/horizontal ghost bands.
+            GL.glEnable(GL.GL_BLEND)
+            GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
+            GL.glDepthMask(true)
+        }
         material(litProg, Palette.trunk, Palette.ghostGlow, g * .55f, 1f - g * .34f, mode = 4, rough = .8f, maps = true, ns = .75f, uvx = 1.5f, uvy = 7f)
         meshes[K_TRUNK].draw(bufs[K_TRUNK], counts[K_TRUNK])
         meshes[K_ROOT].draw(bufs[K_ROOT], counts[K_ROOT])
@@ -698,7 +704,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         }
     }
 
-    // ---- per-frame instance assembly (culling, crown LOD, shockwave dissolve) ----
+    // ---- per-frame instance assembly (culling, full-detail crowns, shockwave dissolve) ----
     private fun emit(kind: Int, src: FloatArray, off: Int) {
         val b = bufs[kind]
         b.position(counts[kind] * 16); b.put(src, off, 16); counts[kind]++
@@ -714,7 +720,6 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val dist = hypot(dx, dz)
             if (dist > reach) continue
             if ((dx * fwx + dz * fwz) / fl < -12) continue
-            val far = dist > CROWN_LOD_DISTANCE
             var dissolving = false; var k = 0.0
             if (s.cleared.contains(p.id)) {
                 val age = s.elapsed - (s.clearedAt[p.id] ?: -99.0)
@@ -722,7 +727,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 if (age >= 0) { dissolving = true; k = min(1.0, age / SHOCKWAVE_DISSOLVE) }
             }
             if (!dissolving) {
-                for (i in p.kinds.indices) emit(if (far && p.kinds[i] == K_CROWN) K_CROWN_FAR else p.kinds[i], p.m, i * 16)
+                for (i in p.kinds.indices) emit(p.kinds[i], p.m, i * 16)
                 continue
             }
             // The wave shoves it into the depth, tips it over and rips it out of the ground.
@@ -742,7 +747,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             Matrix.translateM(tg, 0, (-bx).toFloat(), (-by).toFloat(), (-bz).toFloat())
             for (i in p.kinds.indices) {
                 Matrix.multiplyMM(tmp2, 0, tg, 0, p.m, i * 16)
-                emit(if (far && p.kinds[i] == K_CROWN) K_CROWN_FAR else p.kinds[i], tmp2, 0)
+                emit(p.kinds[i], tmp2, 0)
             }
         }
     }
