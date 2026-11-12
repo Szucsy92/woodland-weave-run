@@ -4,10 +4,16 @@ import kotlin.math.pow
 
 /** The forest palette from styles.css. Lighting runs in linear space, output is gamma 2.2. */
 object Palette {
+    // Match Three.js ColorManagement's IEC 61966-2-1 sRGB transfer curve.
+    // A simple pow(2.2) approximation shifts dark forest tones noticeably.
+    private fun decodeSrgb(v: Float) = if (v <= 0.04045f) v / 12.92f else ((v + 0.055f) / 1.055f).pow(2.4f)
+    fun encodeSrgb(v: Float) = if (v <= 0.0031308f) 12.92f * v else 1.055f * v.coerceAtLeast(0f).pow(1f / 2.4f) - 0.055f
+    fun encodeSrgb(rgb: FloatArray) = FloatArray(3) { encodeSrgb(rgb[it].coerceIn(0f, 1f)) }
+
     private fun lin(hex: Int) = floatArrayOf(
-        (((hex shr 16) and 255) / 255f).pow(2.2f),
-        (((hex shr 8) and 255) / 255f).pow(2.2f),
-        ((hex and 255) / 255f).pow(2.2f),
+        decodeSrgb(((hex shr 16) and 255) / 255f),
+        decodeSrgb(((hex shr 8) and 255) / 255f),
+        decodeSrgb((hex and 255) / 255f),
     )
 
     fun srgb(hex: Int) = floatArrayOf(((hex shr 16) and 255) / 255f, ((hex shr 8) and 255) / 255f, (hex and 255) / 255f)

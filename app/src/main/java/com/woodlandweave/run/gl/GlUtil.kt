@@ -49,6 +49,18 @@ object GlUtil {
         val wrap = if (repeat) GL.GL_REPEAT else GL.GL_CLAMP_TO_EDGE
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, wrap)
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, wrap)
+        // Three.js uses anisotropy 8 for bark and ground maps. Enable the GLES extension
+        // when the device exposes it; keep a safe linear-filter fallback otherwise.
+        if (repeat) {
+            val extensions = GL.glGetString(GL.GL_EXTENSIONS).orEmpty()
+            if (extensions.contains("GL_EXT_texture_filter_anisotropic")) {
+                val maxAnisotropy = FloatArray(1)
+                GL.glGetFloatv(0x84FF, maxAnisotropy, 0) // MAX_TEXTURE_MAX_ANISOTROPY_EXT
+                if (maxAnisotropy[0] >= 1f) {
+                    GL.glTexParameterf(GL.GL_TEXTURE_2D, 0x84FE, minOf(8f, maxAnisotropy[0])) // TEXTURE_MAX_ANISOTROPY_EXT
+                }
+            }
+        }
         return t[0]
     }
 

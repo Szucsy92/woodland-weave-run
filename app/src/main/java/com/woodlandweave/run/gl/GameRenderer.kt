@@ -30,7 +30,8 @@ import kotlin.math.tan
 class GameRenderer(private val context: Context, private val engine: GameEngine) : GLSurfaceView.Renderer {
     private companion object {
         const val CROWN_NEAR_SUBDIVISIONS = 2     // same canopy detail as the web build, close to the runner
-        const val CROWN_FAR_SUBDIVISIONS = 2      // preserve full web-renderer canopy detail at every distance
+        const val CROWN_FAR_SUBDIVISIONS = 2      // match the Capacitor canopy mesh at every distance; avoid a visible LOD silhouette seam
+        const val CROWN_LOD_DISTANCE = 22.0
         const val MAX_PROPS = (RADIUS * 2 + 1) * (RADIUS * 2 + 1)
         const val GROUND_STEP = 200f / 160f
         const val K_TRUNK = 0; const val K_SHADOW = 1; const val K_ROOT = 2; const val K_BRANCH = 3
@@ -307,7 +308,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         effects.update(s, dt, effectState) { holeScreen(it, cam) }
 
         post.bind()
-        val clear = FloatArray(3) { fog[it].toDouble().pow(1 / 2.2).toFloat() }
+        val clear = Palette.encodeSrgb(fog)
         GL.glClearColor(clear[0], clear[1], clear[2], 1f)
         GL.glEnable(GL.GL_DEPTH_TEST); GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
         GL.glClear(GL.GL_COLOR_BUFFER_BIT or GL.GL_DEPTH_BUFFER_BIT)
@@ -354,19 +355,41 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val g = e.ghostK.toFloat()
         bindMaps(barkTex, barkN, barkR)
         if (g > 0f) {
-            // Match the web renderer: blend ghost silhouettes but KEEP depth writes enabled.
-            // The forest is instanced and not back-to-front sorted; disabling depth writes lets a
-            // farther tree overwrite a nearer one and creates overlapping/horizontal ghost bands.
+            // Pass 1: establish the nearest visible tree surface without writing colour.
+            // The native renderer batches trunks, roots and branches separately; blending
+            // those batches directly can expose their submission order as horizontal bands.
+            // A depth-only prepass makes the following ghost pass independent of batch order.
+            GL.glColorMask(false, false, false, false)
+            GL.glDepthMask(true)
+            GL.glDisable(GL.GL_BLEND)
+            material(litProg, Palette.trunk, mode = 4, rough = .8f, maps = true, ns = .75f, uvx = 1.5f, uvy = 7f)
+            meshes[K_TRUNK].draw(bufs[K_TRUNK], counts[K_TRUNK])
+            meshes[K_ROOT].draw(bufs[K_ROOT], counts[K_ROOT])
+            material(litProg, Palette.trunk, mode = 0, rough = .95f, maps = true, ns = .7f, uvx = 1.5f, uvy = 7f)
+            meshes[K_BRANCH].draw(bufs[K_BRANCH], counts[K_BRANCH])
+            GL.glColorMask(true, true, true, true)
+
+            // Pass 2: shade only the nearest surfaces. Keep depth testing enabled but
+            // freeze the prepass depth so transparent batches cannot mask one another.
             GL.glEnable(GL.GL_BLEND)
             GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
+            GL.glDepthFunc(GL.GL_LEQUAL)
+            GL.glDepthMask(false)
+            material(litProg, Palette.trunk, Palette.ghostGlow, g * .55f, 1f - g * .34f, mode = 4, rough = .8f, maps = true, ns = .75f, uvx = 1.5f, uvy = 7f)
+            meshes[K_TRUNK].draw(bufs[K_TRUNK], counts[K_TRUNK])
+            meshes[K_ROOT].draw(bufs[K_ROOT], counts[K_ROOT])
+            material(litProg, Palette.trunk, Palette.ghostGlow, g * .55f, 1f - g * .34f, mode = 0, rough = .95f, maps = true, ns = .7f, uvx = 1.5f, uvy = 7f)
+            meshes[K_BRANCH].draw(bufs[K_BRANCH], counts[K_BRANCH])
             GL.glDepthMask(true)
+            GL.glDepthFunc(GL.GL_LESS)
+            GL.glDisable(GL.GL_BLEND)
+        } else {
+            material(litProg, Palette.trunk, mode = 4, rough = .8f, maps = true, ns = .75f, uvx = 1.5f, uvy = 7f)
+            meshes[K_TRUNK].draw(bufs[K_TRUNK], counts[K_TRUNK])
+            meshes[K_ROOT].draw(bufs[K_ROOT], counts[K_ROOT])
+            material(litProg, Palette.trunk, mode = 0, rough = .95f, maps = true, ns = .7f, uvx = 1.5f, uvy = 7f)
+            meshes[K_BRANCH].draw(bufs[K_BRANCH], counts[K_BRANCH])
         }
-        material(litProg, Palette.trunk, Palette.ghostGlow, g * .55f, 1f - g * .34f, mode = 4, rough = .8f, maps = true, ns = .75f, uvx = 1.5f, uvy = 7f)
-        meshes[K_TRUNK].draw(bufs[K_TRUNK], counts[K_TRUNK])
-        meshes[K_ROOT].draw(bufs[K_ROOT], counts[K_ROOT])
-        material(litProg, Palette.trunk, Palette.ghostGlow, g * .55f, 1f - g * .34f, mode = 0, rough = .95f, maps = true, ns = .7f, uvx = 1.5f, uvy = 7f)
-        meshes[K_BRANCH].draw(bufs[K_BRANCH], counts[K_BRANCH])
-        GL.glDisable(GL.GL_BLEND)
         material(litProg, Palette.crown, mode = 5, rough = .9f)
         meshes[K_CROWN].draw(bufs[K_CROWN], counts[K_CROWN])
         meshes[K_CROWN_FAR].draw(bufs[K_CROWN_FAR], counts[K_CROWN_FAR])
@@ -704,7 +727,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         }
     }
 
-    // ---- per-frame instance assembly (culling, full-detail crowns, shockwave dissolve) ----
+    // ---- per-frame instance assembly (culling, crown LOD, shockwave dissolve) ----
     private fun emit(kind: Int, src: FloatArray, off: Int) {
         val b = bufs[kind]
         b.position(counts[kind] * 16); b.put(src, off, 16); counts[kind]++
@@ -720,6 +743,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val dist = hypot(dx, dz)
             if (dist > reach) continue
             if ((dx * fwx + dz * fwz) / fl < -12) continue
+            val far = dist > CROWN_LOD_DISTANCE
             var dissolving = false; var k = 0.0
             if (s.cleared.contains(p.id)) {
                 val age = s.elapsed - (s.clearedAt[p.id] ?: -99.0)
@@ -727,7 +751,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 if (age >= 0) { dissolving = true; k = min(1.0, age / SHOCKWAVE_DISSOLVE) }
             }
             if (!dissolving) {
-                for (i in p.kinds.indices) emit(p.kinds[i], p.m, i * 16)
+                for (i in p.kinds.indices) emit(if (far && p.kinds[i] == K_CROWN) K_CROWN_FAR else p.kinds[i], p.m, i * 16)
                 continue
             }
             // The wave shoves it into the depth, tips it over and rips it out of the ground.
@@ -747,7 +771,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             Matrix.translateM(tg, 0, (-bx).toFloat(), (-by).toFloat(), (-bz).toFloat())
             for (i in p.kinds.indices) {
                 Matrix.multiplyMM(tmp2, 0, tg, 0, p.m, i * 16)
-                emit(p.kinds[i], tmp2, 0)
+                emit(if (far && p.kinds[i] == K_CROWN) K_CROWN_FAR else p.kinds[i], tmp2, 0)
             }
         }
     }

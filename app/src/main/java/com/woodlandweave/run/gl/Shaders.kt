@@ -60,6 +60,17 @@ uniform vec2 uUvScale;
 uniform sampler2D uTex, uNorm, uRoughTex;
 out vec4 o;
 const float PI = 3.14159265;
+vec3 srgbToLinear(vec3 c) {
+  vec3 lo = c / 12.92;
+  vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));
+  return mix(hi, lo, lessThanEqual(c, vec3(0.04045)));
+}
+vec3 linearToSrgb(vec3 c) {
+  c = max(c, vec3(0.0));
+  vec3 lo = c * 12.92;
+  vec3 hi = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;
+  return mix(hi, lo, lessThanEqual(c, vec3(0.0031308)));
+}
 float falloff(float d, float cutoff) { float r = d / cutoff; return pow(clamp(1.0 - r * r * r * r, 0.0, 1.0), 2.0); }
 float vGGX(float a, float nl, float nv) {
   float a2 = a * a;
@@ -89,7 +100,7 @@ vec3 perturb(vec3 n, vec3 pos, vec2 uv, vec3 m) {
 }
 vec3 finish(vec3 col, float dist) {
   float f = clamp((dist - uFogNear) / (uFogFar - uFogNear), 0.0, 1.0) * uFogOn;
-  return pow(clamp(mix(col, uFog, f), 0.0, 1.0), vec3(0.4545));
+  return linearToSrgb(clamp(mix(col, uFog, f), 0.0, 1.0));
 }
 void main() {
   vec3 toCam = uCam - vW;
@@ -104,7 +115,7 @@ void main() {
   // Texture rows start at the top of the image here, three.js flips them: undo that so maps and normals line up.
   vec2 tuv = vec2(vUv.x * uUvScale.x, (1.0 - vUv.y) * uUvScale.y);
   if (uMaps > 0.5) {
-    albedo *= pow(texture(uTex, tuv).rgb, vec3(2.2));
+    albedo *= srgbToLinear(texture(uTex, tuv).rgb);
     rough *= texture(uRoughTex, tuv).g;
     vec3 mn = texture(uNorm, tuv).xyz * 2.0 - 1.0;
     mn.xy *= uNormalScale;
@@ -175,7 +186,7 @@ uniform sampler2D uTex;
 out vec4 o;
 void main() {
   float a = texture(uTex, vUv).a * vCol.a;
-  o = vec4(pow(clamp(vCol.rgb, 0.0, 1.0), vec3(0.4545)), a);
+  o = vec4(linearToSrgb(clamp(vCol.rgb, 0.0, 1.0)), a);
 }
 """
 
@@ -205,7 +216,18 @@ uniform float reach[RINGS];
 uniform vec2 resolution;
 out vec4 o;
 // The scene is stored gamma-encoded; all effect maths below runs in linear light, like the original.
-vec3 tap(vec2 uv) { return pow(texture(tDiffuse, uv).rgb, vec3(2.2)); }
+vec3 srgbToLinear(vec3 c) {
+  vec3 lo = c / 12.92;
+  vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));
+  return mix(hi, lo, lessThanEqual(c, vec3(0.04045)));
+}
+vec3 linearToSrgb(vec3 c) {
+  c = max(c, vec3(0.0));
+  vec3 lo = c * 12.92;
+  vec3 hi = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;
+  return mix(hi, lo, lessThanEqual(c, vec3(0.0031308)));
+}
+vec3 tap(vec2 uv) { return srgbToLinear(texture(tDiffuse, uv).rgb); }
 vec3 sampleBlur(vec2 uv) {
   vec2 d = vec2(blur * 8.0) / resolution;
   return (tap(uv) * 4.0 + tap(uv + d) + tap(uv - d) + tap(uv + vec2(d.x, -d.y)) + tap(uv + vec2(-d.x, d.y))) / 8.0;
@@ -276,7 +298,7 @@ void main() {
     c = max(c * ch + cross(k, c) * sh + k * dot(k, c) * (1.0 - ch), vec3(0.0));
   }
   c += vec3(0.82, 0.64, 1.0) * flash;
-  o = vec4(pow(clamp(c, 0.0, 1.0), vec3(0.4545)), 1.0);
+  o = vec4(linearToSrgb(clamp(c, 0.0, 1.0)), 1.0);
 }
 """
     }
