@@ -63,13 +63,21 @@ const float PI = 3.14159265;
 vec3 srgbToLinear(vec3 c) {
   vec3 lo = c / 12.92;
   vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));
-  return mix(hi, lo, lessThanEqual(c, vec3(0.04045)));
+  return vec3(
+    c.r <= 0.04045 ? lo.r : hi.r,
+    c.g <= 0.04045 ? lo.g : hi.g,
+    c.b <= 0.04045 ? lo.b : hi.b
+  );
 }
 vec3 linearToSrgb(vec3 c) {
   c = max(c, vec3(0.0));
   vec3 lo = c * 12.92;
   vec3 hi = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;
-  return mix(hi, lo, lessThanEqual(c, vec3(0.0031308)));
+  return vec3(
+    c.r <= 0.0031308 ? lo.r : hi.r,
+    c.g <= 0.0031308 ? lo.g : hi.g,
+    c.b <= 0.0031308 ? lo.b : hi.b
+  );
 }
 float falloff(float d, float cutoff) { float r = d / cutoff; return pow(clamp(1.0 - r * r * r * r, 0.0, 1.0), 2.0); }
 float vGGX(float a, float nl, float nv) {
@@ -184,6 +192,18 @@ precision mediump float;
 in vec2 vUv; in vec4 vCol;
 uniform sampler2D uTex;
 out vec4 o;
+// Fragment shaders are compiled independently: keep the sRGB encoder local to
+// this shader instead of relying on the helper declared in LIT_FS.
+vec3 linearToSrgb(vec3 c) {
+  c = max(c, vec3(0.0));
+  vec3 lo = c * 12.92;
+  vec3 hi = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;
+  return vec3(
+    c.r <= 0.0031308 ? lo.r : hi.r,
+    c.g <= 0.0031308 ? lo.g : hi.g,
+    c.b <= 0.0031308 ? lo.b : hi.b
+  );
+}
 void main() {
   float a = texture(uTex, vUv).a * vCol.a;
   o = vec4(linearToSrgb(clamp(vCol.rgb, 0.0, 1.0)), a);
@@ -219,13 +239,21 @@ out vec4 o;
 vec3 srgbToLinear(vec3 c) {
   vec3 lo = c / 12.92;
   vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));
-  return mix(hi, lo, lessThanEqual(c, vec3(0.04045)));
+  return vec3(
+    c.r <= 0.04045 ? lo.r : hi.r,
+    c.g <= 0.04045 ? lo.g : hi.g,
+    c.b <= 0.04045 ? lo.b : hi.b
+  );
 }
 vec3 linearToSrgb(vec3 c) {
   c = max(c, vec3(0.0));
   vec3 lo = c * 12.92;
   vec3 hi = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;
-  return mix(hi, lo, lessThanEqual(c, vec3(0.0031308)));
+  return vec3(
+    c.r <= 0.0031308 ? lo.r : hi.r,
+    c.g <= 0.0031308 ? lo.g : hi.g,
+    c.b <= 0.0031308 ? lo.b : hi.b
+  );
 }
 vec3 tap(vec2 uv) { return srgbToLinear(texture(tDiffuse, uv).rgb); }
 vec3 sampleBlur(vec2 uv) {
