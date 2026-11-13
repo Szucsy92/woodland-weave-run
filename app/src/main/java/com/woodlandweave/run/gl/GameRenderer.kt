@@ -50,6 +50,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         const val FOV = 72f
         /** The web build's crowns, rocks and bushes were flat-shaded polyhedra (three.js non-indexed geometry). */
         const val FLAT_FACETS = true
+        /** Power-up orbs: smooth spheres, see-through (1 = opaque). */
+        const val ORB_ALPHA = .5f
         /** Draw resolution follows the frame rate between these densities (pixels per dp), capped by the surface. */
         const val ADAPTIVE_SCALE = true
         const val MIN_DENSITY = 1.25f
@@ -132,7 +134,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             Mesh(Geo.jittered(2, .18f, .14f, 33, FLAT_FACETS), MAX_PROPS), Mesh(Geo.jittered(2, .35f, .4f, 47, FLAT_FACETS), MAX_PROPS),
             Mesh(Geo.crown(CROWN_FAR_SUBDIVISIONS, FLAT_FACETS), MAX_PROPS * 16),
         )
-        box = Mesh(Geo.box(1f, 1f, 1f), 4); orb = Mesh(if (FLAT_FACETS) Geo.facetedIcosahedron(1) else Geo.icosphere(1), 4); holeBody = Mesh(Geo.icosphere(3), 4)
+        box = Mesh(Geo.box(1f, 1f, 1f), 4); orb = Mesh(Geo.icosphere(3), 4); holeBody = Mesh(Geo.icosphere(3), 4)
         cyl = Mesh(Geo.cylinder(.5f, .5f, 1f, 8, 1), 4); cone = Mesh(Geo.cylinder(0f, .5f, 1f, 5, 1), 4)
         ico0 = Mesh(Geo.icosphere(0), 4); quad = Mesh(Geo.quadXY(), 4)
         torusA = Mesh(Geo.torus(2.4f, .14f, 8, 40), 4); torusB = Mesh(Geo.torus(1.5f, .08f, 6, 28), 4); torusC = Mesh(Geo.torus(.8f, .1f, 6, 24), 4)
@@ -502,9 +504,13 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val px = if (taken != null) o.p.x + (cam.ex - o.p.x) * flow * .6 else o.p.x
             val pz = if (taken != null) o.p.z + (cam.ez - o.p.z) * flow * .6 else o.p.z
             val py = if (taken != null) base + (cam.ey - .35 - base) * flow else base + sin(t * 1.3 + i * 2) * .08
-            material(litProg, col, col, 1.6f, rough = .2f)
+            // A translucent glass-like sphere: alpha blending, no depth write, front faces only.
+            GL.glEnable(GL.GL_BLEND); GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA); GL.glDepthMask(false)
+            GL.glEnable(GL.GL_CULL_FACE); GL.glCullFace(GL.GL_BACK)
+            material(litProg, col, col, 1.6f, alpha = ORB_ALPHA * (1f - k.toFloat() * .6f), rough = .2f)
             place(parent, px, py, pz, 0.0, t * .8, 0.0, size)
             uploadOne(orb, parent)
+            GL.glDisable(GL.GL_CULL_FACE); GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
         }
         if (s.mode != GameMode.FREEROAM) return
         for (g in e.gates) {
