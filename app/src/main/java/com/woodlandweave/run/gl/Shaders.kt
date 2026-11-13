@@ -53,8 +53,8 @@ void main() {
     val LIT_FS = """#version 300 es
 precision highp float;
 in vec3 vN; in vec3 vW; in vec2 vUv; in float vLY;
-uniform vec3 uColor, uEmissive, uFog, uCam, uSky, uGroundC, uMoonDir, uMoon, uLampPos, uLampCol, uRedPos, uRedCol, uFloodDir, uFloodCol;
-uniform float uAlpha, uMaps, uFogNear, uFogFar, uHemi, uLampI, uRedI, uNormalScale, uRough, uLights, uRed, uFogOn;
+uniform vec3 uColor, uEmissive, uFog, uCam, uFwd, uSky, uGroundC, uMoonDir, uMoon, uLampPos, uLampCol, uRedPos, uRedCol, uFloodDir, uFloodCol;
+uniform float uAlpha, uMaps, uFogNear, uFogFar, uHemi, uLampI, uRedI, uNormalScale, uRough, uLights, uRed, uFogOn, uEncode, uMetal;
 uniform int uMode;
 uniform vec2 uUvScale;
 uniform sampler2D uTex, uNorm, uRoughTex;
@@ -93,8 +93,10 @@ vec3 light(vec3 n, vec3 v, vec3 l, vec3 irradiance, vec3 albedo, float alpha) {
   if (nl <= 0.0) return vec3(0.0);
   vec3 h = normalize(l + v);
   float nv = max(abs(dot(n, v)), 1e-4), nh = max(dot(n, h), 0.0), vh = max(dot(v, h), 0.0);
-  vec3 F = vec3(0.04) + vec3(0.96) * pow(1.0 - vh, 5.0);
-  return (albedo / PI + F * vGGX(alpha, nl, nv) * dGGX(alpha, nh)) * irradiance * nl;
+  // MeshStandardMaterial: diffuse fades with metalness, the specular colour turns towards the albedo.
+  vec3 f0 = mix(vec3(0.04), albedo, uMetal);
+  vec3 F = f0 + (vec3(1.0) - f0) * pow(1.0 - vh, 5.0);
+  return (albedo * (1.0 - uMetal) / PI + F * vGGX(alpha, nl, nv) * dGGX(alpha, nh)) * irradiance * nl;
 }
 vec3 perturb(vec3 n, vec3 pos, vec2 uv, vec3 m) {
   vec3 q0 = dFdx(pos), q1 = dFdy(pos);
@@ -106,24 +108,33 @@ vec3 perturb(vec3 n, vec3 pos, vec2 uv, vec3 m) {
   float sc = det == 0.0 ? 0.0 : inversesqrt(det);
   return normalize(T * (m.x * sc) + B * (m.y * sc) + n * m.z);
 }
-vec3 finish(vec3 col, float dist) {
-  float f = clamp((dist - uFogNear) / (uFogFar - uFogNear), 0.0, 1.0) * uFogOn;
-  return linearToSrgb(clamp(mix(col, uFog, f), 0.0, 1.0));
+// three.js Fog is smoothstep(near, far, depth) on the view-space depth (not the radial distance).
+vec3 finish(vec3 col, float depth) {
+  float f = smoothstep(uFogNear, uFogFar, depth) * uFogOn;
+  col = mix(col, uFog, f);
+  // Linear HDR target: keep highlights above 1 (the effect pass encodes). Fallback RGBA8 target: encode here.
+  if (uEncode > 0.5) return linearToSrgb(clamp(col, 0.0, 1.0));
+  return clamp(col, vec3(0.0), vec3(60000.0));
 }
 void main() {
   vec3 toCam = uCam - vW;
   float dist = length(toCam);
   vec3 v = toCam / max(dist, 1e-4);
-  if (uMode == 1) { o = vec4(uColor, texture(uTex, vUv).a * uAlpha); return; }
-  if (uMode == 2) { o = vec4(finish(uColor, dist), uAlpha); return; }
+  float depth = dot(vW - uCam, uFwd);
+  if (uMode == 1) { o = vec4(finish(uColor, depth), texture(uTex, vUv).a * uAlpha); return; }
+  if (uMode == 2) { o = vec4(finish(uColor, depth), uAlpha); return; }
   vec3 n = normalize(vN);
   if (!gl_FrontFacing) n = -n;
+  // Specular anti-aliasing like three.js: rougher where the geometric normal changes quickly.
+  vec3 dxy = max(abs(dFdx(n)), abs(dFdy(n)));
+  float geometryRoughness = max(max(dxy.x, dxy.y), dxy.z);
   vec3 albedo = uColor;
   float rough = uRough;
   // Texture rows start at the top of the image here, three.js flips them: undo that so maps and normals line up.
   vec2 tuv = vec2(vUv.x * uUvScale.x, (1.0 - vUv.y) * uUvScale.y);
   if (uMaps > 0.5) {
-    albedo *= srgbToLinear(texture(uTex, tuv).rgb);
+    // The colour maps are SRGB8_ALPHA8 textures: the sampler already returns filtered linear light.
+    albedo *= texture(uTex, tuv).rgb;
     rough *= texture(uRoughTex, tuv).g;
     vec3 mn = texture(uNorm, tuv).xyz * 2.0 - 1.0;
     mn.xy *= uNormalScale;
@@ -161,7 +172,7 @@ void main() {
     vec3 pTint = mix(vec3(.2, .55, .34), vec3(.5, .32, .7), .5 + .5 * sin(vW.x * .27 + vW.z * .19));
     emissive += mix(pTint, vec3(.95, .12, .06), uRed) * prim * (.18 + .3 * pfar) * mix(uLights, .8, uRed);
   }
-  float alpha = pow(clamp(rough, 0.0525, 1.0), 2.0);
+  float alpha = pow(min(max(rough, 0.0525) + geometryRoughness, 1.0), 2.0);
   vec3 col = albedo / PI * (mix(uGroundC, uSky, n.y * 0.5 + 0.5) * uHemi);
   col += light(n, v, normalize(uMoonDir), uMoon, albedo, alpha);
   vec3 tl = uLampPos - vW; float d = length(tl);
@@ -169,7 +180,7 @@ void main() {
   tl = uRedPos - vW; d = length(tl);
   col += light(n, v, tl / max(d, 1e-3), uRedCol * (uRedI / max(pow(d, 1.1), 0.01)) * falloff(d, 70.0), albedo, alpha);
   col += light(n, v, normalize(uFloodDir), uFloodCol, albedo, alpha);
-  o = vec4(finish(col + emissive, dist), uAlpha);
+  o = vec4(finish(col + emissive, depth), uAlpha);
 }
 """
 
@@ -177,23 +188,26 @@ void main() {
 layout(location=0) in vec3 aPos;
 layout(location=1) in vec2 aSize;
 layout(location=2) in vec4 aCol;
-uniform mat4 uVP; uniform vec3 uRight, uUp;
-out vec2 vUv; out vec4 vCol;
+uniform mat4 uVP; uniform vec3 uRight, uUp, uCam, uFwd;
+out vec2 vUv; out vec4 vCol; out float vDepth;
 void main() {
   vec2 c = vec2(float(gl_VertexID & 1) * 2.0 - 1.0, float(gl_VertexID >> 1) * 2.0 - 1.0);
   vec3 w = aPos + uRight * c.x * aSize.x * 0.5 + uUp * c.y * aSize.y * 0.5;
   vUv = vec2(c.x * 0.5 + 0.5, 0.5 - c.y * 0.5); vCol = aCol;
+  // three.js sprites fog on the view depth of their centre.
+  vDepth = dot(aPos - uCam, uFwd);
   gl_Position = uVP * vec4(w, 1.0);
 }
 """
 
     val SPRITE_FS = """#version 300 es
-precision mediump float;
-in vec2 vUv; in vec4 vCol;
+precision highp float;
+in vec2 vUv; in vec4 vCol; in float vDepth;
 uniform sampler2D uTex;
+uniform vec3 uFog;
+uniform float uFogNear, uFogFar, uFogOn, uEncode;
 out vec4 o;
-// Fragment shaders are compiled independently: keep the sRGB encoder local to
-// this shader instead of relying on the helper declared in LIT_FS.
+// Fragment shaders are compiled independently: keep the sRGB encoder local to this shader.
 vec3 linearToSrgb(vec3 c) {
   c = max(c, vec3(0.0));
   vec3 lo = c * 12.92;
@@ -206,7 +220,10 @@ vec3 linearToSrgb(vec3 c) {
 }
 void main() {
   float a = texture(uTex, vUv).a * vCol.a;
-  o = vec4(linearToSrgb(clamp(vCol.rgb, 0.0, 1.0)), a);
+  vec3 col = vCol.rgb;
+  // SpriteMaterial fogs by default; the glow clusters, spores and black-hole halos switch it off.
+  col = mix(col, uFog, smoothstep(uFogNear, uFogFar, vDepth) * uFogOn);
+  o = vec4(uEncode > 0.5 ? linearToSrgb(clamp(col, 0.0, 1.0)) : col, a);
 }
 """
 
@@ -219,7 +236,12 @@ void main() {
 }
 """
 
-    /** Port of the web build's ForestEffects pass: blur, glitch, lens, frost, shockwave rings, wormhole, black hole, hue. */
+    /**
+     * Port of the web build's ForestEffects pass (blur, glitch, lens, frost, shockwave rings, wormhole,
+     * black hole, hue) plus what the browser did around it: the OutputPass (sRGB encode, here with a
+     * triangular dither so the dark fog gradients never band) and the CSS glass panels (backdrop blur,
+     * saturate, tint, drop shadow).
+     */
     fun postFs(rings: Int, gap: Double, speed: Double): String {
         fun f(v: Double) = String.format(java.util.Locale.US, "%.3f", v)
         return """#version 300 es
@@ -228,14 +250,20 @@ precision highp float;
 #define GAP ${f(gap)}
 #define WSPEED ${f(speed)}
 #define RING_GLOW 0.28
+precision highp sampler2D;
 in vec2 vUv;
 uniform sampler2D tDiffuse;
 uniform float blur, glitch, frost, lens, wave, waveT, warp, flash, hue, time;
+uniform float uSrcSrgb;
 uniform vec4 hole;
 uniform float reach[RINGS];
 uniform vec2 resolution;
+// Glass panels, in dp with the origin at the bottom left of the screen.
+uniform vec2 uRootDp;
+uniform vec4 uGlassRect[2];
+uniform vec4 uGlassParam[2];   // x blur sigma (dp), y saturate, z shadow (0/1), w opacity
+uniform float uGlassCount;
 out vec4 o;
-// The scene is stored gamma-encoded; all effect maths below runs in linear light, like the original.
 vec3 srgbToLinear(vec3 c) {
   vec3 lo = c / 12.92;
   vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));
@@ -255,10 +283,37 @@ vec3 linearToSrgb(vec3 c) {
     c.b <= 0.0031308 ? lo.b : hi.b
   );
 }
-vec3 tap(vec2 uv) { return srgbToLinear(texture(tDiffuse, uv).rgb); }
+// The scene is linear HDR (or, on the RGBA8 fallback, gamma encoded); all effect maths runs in linear light.
+vec3 tap(vec2 uv) {
+  vec3 c = textureLod(tDiffuse, uv, 0.0).rgb;
+  return uSrcSrgb > 0.5 ? srgbToLinear(c) : c;
+}
 vec3 sampleBlur(vec2 uv) {
   vec2 d = vec2(blur * 8.0) / resolution;
   return (tap(uv) * 4.0 + tap(uv + d) + tap(uv - d) + tap(uv + vec2(d.x, -d.y)) + tap(uv + vec2(-d.x, d.y))) / 8.0;
+}
+// Interleaved gradient noise: cheap, blue-ish, no visible pattern.
+float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
+float sdRoundBox(vec2 p, vec2 half_, float r) {
+  vec2 q = abs(p) - half_ + r;
+  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+// Gaussian-ish backdrop blur: golden-angle taps over a pre-filtered mip level.
+vec3 backdrop(vec2 uv, float sigmaDp) {
+  float ppd = resolution.y / uRootDp.y;                 // rendered pixels per dp
+  float lod = max(0.0, log2(max(1.0, sigmaDp * ppd * 0.5)));
+  vec2 sg = vec2(sigmaDp) / uRootDp;
+  vec3 acc = vec3(0.0); float wsum = 0.0;
+  for (int i = 0; i < 20; i++) {
+    float fi = float(i) + 0.5;
+    float r = sqrt(fi / 20.0) * 2.2;                    // in sigmas
+    float a = fi * 2.39996323;
+    vec2 off = vec2(cos(a), sin(a)) * r * sg;
+    float w = exp(-0.5 * r * r);
+    vec3 c = textureLod(tDiffuse, clamp(uv + off, vec2(0.002), vec2(0.998)), lod).rgb;
+    acc += (uSrcSrgb > 0.5 ? srgbToLinear(c) : c) * w; wsum += w;
+  }
+  return acc / wsum;
 }
 void main() {
   vec2 d = vUv - 0.5;
@@ -326,7 +381,43 @@ void main() {
     c = max(c * ch + cross(k, c) * sh + k * dot(k, c) * (1.0 - ch), vec3(0.0));
   }
   c += vec3(0.82, 0.64, 1.0) * flash;
-  o = vec4(linearToSrgb(clamp(c, 0.0, 1.0)), 1.0);
+  // OutputPass: linear -> sRGB. From here on the picture is gamma encoded, like the browser's compositor.
+  vec3 outS = linearToSrgb(clamp(c, 0.0, 1.0));
+
+  // CSS glass panels: backdrop-filter blur + saturate, translucent tint, 1px inset highlight, soft drop shadow.
+  if (uGlassCount > 0.5) {
+    vec2 dp = vUv * uRootDp;
+    float vig = mix(0.46, 1.0, vignette);
+    for (int i = 0; i < 2; i++) {
+      if (float(i) >= uGlassCount) break;
+      vec4 rc = uGlassRect[i]; vec4 pr = uGlassParam[i];
+      vec2 ctr = (rc.xy + rc.zw) * 0.5; vec2 hs = (rc.zw - rc.xy) * 0.5;
+      float sd = sdRoundBox(dp - ctr, hs, 10.0);
+      float op = pr.w;
+      if (pr.z > 0.5) {
+        // box-shadow: 0 16px 70px oklch(0.12 0.01 290 / 0.35), only outside the box.
+        float sds = sdRoundBox(dp - ctr + vec2(0.0, 16.0), hs, 10.0);
+        float cov = 1.0 - smoothstep(-35.0, 35.0, sds);
+        outS = mix(outS, vec3(0.022, 0.0207, 0.0347), 0.35 * cov * op * smoothstep(-0.5, 0.5, sd));
+      }
+      float inside = 1.0 - smoothstep(-0.5, 0.5, sd);
+      if (inside > 0.0) {
+        vec3 bl = backdrop(vUv, pr.x) * vig;
+        vec3 bs = linearToSrgb(clamp(bl, 0.0, 1.0));
+        float lum = dot(bs, vec3(0.213, 0.715, 0.072));
+        bs = mix(vec3(lum), bs, pr.y);                                   // saturate()
+        bs = mix(bs, vec3(0.2385, 0.2367, 0.2574), 0.3);                 // oklch(0.36 0.009 290 / 0.3)
+        float fromTop = (rc.w - dp.y);
+        float line = smoothstep(0.5, 1.5, fromTop) * (1.0 - smoothstep(1.5, 2.5, fromTop));
+        bs = mix(bs, vec3(1.0), 0.1 * line);                             // inset 0 1px 0 oklch(1 0 0 / 0.1)
+        outS = mix(outS, bs, inside * op);
+      }
+    }
+  }
+  // Triangular-PDF dither, one 8-bit step: removes banding in the dark gradients.
+  vec2 fc = gl_FragCoord.xy + vec2(fract(time * 7.13) * 31.0, fract(time * 3.77) * 17.0);
+  float dn = (ign(fc) + ign(fc + vec2(5.3, 11.7)) - 1.0) / 255.0;
+  o = vec4(clamp(outS + dn, 0.0, 1.0), 1.0);
 }
 """
     }

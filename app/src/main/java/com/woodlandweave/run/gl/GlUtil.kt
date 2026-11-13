@@ -38,35 +38,47 @@ object GlUtil {
         return p
     }
 
-    fun texture(bitmap: Bitmap, repeat: Boolean, mipmaps: Boolean): Int {
+    fun texture(bitmap: Bitmap, repeat: Boolean, mipmaps: Boolean, srgb: Boolean = false): Int {
         val t = IntArray(1)
         GL.glGenTextures(1, t, 0)
         GL.glBindTexture(GL.GL_TEXTURE_2D, t[0])
-        GLUtils.texImage2D(GL.GL_TEXTURE_2D, 0, bitmap, 0)
+        if (srgb) {
+            // Colour maps are sRGB data: let the hardware decode them *before* filtering, so mip levels and
+            // anisotropic taps average in linear light, exactly like three.js's SRGBColorSpace textures.
+            val src = if (bitmap.config == Bitmap.Config.ARGB_8888) bitmap else bitmap.copy(Bitmap.Config.ARGB_8888, false)
+            val buf = ByteBuffer.allocateDirect(src.width * src.height * 4).order(ByteOrder.nativeOrder())
+            src.copyPixelsToBuffer(buf)
+            buf.position(0)
+            GL.glPixelStorei(GL.GL_UNPACK_ALIGNMENT, 4)
+            GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_SRGB8_ALPHA8, src.width, src.height, 0, GL.GL_RGBA, GL.GL_UNSIGNED_BYTE, buf)
+            if (src !== bitmap) src.recycle()
+        } else {
+            GLUtils.texImage2D(GL.GL_TEXTURE_2D, 0, bitmap, 0)
+        }
         if (mipmaps) GL.glGenerateMipmap(GL.GL_TEXTURE_2D)
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, if (mipmaps) GL.GL_LINEAR_MIPMAP_LINEAR else GL.GL_LINEAR)
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
         val wrap = if (repeat) GL.GL_REPEAT else GL.GL_CLAMP_TO_EDGE
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, wrap)
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, wrap)
-        // Three.js uses anisotropy 8 for bark and ground maps. Enable the GLES extension
-        // when the device exposes it; keep a safe linear-filter fallback otherwise.
+        // Three.js used anisotropy 8 for the bark and ground maps; take everything the GPU offers up to 16
+        // (sharper trunks and ground at grazing angles). Safe linear-filter fallback otherwise.
         if (repeat) {
             val extensions = GL.glGetString(GL.GL_EXTENSIONS).orEmpty()
             if (extensions.contains("GL_EXT_texture_filter_anisotropic")) {
                 val maxAnisotropy = FloatArray(1)
                 GL.glGetFloatv(0x84FF, maxAnisotropy, 0) // MAX_TEXTURE_MAX_ANISOTROPY_EXT
                 if (maxAnisotropy[0] >= 1f) {
-                    GL.glTexParameterf(GL.GL_TEXTURE_2D, 0x84FE, minOf(8f, maxAnisotropy[0])) // TEXTURE_MAX_ANISOTROPY_EXT
+                    GL.glTexParameterf(GL.GL_TEXTURE_2D, 0x84FE, minOf(16f, maxAnisotropy[0])) // TEXTURE_MAX_ANISOTROPY_EXT
                 }
             }
         }
         return t[0]
     }
 
-    fun assetTexture(context: Context, name: String): Int {
+    fun assetTexture(context: Context, name: String, srgb: Boolean = false): Int {
         val bmp = context.assets.open(name).use { BitmapFactory.decodeStream(it) }
-        val id = texture(bmp, repeat = true, mipmaps = true)
+        val id = texture(bmp, repeat = true, mipmaps = true, srgb = srgb)
         bmp.recycle()
         return id
     }

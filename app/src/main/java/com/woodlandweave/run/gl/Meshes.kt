@@ -33,6 +33,23 @@ class MeshData(val pos: FloatArray, val uv: FloatArray, val idx: ShortArray) {
         }
     }
 
+    /** Per-face normals for a triangle soup (what three.js computes for non-indexed geometry): a faceted look. */
+    fun computeFlatNormals() {
+        nor = FloatArray(pos.size)
+        var i = 0
+        while (i + 2 < vertexCount) {
+            val a = i * 3; val b = (i + 1) * 3; val c = (i + 2) * 3
+            // (C - B) x (A - B), the same expression as three.js's computeVertexNormals().
+            val cbx = pos[c] - pos[b]; val cby = pos[c + 1] - pos[b + 1]; val cbz = pos[c + 2] - pos[b + 2]
+            val abx = pos[a] - pos[b]; val aby = pos[a + 1] - pos[b + 1]; val abz = pos[a + 2] - pos[b + 2]
+            var nx = cby * abz - cbz * aby; var ny = cbz * abx - cbx * abz; var nz = cbx * aby - cby * abx
+            val l = sqrt(nx * nx + ny * ny + nz * nz)
+            if (l > 1e-12f) { nx /= l; ny /= l; nz /= l }
+            for (k in intArrayOf(a, b, c)) { nor[k] = nx; nor[k + 1] = ny; nor[k + 2] = nz }
+            i += 3
+        }
+    }
+
     fun forEachVertex(f: (i: Int, p: FloatArray) -> Unit) {
         val p = FloatArray(3)
         for (i in 0 until vertexCount) {
@@ -109,6 +126,56 @@ object Geo {
         val idx = ShortArray(f.size * 3) { f[it / 3][it % 3].toShort() }
         return MeshData(pos, uv, idx).also { it.computeNormals() }
     }
+
+    /**
+     * THREE.IcosahedronGeometry(1, detail): an unindexed triangle soup in three.js's exact vertex order, so that
+     * the per-vertex displacement below (which is keyed by vertex index) tears and bumps it the same way. Call
+     * [MeshData.computeFlatNormals] once it is displaced.
+     */
+    fun polyhedron(detail: Int): MeshData {
+        val t = (1f + sqrt(5f)) / 2f
+        val vs = floatArrayOf(
+            -1f, t, 0f, 1f, t, 0f, -1f, -t, 0f, 1f, -t, 0f,
+            0f, -1f, t, 0f, 1f, t, 0f, -1f, -t, 0f, 1f, -t,
+            t, 0f, -1f, t, 0f, 1f, -t, 0f, -1f, -t, 0f, 1f,
+        )
+        val ix = intArrayOf(
+            0, 11, 5, 0, 5, 1, 0, 1, 7, 0, 7, 10, 0, 10, 11, 1, 5, 9, 5, 11, 4, 11, 10, 2, 10, 7, 6, 7, 1, 8,
+            3, 9, 4, 3, 4, 2, 3, 2, 6, 3, 6, 8, 3, 8, 9, 4, 9, 5, 2, 4, 11, 6, 2, 10, 8, 6, 7, 9, 8, 1,
+        )
+        val cols = detail + 1
+        val out = ArrayList<Float>()
+        fun lerp(a: FloatArray, b: FloatArray, k: Float) = FloatArray(3) { a[it] + (b[it] - a[it]) * k }
+        fun push(v: FloatArray) {
+            val l = sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
+            out += v[0] / l; out += v[1] / l; out += v[2] / l
+        }
+        for (f in 0 until ix.size / 3) {
+            val a = FloatArray(3) { vs[ix[f * 3] * 3 + it] }
+            val b = FloatArray(3) { vs[ix[f * 3 + 1] * 3 + it] }
+            val c = FloatArray(3) { vs[ix[f * 3 + 2] * 3 + it] }
+            val v = Array(cols + 1) { i -> Array(cols - i + 1) { FloatArray(3) } }
+            for (i in 0..cols) {
+                val aj = lerp(a, c, i.toFloat() / cols)
+                val bj = lerp(b, c, i.toFloat() / cols)
+                val rows = cols - i
+                for (j in 0..rows) v[i][j] = if (j == 0 && i == cols) aj else lerp(aj, bj, j.toFloat() / rows)
+            }
+            for (i in 0 until cols) {
+                for (j in 0 until 2 * (cols - i) - 1) {
+                    val k = j / 2
+                    if (j % 2 == 0) { push(v[i][k + 1]); push(v[i + 1][k]); push(v[i][k]) }
+                    else { push(v[i][k + 1]); push(v[i + 1][k + 1]); push(v[i + 1][k]) }
+                }
+            }
+        }
+        val pos = out.toFloatArray()
+        val n = pos.size / 3
+        return MeshData(pos, FloatArray(n * 2), ShortArray(n) { it.toShort() })
+    }
+
+    /** A flat-shaded icosahedron, as three.js draws IcosahedronGeometry(1, detail) with computeVertexNormals(). */
+    fun facetedIcosahedron(detail: Int): MeshData = polyhedron(detail).also { it.computeFlatNormals() }
 
     fun box(w: Float, h: Float, d: Float): MeshData {
         val hx = w / 2; val hy = h / 2; val hz = d / 2
@@ -216,8 +283,8 @@ object Geo {
     }
 
     /** Lumpy leaf mass; CROWN_SUBDIVISIONS keeps the instance count affordable on phones. */
-    fun crown(subdivisions: Int): MeshData {
-        val g = icosphere(subdivisions)
+    fun crown(subdivisions: Int, flat: Boolean = true): MeshData {
+        val g = if (flat) polyhedron(subdivisions) else icosphere(subdivisions)
         g.forEachVertex { _, v ->
             val n = sin(v[0] * 5.1f + v[1] * 2.3f) * sin(v[2] * 4.7f - v[1] * 3.1f) * .16f + sin(v[0] * 11 + v[2] * 9) * .05f
             val lump = sin(v[0] * 2.1f + 1.3f) * sin(v[2] * 1.7f + v[1] * 2.6f) * .32f + sin(v[1] * 7.7f + v[0] * 6.1f) * cos(v[2] * 8.3f) * .12f
@@ -225,18 +292,18 @@ object Geo {
             v[0] *= k; v[1] *= k; v[2] *= k
             v[1] *= if (v[1] < 0) .45f else .8f
         }
-        g.computeNormals()
+        if (flat) g.computeFlatNormals() else g.computeNormals()
         return g
     }
 
-    fun jittered(subdivisions: Int, xz: Float, y: Float, seed: Int): MeshData {
-        val g = icosphere(subdivisions)
+    fun jittered(subdivisions: Int, xz: Float, y: Float, seed: Int, flat: Boolean = true): MeshData {
+        val g = if (flat) polyhedron(subdivisions) else icosphere(subdivisions)
         g.forEachVertex { i, p ->
             val r1 = hash(i * 7 + 1, i * 13 + 3, seed).toFloat()
             val r2 = hash(i * 17 + 5, i * 11 + 9, seed + 1).toFloat()
             p[0] *= 1 - xz + r1 * xz * 2; p[1] *= 1 - y + r2 * y * 2; p[2] *= 1 - xz + r2 * xz * 2
         }
-        g.computeNormals()
+        if (flat) g.computeFlatNormals() else g.computeNormals()
         return g
     }
 

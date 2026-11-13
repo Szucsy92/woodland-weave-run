@@ -48,6 +48,12 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val WORM_COUNTS = intArrayOf(260, 3, 5)
         val REM_COUNTS = intArrayOf(70, 1, 2)
         const val FOV = 72f
+        /** The web build's crowns, rocks and bushes were flat-shaded polyhedra (three.js non-indexed geometry). */
+        const val FLAT_FACETS = true
+        /** Draw resolution follows the frame rate between these densities (pixels per dp), capped by the surface. */
+        const val ADAPTIVE_SCALE = true
+        const val MIN_DENSITY = 1.25f
+        const val START_DENSITY = 1.5f
     }
 
     // ---- GL objects ----
@@ -64,10 +70,12 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var glowTex = 0; private var sporeTex = 0; private var holeGlowTex = 0; private var ringTex = 0; private var whiteTex = 0
     private var spriteVao = 0; private var spriteVbo = 0
     private val post = PostFx()
+    private val surfaceDensity = minOf(context.resources.displayMetrics.density, GameView.MAX_DENSITY)
+    private val scaler = Scaler()
     private val effects = EffectsModel()
     private val effectState = EffectState()
 
-    private class Sprites(val capacity: Int, val texture: () -> Int, val additive: Boolean) {
+    private class Sprites(val capacity: Int, val texture: () -> Int, val additive: Boolean, val fog: Boolean) {
         val data: FloatBuffer = GlUtil.floatBuffer(capacity * 9)
         var count = 0
         fun clear() { data.clear(); count = 0 }
@@ -78,10 +86,13 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             count++
         }
     }
-    private val bGlow = Sprites(256, { glowTex }, true)
-    private val bMist = Sprites(16, { glowTex }, false)
-    private val bSpore = Sprites(128, { sporeTex }, true)
-    private val bHole = Sprites(1600, { holeGlowTex }, true)
+    // `fog` mirrors three.js's SpriteMaterial.fog of the web build: forest lights, spores and black-hole glow
+    // opt out, mist, orb auras and secret glows do not.
+    private val bGlow = Sprites(256, { glowTex }, true, false)
+    private val bGlowFog = Sprites(64, { glowTex }, true, true)
+    private val bMist = Sprites(16, { glowTex }, false, true)
+    private val bSpore = Sprites(128, { sporeTex }, true, false)
+    private val bHole = Sprites(1600, { holeGlowTex }, true, false)
 
     private val bufs = Array(KINDS) {
         GlUtil.floatBuffer(MAX_PROPS * (if (it == K_CROWN || it == K_CROWN_FAR) 16 else if (it == K_BRANCH) 11 else if (it == K_ROOT) 5 else 2) * 16)
@@ -99,6 +110,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var fog = Palette.fog; private var sky = Palette.moon; private var groundC = Palette.fog
     private var moonCol = Palette.moon; private var hemi = .85f; private var fogNear = 7f
     private var lights = 1f; private var red = 0f
+    private var encode = 1f
+    private var camFwdX = 0f; private var camFwdY = 0f; private var camFwdZ = -1f
     private var dayLevel = -1.0
     private var wormBase = FloatArray(0); private var remBase = FloatArray(0); private var remSeed = -1
 
@@ -115,11 +128,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         locs.clear()
         meshes = arrayOf(
             Mesh(Geo.trunk(), MAX_PROPS), Mesh(Geo.flatQuad(), MAX_PROPS * 2), Mesh(Geo.root(), MAX_PROPS * 5),
-            Mesh(Geo.branch(), MAX_PROPS * 11), Mesh(Geo.crown(CROWN_NEAR_SUBDIVISIONS), MAX_PROPS * 16),
-            Mesh(Geo.jittered(2, .18f, .14f, 33), MAX_PROPS), Mesh(Geo.jittered(2, .35f, .4f, 47), MAX_PROPS),
-            Mesh(Geo.crown(CROWN_FAR_SUBDIVISIONS), MAX_PROPS * 16),
+            Mesh(Geo.branch(), MAX_PROPS * 11), Mesh(Geo.crown(CROWN_NEAR_SUBDIVISIONS, FLAT_FACETS), MAX_PROPS * 16),
+            Mesh(Geo.jittered(2, .18f, .14f, 33, FLAT_FACETS), MAX_PROPS), Mesh(Geo.jittered(2, .35f, .4f, 47, FLAT_FACETS), MAX_PROPS),
+            Mesh(Geo.crown(CROWN_FAR_SUBDIVISIONS, FLAT_FACETS), MAX_PROPS * 16),
         )
-        box = Mesh(Geo.box(1f, 1f, 1f), 4); orb = Mesh(Geo.icosphere(1), 4); holeBody = Mesh(Geo.icosphere(3), 4)
+        box = Mesh(Geo.box(1f, 1f, 1f), 4); orb = Mesh(if (FLAT_FACETS) Geo.facetedIcosahedron(1) else Geo.icosphere(1), 4); holeBody = Mesh(Geo.icosphere(3), 4)
         cyl = Mesh(Geo.cylinder(.5f, .5f, 1f, 8, 1), 4); cone = Mesh(Geo.cylinder(0f, .5f, 1f, 5, 1), 4)
         ico0 = Mesh(Geo.icosphere(0), 4); quad = Mesh(Geo.quadXY(), 4)
         torusA = Mesh(Geo.torus(2.4f, .14f, 8, 40), 4); torusB = Mesh(Geo.torus(1.5f, .08f, 6, 28), 4); torusC = Mesh(Geo.torus(.8f, .1f, 6, 24), 4)
@@ -161,7 +174,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     override fun onSurfaceChanged(gl: GL10?, w: Int, h: Int) {
         GL.glViewport(0, 0, w, h)
         Matrix.perspectiveM(proj, 0, FOV, w.toFloat() / max(1, h), 0.1f, 220f)
-        post.resize(w, h)
+        post.resize(w, h, scaler.density / surfaceDensity)
     }
 
     override fun onDrawFrame(gl: GL10?) {
@@ -188,11 +201,12 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private fun material(
         p: Int, color: FloatArray, emissive: FloatArray? = null, ek: Float = 0f, alpha: Float = 1f, mode: Int = 0,
         rough: Float = .9f, maps: Boolean = false, ns: Float = 1f, uvx: Float = 1f, uvy: Float = 1f, fogOn: Float = 1f,
+        metal: Float = 0f,
     ) {
         u3(p, "uColor", color)
         if (emissive != null) u3(p, "uEmissive", emissive[0] * ek, emissive[1] * ek, emissive[2] * ek) else u3(p, "uEmissive", 0f, 0f, 0f)
         u1(p, "uAlpha", alpha); u1(p, "uMaps", if (maps) 1f else 0f); u1(p, "uRough", rough); u1(p, "uNormalScale", ns)
-        GL.glUniform2f(loc(p, "uUvScale"), uvx, uvy); GL.glUniform1i(loc(p, "uMode"), mode); u1(p, "uFogOn", fogOn)
+        GL.glUniform2f(loc(p, "uUvScale"), uvx, uvy); GL.glUniform1i(loc(p, "uMode"), mode); u1(p, "uFogOn", fogOn); u1(p, "uMetal", metal)
     }
 
     // ---- building props from the engine's world ----
@@ -307,8 +321,12 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
 
         effects.update(s, dt, effectState) { holeScreen(it, cam) }
 
+        if (ADAPTIVE_SCALE && scaler.tick(dt)) post.setScale(scaler.density / surfaceDensity)
+        encode = if (post.linear) 0f else 1f
+        camFwdX = -view[2]; camFwdY = -view[6]; camFwdZ = -view[10]
+
         post.bind()
-        val clear = Palette.encodeSrgb(fog)
+        val clear = if (post.linear) fog else Palette.encodeSrgb(fog)
         GL.glClearColor(clear[0], clear[1], clear[2], 1f)
         GL.glEnable(GL.GL_DEPTH_TEST); GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
         GL.glClear(GL.GL_COLOR_BUFFER_BIT or GL.GL_DEPTH_BUFFER_BIT)
@@ -325,6 +343,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             GL.glUseProgram(p)
             GL.glUniformMatrix4fv(loc(p, "uVP"), 1, false, vp, 0)
             u3(p, "uCam", cam.ex.toFloat(), cam.ey.toFloat(), cam.ez.toFloat())
+            u3(p, "uFwd", camFwdX, camFwdY, camFwdZ); u1(p, "uEncode", encode)
             u3(p, "uFog", fog); u1(p, "uFogNear", fogNear); u1(p, "uFogFar", FOG_END.toFloat())
             u3(p, "uSky", sky); u3(p, "uGroundC", groundC); u1(p, "uHemi", hemi)
             val ml = sqrt(24f * 24f + 20f * 20f)
@@ -390,6 +409,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             material(litProg, Palette.trunk, mode = 0, rough = .95f, maps = true, ns = .7f, uvx = 1.5f, uvy = 7f)
             meshes[K_BRANCH].draw(bufs[K_BRANCH], counts[K_BRANCH])
         }
+        // Closed blobs: three.js culled their back faces (FrontSide); doing the same halves the canopy's overdraw.
+        GL.glEnable(GL.GL_CULL_FACE); GL.glCullFace(GL.GL_BACK)
         material(litProg, Palette.crown, mode = 5, rough = .9f)
         meshes[K_CROWN].draw(bufs[K_CROWN], counts[K_CROWN])
         meshes[K_CROWN_FAR].draw(bufs[K_CROWN_FAR], counts[K_CROWN_FAR])
@@ -397,6 +418,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         meshes[K_ROCK].draw(bufs[K_ROCK], counts[K_ROCK])
         material(litProg, Palette.plant, mode = 6, rough = .9f)
         meshes[K_PLANT].draw(bufs[K_PLANT], counts[K_PLANT])
+        GL.glDisable(GL.GL_CULL_FACE)
 
         drawLandmarks(s, e, cam)
         drawHoles(s)
@@ -410,9 +432,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
 
         buildSprites(s, e)
-        for (b in arrayOf(bMist, bGlow, bSpore, bHole)) drawSprites(b)
+        for (b in arrayOf(bMist, bGlow, bGlowFog, bSpore, bHole)) drawSprites(b)
 
-        post.present(effectState)
+        post.present(effectState, e.glass)
     }
 
     /** Where the nearest black hole sits on screen, for the lens effect. */
@@ -456,10 +478,10 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private fun place(out: FloatArray, x: Double, y: Double, z: Double, rx: Double = 0.0, ry: Double = 0.0, rz: Double = 0.0, s: Double = 1.0) =
         Mat.compose(out, 0, x, y, z, rx, ry, rz, Mat.XYZ, s, s, s)
 
-    private fun additiveVeil(color: FloatArray, alpha: Float, tex: Int, par: FloatArray, sx: Double, sy: Double, lx: Double = 0.0, ly: Double = 0.0, lz: Double = 0.0, rz: Double = 0.0) {
+    private fun additiveVeil(color: FloatArray, alpha: Float, tex: Int, par: FloatArray, sx: Double, sy: Double, lx: Double = 0.0, ly: Double = 0.0, lz: Double = 0.0, rz: Double = 0.0, fogOn: Float = 1f) {
         GL.glEnable(GL.GL_BLEND); GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE); GL.glDepthMask(false)
         bindMaps(tex, tex, tex)
-        material(litProg, color, alpha = alpha, mode = 1)
+        material(litProg, color, alpha = alpha, mode = 1, fogOn = fogOn)
         prim(quad, par, lx, ly, lz, 0.0, 0.0, rz, sx, sy, 1.0)
         GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
         bindMaps(barkTex, barkN, barkR)
@@ -488,7 +510,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         for (g in e.gates) {
             val gyG = groundHeight(g.x, g.z)
             place(parent, g.x, gyG, g.z, 0.0, g.angle, 0.0)
-            material(litProg, Palette.rock, Palette.ember, .9f, rough = .4f)
+            material(litProg, Palette.rock, Palette.ember, .9f, rough = .4f, metal = .2f)
             for (side in intArrayOf(-1, 1)) prim(box, parent, side * (GATE_HALF + .2), 2.1, 0.0, 0.0, 0.0, 0.0, .4, 4.6, .4)
             prim(box, parent, 0.0, 4.5, 0.0, 0.0, 0.0, 0.0, GATE_HALF * 2 + .8, .4, .4)
         }
@@ -501,7 +523,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             place(parent, sec.x, gyS, sec.z)
             when (sec.type) {
                 SecretType.MONOLITH -> {
-                    material(litProg, Palette.rock, Palette.secret, .08f, rough = .35f)
+                    material(litProg, Palette.rock, Palette.secret, .08f, rough = .35f, metal = .2f)
                     prim(box, parent, 0.0, 2.0, 0.0, 0.0, .4, 0.0, 1.0, 4.4, .35)
                     material(litProg, Palette.secret, mode = 2)
                     prim(box, parent, .07, 2.1, .2, 0.0, .4, 0.0, .06, 3.2, .02)
@@ -540,7 +562,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val rings = arrayOf(Triple(10.0, Palette.lavender, .16f), Triple(13.0, Palette.purple, .11f), Triple(17.0, Palette.secret, .07f))
             for ((r, ring) in rings.withIndex()) {
                 val spin = t * (.9 - r * .28) * (if (r % 2 == 1) -1 else 1)
-                additiveVeil(ring.second, ring.third, ringTex, parent, ring.first, ring.first, rz = spin)
+                additiveVeil(ring.second, ring.third, ringTex, parent, ring.first, ring.first, rz = spin, fogOn = 0f)
             }
             i++
         }
@@ -552,9 +574,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val hue = Palette.odd[(idx * 3 + idx / 6) % 8]
         val alt = Palette.odd[(idx * 5 + 2) % 8]
         fun basic(c: FloatArray) = material(litProg, c, mode = 2)
-        fun rockMat(em: FloatArray?, ek: Float, rough: Float) = material(litProg, Palette.rock, em, ek, rough = rough)
+        fun rockMat(em: FloatArray?, ek: Float, rough: Float, metal: Float = 0f) = material(litProg, Palette.rock, em, ek, rough = rough, metal = metal)
         when (kind) {
-            0 -> { rockMat(hue, .35f, .35f); prim(box, par, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 4.4, .35)
+            0 -> { rockMat(hue, .35f, .35f, .2f); prim(box, par, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 4.4, .35)
                 basic(hue); prim(box, par, .07, .1, .2, 0.0, 0.0, 0.0, .06, 3.2, .02) }
             1 -> { basic(hue); prim(torusA, par, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
                 basic(alt); prim(torusB, par, 0.0, 0.0, 0.0, PI / 2, 0.0, 0.0, 1.0, 1.0, 1.0) }
@@ -565,7 +587,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 for (m in 0 until 6) { val a = m / 6.0 * PI * 2 + .3; basic(Palette.odd[(m * 2 + idx + 3) % 8]); prim(orb, par, cos(a) * 1.2, 0.0, sin(a) * 1.2, 0.0, 0.0, 0.0, .16, .16, .16) }
             }
             4 -> {
-                rockMat(null, 0f, .5f); prim(cyl, par, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, .28, 6.0, .28)
+                rockMat(null, 0f, .5f, .2f); prim(cyl, par, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, .28, 6.0, .28)
                 rockMat(hue, .5f, .4f); prim(box, par, 0.0, -2.0, 0.0, 0.0, 0.0, 0.0, .9, .7, .9)
                 basic(alt); prim(orb, par, 0.0, -.7, 0.0, 0.0, 0.0, 0.0, .6, .6, .6)
                 basic(hue); prim(torusC, par, 0.0, .6, 0.0, PI / 2, 0.0, 0.0, 1.0, 1.0, 1.0)
@@ -573,8 +595,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 basic(hue); prim(ico0, par, 0.0, 3.3, 0.0, 0.0, 0.0, 0.0, .4, .4, .4)
             }
             else -> {
-                for (side in intArrayOf(-1, 1)) { rockMat(hue, .9f, .4f); prim(box, par, side * 2.2, 0.0, 0.0, 0.0, 0.0, 0.0, .4, 4.6, .4) }
-                rockMat(hue, .9f, .4f); prim(box, par, 0.0, 2.4, 0.0, 0.0, 0.0, 0.0, 5.2, .4, .4)
+                for (side in intArrayOf(-1, 1)) { rockMat(hue, .9f, .4f, .2f); prim(box, par, side * 2.2, 0.0, 0.0, 0.0, 0.0, 0.0, .4, 4.6, .4) }
+                rockMat(hue, .9f, .4f, .2f); prim(box, par, 0.0, 2.4, 0.0, 0.0, 0.0, 0.0, 5.2, .4, .4)
                 additiveVeil(alt, .16f, whiteTex, par, 4.4, 4.4)
             }
         }
@@ -785,7 +807,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
 
     // ---- sprites ----
     private fun buildSprites(s: Simulation, e: GameEngine) {
-        for (b in arrayOf(bGlow, bMist, bSpore, bHole)) if (b !== bHole) b.clear()
+        for (b in arrayOf(bGlow, bGlowFog, bMist, bSpore, bHole)) if (b !== bHole) b.clear()
         // bHole also carries the relics' glow queued earlier in this frame, so it is cleared after drawing.
         val t = s.elapsed
         val ember = surviveStage(s) == SurviveStage.RED
@@ -827,7 +849,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val px = if (taken != null) o.p.x + (e.camera.ex - o.p.x) * flow * .6 else o.p.x
             val pz = if (taken != null) o.p.z + (e.camera.ez - o.p.z) * flow * .6 else o.p.z
             val py = if (taken != null) base + (e.camera.ey - .35 - base) * flow else base + sin(t * 1.3 + i * 2) * .08
-            bGlow.add(px, py, pz, size, size, col, a)
+            bGlowFog.add(px, py, pz, size, size, col, a)
         }
         // Low drifting mist ahead (ordinary alpha blending, not additive).
         for (i in 0 until 4) {
@@ -842,12 +864,12 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 val pulse = (if (found) 1.4 else 1.0) * (.8 + sin(t * 1.6 + i) * .2)
                 val gyS = groundHeight(sec.x, sec.z)
                 when (sec.type) {
-                    SecretType.MONOLITH -> bGlow.add(sec.x, gyS + 2.4, sec.z, 5.0, 7.0, Palette.secret, min(1.0, .35 * pulse))
+                    SecretType.MONOLITH -> bGlowFog.add(sec.x, gyS + 2.4, sec.z, 5.0, 7.0, Palette.secret, min(1.0, .35 * pulse))
                     SecretType.RING -> for (m in 0 until 11) {
                         val a = m / 11.0 * PI * 2 + t * .25
-                        bGlow.add(sec.x + cos(a) * 2.6, gyS + .3, sec.z + sin(a) * 2.6, .9, .9, Palette.green, min(1.0, .7 * pulse))
+                        bGlowFog.add(sec.x + cos(a) * 2.6, gyS + .3, sec.z + sin(a) * 2.6, .9, .9, Palette.green, min(1.0, .7 * pulse))
                     }
-                    SecretType.LANTERN -> bGlow.add(sec.x + .06, gyS + 1.7, sec.z, 3.2, 3.2, Palette.lamp, min(1.0, .75 * pulse * (.85 + sin(t * 9 + i) * .15)))
+                    SecretType.LANTERN -> bGlowFog.add(sec.x + .06, gyS + 1.7, sec.z, 3.2, 3.2, Palette.lamp, min(1.0, .75 * pulse * (.85 + sin(t * 9 + i) * .15)))
                 }
             }
             for (g in e.gates) bGlow.add(g.x, groundHeight(g.x, g.z) + 3, g.z, 16.0, 16.0, Palette.ember, .32)
@@ -868,6 +890,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     }
 
     private fun drawSprites(b: Sprites) {
+        val e = engine
         if (b.count > 0) {
             GL.glUseProgram(spriteProg)
             GL.glUniformMatrix4fv(loc(spriteProg, "uVP"), 1, false, vp, 0)
@@ -875,6 +898,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             GL.glUniform3f(loc(spriteProg, "uRight"), view[0], view[4], view[8])
             GL.glUniform3f(loc(spriteProg, "uUp"), view[1], view[5], view[9])
             GL.glUniform1i(loc(spriteProg, "uTex"), 0)
+            GL.glUniform3f(loc(spriteProg, "uCam"), e.camera.ex.toFloat(), e.camera.ey.toFloat(), e.camera.ez.toFloat())
+            GL.glUniform3f(loc(spriteProg, "uFwd"), camFwdX, camFwdY, camFwdZ)
+            GL.glUniform3f(loc(spriteProg, "uFog"), fog[0], fog[1], fog[2])
+            GL.glUniform1f(loc(spriteProg, "uFogNear"), fogNear); GL.glUniform1f(loc(spriteProg, "uFogFar"), FOG_END.toFloat())
+            GL.glUniform1f(loc(spriteProg, "uFogOn"), if (b.fog) 1f else 0f); GL.glUniform1f(loc(spriteProg, "uEncode"), encode)
             GL.glEnable(GL.GL_BLEND)
             if (b.additive) GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE) else GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
             GL.glDepthMask(false)
@@ -888,5 +916,46 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
         }
         if (b === bHole) b.clear()
+    }
+
+    /**
+     * Dynamic resolution: starts at the web build's 1.5x density and climbs towards the surface's own density while
+     * the device keeps 60 fps with room to spare; drops again (and remembers the failing level for a while) when it
+     * cannot. Only the effect pass's target is resized, never the surface.
+     */
+    private inner class Scaler {
+        var density = minOf(START_DENSITY, surfaceDensity)
+        private val minDensity = minOf(MIN_DENSITY, surfaceDensity)
+        private var avg = 1.0 / 60
+        private var slowFor = 0.0
+        private var fastFor = 0.0
+        private var cooldown = 6.0
+        private var ceiling = surfaceDensity
+        private var ceilingHold = 0.0
+
+        /** @return true when [density] changed. */
+        fun tick(dt: Double): Boolean {
+            val d = dt.coerceIn(0.002, 0.25)
+            avg += (d - avg) * 0.05
+            cooldown = max(0.0, cooldown - d)
+            if (ceilingHold > 0) { ceilingHold -= d; if (ceilingHold <= 0) ceiling = surfaceDensity }
+            val budget = 1.0 / 60
+            if (avg > budget * 1.38) { slowFor += d; fastFor = 0.0 }
+            else if (avg < budget * 1.12) { fastFor += d; slowFor = 0.0 }
+            else { slowFor = 0.0; fastFor = 0.0 }
+            if (slowFor > 1.5 && density > minDensity + 0.01f) {
+                ceiling = max(minDensity, density - 0.01f); ceilingHold = 90.0
+                density = max(minDensity, density - 0.125f)
+                slowFor = 0.0; cooldown = 10.0; avg = budget
+                return true
+            }
+            val cap = minOf(surfaceDensity, ceiling)
+            if (fastFor > 5.0 && cooldown <= 0.0 && density < cap - 0.01f) {
+                density = minOf(cap, density + 0.125f)
+                fastFor = 0.0; cooldown = 3.0
+                return true
+            }
+            return false
+        }
     }
 }
