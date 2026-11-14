@@ -47,6 +47,7 @@ import com.woodlandweave.run.GameEngine
 import com.woodlandweave.run.UiState
 import com.woodlandweave.run.data.Settings
 import com.woodlandweave.run.gl.GlassState
+import com.woodlandweave.run.gl.Quality
 import com.woodlandweave.run.gl.GameView
 import com.woodlandweave.run.sim.*
 import com.woodlandweave.run.update.UpdateController
@@ -77,6 +78,7 @@ class Actions(
     val setDifficulty: (Difficulty) -> Unit,
     val setMode: (GameMode) -> Unit,
     val setMood: (ForestMood) -> Unit,
+    val setQuality: (Quality) -> Unit,
     val finish: () -> Unit,
 )
 
@@ -408,6 +410,7 @@ private fun SettingsPanel(ui: UiState, a: Actions, updates: UpdateController, on
                     Seg(listOf(GameMode.CLASSIC to "Classic", GameMode.SURVIVE to "Survive", GameMode.FREEROAM to "Freeroam"), s.mode, a.setMode)
                 }
                 SettingRow("Forest") { Seg(listOf(ForestMood.NIGHT to "Night", ForestMood.DAY to "Day", ForestMood.AUTO to "Auto"), s.mood, a.setMood) }
+                SettingRow("Graphics", hint = "Higher tiers add shadows, foliage, light shafts and more. Needs a strong GPU.") { Seg(listOf(Quality.LOW to "Low", Quality.MEDIUM to "Med", Quality.HIGH to "High", Quality.ULTRA to "Ultra"), s.quality, a.setQuality) }
                 SettingRow("Controls") { Seg(listOf(false to "Tilt", true to "Touch"), s.touch, a.setTouch) }
                 SettingRow("Orientation") { Seg(listOf(false to "Landscape", true to "Any"), s.anyOrientation, a.setAnyOrientation) }
                 SettingRow("Audio") { OnOff(s.sound, a.setSound) }
