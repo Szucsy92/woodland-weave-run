@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.woodlandweave.run.sim.Difficulty
+import com.woodlandweave.run.gl.Quality
 import com.woodlandweave.run.sim.ForestMood
 import com.woodlandweave.run.sim.GameMode
 import kotlinx.coroutines.flow.Flow
@@ -23,6 +24,7 @@ data class Settings(
     val difficulty: Difficulty = Difficulty.EASY,
     val mode: GameMode = GameMode.CLASSIC,
     val mood: ForestMood = ForestMood.NIGHT,
+    val quality: Quality = Quality.LOW,
     val best: Int = 0,
     val last: Int = 0,
     val secrets: Set<String> = emptySet(),
@@ -40,6 +42,7 @@ class SettingsRepo(private val context: Context) {
         val difficulty = stringPreferencesKey("difficulty")
         val mode = stringPreferencesKey("mode")
         val mood = stringPreferencesKey("mood")
+        val quality = stringPreferencesKey("quality")
         val best = intPreferencesKey("best")
         val last = intPreferencesKey("last")
         val secrets = stringSetPreferencesKey("secrets")
@@ -58,6 +61,7 @@ class SettingsRepo(private val context: Context) {
             difficulty = p.enumOf(K.difficulty, Difficulty.EASY),
             mode = p.enumOf(K.mode, GameMode.CLASSIC),
             mood = p.enumOf(K.mood, ForestMood.NIGHT),
+            quality = p.enumOf(K.quality, Quality.LOW),
             best = p[K.best] ?: 0,
             last = p[K.last] ?: 0,
             secrets = p[K.secrets] ?: emptySet(),
@@ -71,6 +75,7 @@ class SettingsRepo(private val context: Context) {
     suspend fun setDifficulty(v: Difficulty) = context.store.edit { it[K.difficulty] = v.name }
     suspend fun setMode(v: GameMode) = context.store.edit { it[K.mode] = v.name }
     suspend fun setMood(v: ForestMood) = context.store.edit { it[K.mood] = v.name }
+    suspend fun setQuality(v: Quality) = context.store.edit { it[K.quality] = v.name }
     suspend fun setSecrets(v: Set<String>) = context.store.edit { it[K.secrets] = v }
     suspend fun recordScore(score: Int) = context.store.edit {
         it[K.last] = score
