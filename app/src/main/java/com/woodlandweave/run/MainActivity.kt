@@ -74,6 +74,7 @@ class MainActivity : ComponentActivity() {
             setDifficulty = { v -> lifecycleScope.launch { repo.setDifficulty(v) } },
             setMode = { v -> lifecycleScope.launch { repo.setMode(v) } },
             setMood = { v -> lifecycleScope.launch { repo.setMood(v) } },
+            setQuality = { v -> lifecycleScope.launch { repo.setQuality(v) } },
             finish = { finish() },
         )
         setContent { ForestApp(engine, gameView, actions, updates) }
