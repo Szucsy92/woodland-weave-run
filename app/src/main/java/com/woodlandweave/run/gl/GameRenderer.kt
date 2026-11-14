@@ -57,10 +57,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         const val ADAPTIVE_SCALE = true
         const val MIN_DENSITY = 1.25f
         const val START_DENSITY = 1.5f
-        const val GRASS_MAX = 3800
         const val TREE_SWAY = .15f
-        const val CROWN_FLUTTER = .045f
-        const val GRASS_SWAY = .14f
     }
 
     // ---- GL objects ----
@@ -83,7 +80,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     // ---- graphics tiers ----
     private var feat = Features(Quality.LOW)
     private var appliedQuality: Quality? = null
-    private var qualityCap = Quality.ULTRA
+    private var qualityCap = Quality.HIGH
     private var shadow: ShadowMap? = null
     private var shadowProg = 0
     private val pp = PostParams()
@@ -91,13 +88,6 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var aspectRatio = 16f / 9f
     private var lastCamX = 0.0; private var lastCamZ = 0.0
     private val moonDirV = run { val ml = sqrt(24f * 24f + 20f * 20f); floatArrayOf(0f, 24f / ml, -20f / ml) }
-    private var grassMesh: Mesh? = null
-    private val grassBuf = GlUtil.floatBuffer(GRASS_MAX * 16)
-    private var grassCount = 0
-    private var cylCap: Mesh? = null
-    private var holeTorus: Mesh? = null
-    private val sporeSph = FloatArray(GameEngine.SPORE_COUNT * 8)
-    private var sporeSphN = 0
     private val effects = EffectsModel()
     private val effectState = EffectState()
 
@@ -150,7 +140,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         litProg = GlUtil.program(Shaders.LIT_VS, Shaders.litFs(""))
         groundProg = GlUtil.program(Shaders.GROUND_VS, Shaders.litFs(""))
-        shadow = null; shadowProg = 0; grassMesh = null; cylCap = null; holeTorus = null
+        shadow = null; shadowProg = 0
         feat = Features(Quality.LOW); appliedQuality = null
         spriteProg = GlUtil.program(Shaders.SPRITE_VS, Shaders.SPRITE_FS)
         locs.clear()
@@ -366,8 +356,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         pp.moonCol[0] = moonCol[0] * moonI * .6f; pp.moonCol[1] = moonCol[1] * moonI * .6f; pp.moonCol[2] = moonCol[2] * moonI * .6f
         val camSpeed = if (dt > 0) hypot(cam.ex - lastCamX, cam.ez - lastCamZ) / dt else 0.0
         lastCamX = cam.ex; lastCamZ = cam.ez
-        pp.motion = (((camSpeed - 5.0) / 14.0).coerceIn(0.0, 1.0) * .045).toFloat()
-        pp.glowCount = 0
+        // Motion blur grows smoothly with the runner's speed (nothing when walking, a light radial smear at a sprint).
+        val sp01 = ((camSpeed - 3.0) / 15.0).coerceIn(0.0, 1.0)
+        pp.motion = (sp01 * sp01 * feat.motionBlurMax).toFloat()
 
         post.bind()
         val clear = if (post.linear) fog else Palette.encodeSrgb(fog)
@@ -392,12 +383,10 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val sm = shadow
             if (sm != null && feat.shadows) {
                 GL.glActiveTexture(GL.GL_TEXTURE5); GL.glBindTexture(GL.GL_TEXTURE_2D, sm.tex[0])
-                GL.glActiveTexture(GL.GL_TEXTURE6); GL.glBindTexture(GL.GL_TEXTURE_2D, if (sm.cascades > 1) sm.tex[1] else sm.tex[0])
                 GL.glActiveTexture(GL.GL_TEXTURE0)
-                GL.glUniform1i(loc(p, "uShadow0"), 5); GL.glUniform1i(loc(p, "uShadow1"), 6)
+                GL.glUniform1i(loc(p, "uShadow0"), 5)
                 GL.glUniformMatrix4fv(loc(p, "uLightVP0"), 1, false, sm.vp[0], 0)
-                GL.glUniformMatrix4fv(loc(p, "uLightVP1"), 1, false, sm.vp[if (sm.cascades > 1) 1 else 0], 0)
-                GL.glUniform2f(loc(p, "uShadowTexel"), 1f / sm.res, 1f / sm.res)
+                GL.glUniform1f(loc(p, "uShadowTexel"), 1f / sm.res)
                 u1(p, "uShadowOn", 1f)
             }
             u3(p, "uFog", fog); u1(p, "uFogNear", fogNear); u1(p, "uFogFar", FOG_END.toFloat())
@@ -432,9 +421,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             post.bind()
             GL.glEnable(GL.GL_DEPTH_TEST)
             System.arraycopy(smap.vp[0], 0, pp.lightVp0, 0, 16)
-            System.arraycopy(smap.vp[if (smap.cascades > 1) 1 else 0], 0, pp.lightVp1, 0, 16)
-            pp.shadowTex0 = smap.tex[0]; pp.shadowTex1 = if (smap.cascades > 1) smap.tex[1] else 0
-        } else { pp.shadowTex0 = 0; pp.shadowTex1 = 0 }
+            pp.shadowTex0 = smap.tex[0]
+        } else pp.shadowTex0 = 0
         scene(litProg)
         val g = e.ghostK.toFloat()
         bindMaps(barkTex, barkN, barkR)
@@ -475,30 +463,24 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             material(litProg, Palette.trunk, mode = 0, rough = .95f, maps = true, ns = .7f, uvx = 1.5f, uvy = 7f)
             meshes[K_BRANCH].draw(bufs[K_BRANCH], counts[K_BRANCH])
         }
-        // Canopy: with leaves, holes are see-through (alpha to coverage) and nothing is culled; otherwise closed blobs cull their back faces.
-        if (feat.leaf) GL.glEnable(GL.GL_SAMPLE_ALPHA_TO_COVERAGE) else { GL.glEnable(GL.GL_CULL_FACE); GL.glCullFace(GL.GL_BACK) }
-        if (feat.wind) setSway(litProg, TREE_SWAY, CROWN_FLUTTER, 0f)
+        // Closed round blobs: three.js culled their back faces (FrontSide); doing the same halves the canopy's overdraw.
+        GL.glEnable(GL.GL_CULL_FACE); GL.glCullFace(GL.GL_BACK)
         material(litProg, Palette.crown, mode = 5, rough = .9f)
         meshes[K_CROWN].draw(bufs[K_CROWN], counts[K_CROWN])
         meshes[K_CROWN_FAR].draw(bufs[K_CROWN_FAR], counts[K_CROWN_FAR])
-        if (feat.leaf) GL.glDisable(GL.GL_SAMPLE_ALPHA_TO_COVERAGE)
-        if (feat.wind) setSway(litProg, 0f, 0f, 0f)
-        GL.glEnable(GL.GL_CULL_FACE); GL.glCullFace(GL.GL_BACK)
+        if (feat.wind) setSway(litProg, 0f, 0f, 0f)    // rocks and bushes stay put
         material(litProg, Palette.rock, rough = .9f)
         meshes[K_ROCK].draw(bufs[K_ROCK], counts[K_ROCK])
-        if (feat.wind) setSway(litProg, .05f, .03f, 0f)
         material(litProg, Palette.plant, mode = 6, rough = .9f)
         meshes[K_PLANT].draw(bufs[K_PLANT], counts[K_PLANT])
-        if (feat.wind) setSway(litProg, 0f, 0f, 0f)
         GL.glDisable(GL.GL_CULL_FACE)
-        if (feat.grass) { fillGrass(cam); drawGrass() }
 
         drawLandmarks(s, e, cam)
         drawHoles(s)
         drawRelics(s, cam)
 
-        // Contact shadows: soft dark decals just above the ground (the top tier has real shadows instead).
-        if (!feat.noQuads) {
+        // Contact shadows: soft dark decals just above the ground (High has real shadows instead).
+        if (!feat.shadows) {
             GL.glEnable(GL.GL_BLEND); GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA); GL.glDepthMask(false)
             bindMaps(glowTex, glowTex, glowTex)
             material(litProg, floatArrayOf(0f, 0f, 0f), alpha = .6f, mode = 1)
@@ -507,9 +489,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         }
 
         buildSprites(s, e)
-        if (feat.noQuads) convertGlows()
         for (b in arrayOf(bMist, bGlow, bGlowFog, bSpore, bHole)) drawSprites(b)
-        if (feat.noQuads) drawSporeSpheres()
 
         post.present(effectState, e.glass, pp)
     }
@@ -544,7 +524,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     // ---- graphics tiers ----
     private fun setSway(p: Int, a: Float, b: Float, c: Float) = GL.glUniform3f(loc(p, "uSway"), a, b, c)
 
-    /** Switches tier: effect chain, shaders, shadow maps, tier meshes. Anything that fails drops one tier instead of crashing. */
+    /** Switches tier: effect chain, shaders, shadow map, round shapes. Anything that fails drops one tier instead of crashing. */
     private fun applyQuality(q: Quality) {
         var f = post.configure(Features(q))
         while (true) {
@@ -554,7 +534,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             var sm: ShadowMap? = null; var sp = 0
             var ok = lp != 0 && gp != 0
             if (ok && f.shadows) {
-                sm = ShadowMap(f.shadowRes, f.cascades).also { it.create() }
+                sm = ShadowMap(f.shadowRes, 1).also { it.create() }
                 sp = GlUtil.programOrNull(Shaders.SHADOW_VS, Shaders.SHADOW_FS)
                 if (!sm.ok || sp == 0) { sm.release(); sm = null; if (sp != 0) GL.glDeleteProgram(sp); ok = false }
             }
@@ -577,126 +557,50 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         if (feat.quality.ordinal < q.ordinal) qualityCap = feat.quality
     }
 
+    /** Low keeps the faceted web look; Medium and up get smooth, finely tessellated round shapes and shapely trees. */
     private fun rebuildTierMeshes(f: Features) {
         val flat = !f.smoothMeshes
-        val old = arrayOf(meshes[K_CROWN], meshes[K_ROCK], meshes[K_PLANT], meshes[K_CROWN_FAR])
-        meshes[K_CROWN] = Mesh(Geo.crown(f.crownNearDetail, flat), MAX_PROPS * 16)
+        val old = arrayListOf(meshes[K_CROWN], meshes[K_ROCK], meshes[K_PLANT], meshes[K_CROWN_FAR], meshes[K_TRUNK], meshes[K_ROOT], meshes[K_BRANCH])
+        meshes[K_CROWN] = Mesh(Geo.crown(if (flat) CROWN_NEAR_SUBDIVISIONS else f.crownNearDetail, flat), MAX_PROPS * 16)
         meshes[K_ROCK] = Mesh(if (flat) Geo.jittered(2, .18f, .14f, 33, true) else Geo.jittered(f.rockDetail, .18f, .14f, 33, false), MAX_PROPS)
         meshes[K_PLANT] = Mesh(if (flat) Geo.jittered(2, .35f, .4f, 47, true) else Geo.jittered(f.rockDetail, .35f, .4f, 47, false), MAX_PROPS)
-        meshes[K_CROWN_FAR] = Mesh(Geo.crown(2, flat), MAX_PROPS * 16)
+        meshes[K_CROWN_FAR] = Mesh(Geo.crown(CROWN_FAR_SUBDIVISIONS, flat), MAX_PROPS * 16)
+        meshes[K_TRUNK] = Mesh(if (f.lifelikeTrees) Geo.trunkLifelike() else Geo.trunk(), MAX_PROPS)
+        meshes[K_ROOT] = Mesh(if (f.lifelikeTrees) Geo.rootLifelike() else Geo.root(), MAX_PROPS * 5)
+        meshes[K_BRANCH] = Mesh(if (f.lifelikeTrees) Geo.branchRound() else Geo.branch(), MAX_PROPS * 11)
         for (m in old) m.release()
-        if (f.grass && grassMesh == null) grassMesh = Mesh(Geo.blade(), GRASS_MAX)
-        if (f.noQuads) {
-            if (cylCap == null) cylCap = Mesh(Geo.cylinderCapped(.5f, .5f, 1f, 18), 4)
-            if (holeTorus == null) holeTorus = Mesh(Geo.torus(1f, .045f, 10, 72), 4)
+        // Rings and posts: round on Medium and up.
+        val oldRound = arrayListOf(cyl, torusA, torusB, torusC)
+        if (f.smoothMeshes) {
+            cyl = Mesh(Geo.cylinder(.5f, .5f, 1f, 20, 1), 4)
+            torusA = Mesh(Geo.torus(2.4f, .14f, 16, 80), 4); torusB = Mesh(Geo.torus(1.5f, .08f, 12, 64), 4); torusC = Mesh(Geo.torus(.8f, .1f, 12, 48), 4)
+        } else {
+            cyl = Mesh(Geo.cylinder(.5f, .5f, 1f, 8, 1), 4)
+            torusA = Mesh(Geo.torus(2.4f, .14f, 8, 40), 4); torusB = Mesh(Geo.torus(1.5f, .08f, 6, 28), 4); torusC = Mesh(Geo.torus(.8f, .1f, 6, 24), 4)
         }
+        for (m in oldRound) m.release()
     }
 
-    /** Moon shadow cascades around the runner. */
+    /** Moon shadow around the runner. */
     private fun shadowPass(sm: ShadowMap, cam: CameraPose) {
         val fwx = cam.tx - cam.ex; val fwz = cam.tz - cam.ez
         val fl = hypot(fwx, fwz).coerceAtLeast(1e-6)
         val nx = (fwx / fl).toFloat(); val nz = (fwz / fl).toFloat()
         GL.glUseProgram(shadowProg)
         GL.glUniform1f(loc(shadowProg, "uTime"), animT.toFloat())
-        val wind = feat.wind; val leaves = feat.leaf
-        fun draw(kind: Int, macro: Float, flutter: Float, leaf: Boolean) {
-            GL.glUniform3f(loc(shadowProg, "uSway"), if (wind) macro else 0f, if (wind) flutter else 0f, 0f)
-            GL.glUniform1f(loc(shadowProg, "uLeaf"), if (leaf && leaves) 1f else 0f)
+        val ext = feat.shadowExtent
+        sm.update(0, cam.ex.toFloat() + nx * ext * .55f, 1f, cam.ez.toFloat() + nz * ext * .55f, moonDirV, ext)
+        sm.begin(0)
+        GL.glUniformMatrix4fv(loc(shadowProg, "uLightVP"), 1, false, sm.vp[0], 0)
+        // Only whole-tree sway moves things, so the shadows follow the trees; rocks and bushes stay put.
+        fun draw(kind: Int, sway: Float) {
+            GL.glUniform3f(loc(shadowProg, "uSway"), if (feat.wind) sway else 0f, 0f, 0f)
             meshes[kind].draw(bufs[kind], counts[kind])
         }
-        for (c in 0 until sm.cascades) {
-            val ext = if (c == 0) feat.shadowExtent0 else feat.shadowExtent1
-            val ahead = if (c == 0) ext * .55f else 22f
-            sm.update(c, cam.ex.toFloat() + nx * ahead, 1f, cam.ez.toFloat() + nz * ahead, moonDirV, ext)
-            sm.begin(c)
-            GL.glUniformMatrix4fv(loc(shadowProg, "uLightVP"), 1, false, sm.vp[c], 0)
-            draw(K_TRUNK, TREE_SWAY, 0f, false); draw(K_ROOT, TREE_SWAY, 0f, false); draw(K_BRANCH, TREE_SWAY, 0f, false)
-            draw(K_CROWN, TREE_SWAY, CROWN_FLUTTER, true); draw(K_CROWN_FAR, TREE_SWAY, CROWN_FLUTTER, true)
-            draw(K_ROCK, 0f, 0f, false); draw(K_PLANT, .05f, .03f, false)
-            sm.end()
-        }
-    }
-
-    /** Grass blades on a world-anchored lattice around the runner, ahead of the camera only. */
-    private fun fillGrass(cam: CameraPose) {
-        grassBuf.clear(); grassCount = 0
-        val density = feat.grassDensity.toDouble()
-        val cell = 1.3; val reach = 19.0
-        val n = (reach / cell).toInt() + 1
-        val cx = floor(cam.ex / cell).toInt(); val cz = floor(cam.ez / cell).toInt()
-        val fwx = camFwdX.toDouble(); val fwz = camFwdZ.toDouble()
-        val fl = hypot(fwx, fwz).coerceAtLeast(1e-6)
-        for (ix in cx - n..cx + n) for (iz in cz - n..cz + n) {
-            val dx = (ix + .5) * cell - cam.ex; val dz = (iz + .5) * cell - cam.ez
-            val dist = hypot(dx, dz)
-            if (dist > reach) continue
-            if (dist > 5 && (dx * fwx + dz * fwz) / (dist * fl) < .3) continue
-            val fade = 1.0 - smoothRange(dist, 11.0, reach)
-            for (k in 0 until 4) {
-                if (grassCount >= GRASS_MAX) return
-                if (hash(ix * 5 + k, iz * 11 + k * 3, 611 + k) > density * fade) continue
-                val px = (ix + hash(ix, iz + k, 612 + k)) * cell
-                val pz = (iz + hash(ix + k, iz, 613 + k)) * cell
-                val ry = hash(ix + k, iz + 7, 614) * PI * 2
-                val hgt = .45 + hash(ix, iz + k * 3, 615) * .65
-                val lean = (hash(ix + 3, iz + k, 616) - .5) * .5
-                Mat.compose(tmpL, 0, px, groundHeight(px, pz), pz, lean, ry, lean * .6, Mat.XYZ, .7 + hgt * .5, hgt, .7 + hgt * .5)
-                grassBuf.put(tmpL, 0, 16); grassCount++
-            }
-        }
-    }
-
-    private fun drawGrass() {
-        val mesh = grassMesh ?: return
-        if (grassCount == 0) return
-        material(litProg, floatArrayOf(.06f, .11f, .035f), mode = 7, rough = .75f)
-        setSway(litProg, GRASS_SWAY, 0f, 1f)
-        mesh.draw(grassBuf, grassCount)
-        setSway(litProg, 0f, 0f, 0f)
-    }
-
-    /** Top tier: sprite glows become analytic, depth-occluded halos in the effect pass; no billboards are drawn. */
-    private fun convertGlows() {
-        pp.glowCount = 0
-        for (b in arrayOf(bGlow, bGlowFog)) {
-            val d = b.data
-            for (i in 0 until b.count) {
-                if (pp.glowCount >= 40) break
-                val o = i * 9; val k = pp.glowCount * 4
-                pp.glowA[k] = d.get(o); pp.glowA[k + 1] = d.get(o + 1); pp.glowA[k + 2] = d.get(o + 2); pp.glowA[k + 3] = d.get(o + 3) * .27f
-                pp.glowB[k] = d.get(o + 5); pp.glowB[k + 1] = d.get(o + 6); pp.glowB[k + 2] = d.get(o + 7); pp.glowB[k + 3] = d.get(o + 8) * .85f
-                pp.glowCount++
-            }
-            b.clear()
-        }
-        bMist.clear(); bSpore.clear(); bHole.clear()
-    }
-
-    private fun drawSporeSpheres() {
-        if (sporeSphN == 0) return
-        GL.glEnable(GL.GL_BLEND); GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE); GL.glDepthMask(false)
-        for (i in 0 until sporeSphN) {
-            val o = i * 8
-            material(litProg, floatArrayOf(sporeSph[o + 4], sporeSph[o + 5], sporeSph[o + 6]), alpha = sporeSph[o + 7], mode = 2)
-            place(parent, sporeSph[o].toDouble(), sporeSph[o + 1].toDouble(), sporeSph[o + 2].toDouble(), 0.0, 0.0, 0.0, sporeSph[o + 3].toDouble())
-            uploadOne(orb, parent)
-        }
-        GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
-    }
-
-    private fun postLike(a: Double, b: Double) = abs(a - b) <= .25 * max(a, b)
-
-    /** A box on lower tiers; on the top tier stone becomes ellipsoids and posts become capped columns. */
-    private fun boxPrim(par: FloatArray, lx: Double, ly: Double, lz: Double, rx: Double, ry: Double, rz: Double, sx: Double, sy: Double, sz: Double) {
-        val cyl = cylCap
-        if (!feat.noQuads || cyl == null) { prim(box, par, lx, ly, lz, rx, ry, rz, sx, sy, sz); return }
-        when {
-            postLike(sx, sz) && sy > 2.2 * max(sx, sz) -> prim(cyl, par, lx, ly, lz, rx, ry, rz, max(sx, sz), sy, max(sx, sz))
-            postLike(sy, sz) && sx > 2.2 * max(sy, sz) -> prim(cyl, par, lx, ly, lz, rx, ry, rz + PI / 2, max(sy, sz), sx, max(sy, sz))
-            postLike(sx, sy) && sz > 2.2 * max(sx, sy) -> prim(cyl, par, lx, ly, lz, rx + PI / 2, ry, rz, max(sx, sy), sz, max(sx, sy))
-            else -> prim(orb, par, lx, ly, lz, rx, ry, rz, sx * .5, sy * .5, sz * .5)
-        }
+        draw(K_TRUNK, TREE_SWAY); draw(K_ROOT, TREE_SWAY); draw(K_BRANCH, TREE_SWAY)
+        draw(K_CROWN, TREE_SWAY); draw(K_CROWN_FAR, TREE_SWAY)
+        draw(K_ROCK, 0f); draw(K_PLANT, 0f)
+        sm.end()
     }
 
     // ---- single primitives ----
@@ -715,17 +619,6 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         Mat.compose(out, 0, x, y, z, rx, ry, rz, Mat.XYZ, s, s, s)
 
     private fun additiveVeil(color: FloatArray, alpha: Float, tex: Int, par: FloatArray, sx: Double, sy: Double, lx: Double = 0.0, ly: Double = 0.0, lz: Double = 0.0, rz: Double = 0.0, fogOn: Float = 1f) {
-        if (feat.noQuads) {
-            // No flat veils on the top tier: accretion rings become thin glowing tori, the other veils are left to the volumetrics.
-            val torus = holeTorus
-            if (tex == ringTex && torus != null) {
-                GL.glEnable(GL.GL_BLEND); GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE); GL.glDepthMask(false)
-                material(litProg, color, alpha = min(1f, alpha * 2.4f), mode = 2, fogOn = fogOn)
-                prim(torus, par, lx, ly, lz, 0.0, 0.0, rz, sx * .36, sx * .36, sx * .36)
-                GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
-            }
-            return
-        }
         GL.glEnable(GL.GL_BLEND); GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE); GL.glDepthMask(false)
         bindMaps(tex, tex, tex)
         material(litProg, color, alpha = alpha, mode = 1, fogOn = fogOn)
@@ -762,8 +655,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val gyG = groundHeight(g.x, g.z)
             place(parent, g.x, gyG, g.z, 0.0, g.angle, 0.0)
             material(litProg, Palette.rock, Palette.ember, .9f, rough = .4f, metal = .2f)
-            for (side in intArrayOf(-1, 1)) boxPrim(parent, side * (GATE_HALF + .2), 2.1, 0.0, 0.0, 0.0, 0.0, .4, 4.6, .4)
-            boxPrim(parent, 0.0, 4.5, 0.0, 0.0, 0.0, 0.0, GATE_HALF * 2 + .8, .4, .4)
+            for (side in intArrayOf(-1, 1)) prim(box, parent, side * (GATE_HALF + .2), 2.1, 0.0, 0.0, 0.0, 0.0, .4, 4.6, .4)
+            prim(box, parent, 0.0, 4.5, 0.0, 0.0, 0.0, 0.0, GATE_HALF * 2 + .8, .4, .4)
         }
         for ((i, g) in e.gates.withIndex()) {
             place(parent, g.x, groundHeight(g.x, g.z), g.z, 0.0, g.angle, 0.0)
@@ -775,9 +668,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             when (sec.type) {
                 SecretType.MONOLITH -> {
                     material(litProg, Palette.rock, Palette.secret, .08f, rough = .35f, metal = .2f)
-                    boxPrim(parent, 0.0, 2.0, 0.0, 0.0, .4, 0.0, 1.0, 4.4, .35)
+                    prim(box, parent, 0.0, 2.0, 0.0, 0.0, .4, 0.0, 1.0, 4.4, .35)
                     material(litProg, Palette.secret, mode = 2)
-                    boxPrim(parent, .07, 2.1, .2, 0.0, .4, 0.0, .06, 3.2, .02)
+                    prim(box, parent, .07, 2.1, .2, 0.0, .4, 0.0, .06, 3.2, .02)
                 }
                 SecretType.RING -> {
                     material(litProg, Palette.green, mode = 2)
@@ -790,7 +683,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                     material(litProg, Palette.trunk, rough = .9f)
                     prim(cyl, parent, 0.0, .8, 0.0, 0.0, 0.0, .08, .12, 1.6, .12)
                     material(litProg, Palette.lamp, mode = 2)
-                    boxPrim(parent, .06, 1.7, 0.0, 0.0, 0.0, 0.0, .24, .3, .24)
+                    prim(box, parent, .06, 1.7, 0.0, 0.0, 0.0, 0.0, .24, .3, .24)
                 }
             }
         }
@@ -827,27 +720,27 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         fun basic(c: FloatArray) = material(litProg, c, mode = 2)
         fun rockMat(em: FloatArray?, ek: Float, rough: Float, metal: Float = 0f) = material(litProg, Palette.rock, em, ek, rough = rough, metal = metal)
         when (kind) {
-            0 -> { rockMat(hue, .35f, .35f, .2f); boxPrim(par, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 4.4, .35)
-                basic(hue); boxPrim(par, .07, .1, .2, 0.0, 0.0, 0.0, .06, 3.2, .02) }
+            0 -> { rockMat(hue, .35f, .35f, .2f); prim(box, par, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 4.4, .35)
+                basic(hue); prim(box, par, .07, .1, .2, 0.0, 0.0, 0.0, .06, 3.2, .02) }
             1 -> { basic(hue); prim(torusA, par, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
                 basic(alt); prim(torusB, par, 0.0, 0.0, 0.0, PI / 2, 0.0, 0.0, 1.0, 1.0, 1.0) }
             2 -> { material(litProg, Palette.rock, rough = .9f); prim(cyl, par, 0.0, -.8, 0.0, 0.0, 0.0, 0.0, .12, 1.6, .12)
-                basic(hue); boxPrim(par, .06, .1, 0.0, 0.0, 0.0, 0.0, .24, .3, .24) }
+                basic(hue); prim(box, par, .06, .1, 0.0, 0.0, 0.0, 0.0, .24, .3, .24) }
             3 -> {
                 for (m in 0 until 12) { val a = m / 12.0 * PI * 2; basic(Palette.odd[(m + idx) % 8]); prim(orb, par, cos(a) * 2.4, 0.0, sin(a) * 2.4, 0.0, 0.0, 0.0, .26, .26, .26) }
                 for (m in 0 until 6) { val a = m / 6.0 * PI * 2 + .3; basic(Palette.odd[(m * 2 + idx + 3) % 8]); prim(orb, par, cos(a) * 1.2, 0.0, sin(a) * 1.2, 0.0, 0.0, 0.0, .16, .16, .16) }
             }
             4 -> {
                 rockMat(null, 0f, .5f, .2f); prim(cyl, par, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, .28, 6.0, .28)
-                rockMat(hue, .5f, .4f); boxPrim(par, 0.0, -2.0, 0.0, 0.0, 0.0, 0.0, .9, .7, .9)
+                rockMat(hue, .5f, .4f); prim(box, par, 0.0, -2.0, 0.0, 0.0, 0.0, 0.0, .9, .7, .9)
                 basic(alt); prim(orb, par, 0.0, -.7, 0.0, 0.0, 0.0, 0.0, .6, .6, .6)
                 basic(hue); prim(torusC, par, 0.0, .6, 0.0, PI / 2, 0.0, 0.0, 1.0, 1.0, 1.0)
                 rockMat(alt, .5f, .4f); prim(cone, par, 0.0, 1.8, 0.0, 0.0, 0.0, 0.0, 1.1, 1.2, 1.1)
                 basic(hue); prim(ico0, par, 0.0, 3.3, 0.0, 0.0, 0.0, 0.0, .4, .4, .4)
             }
             else -> {
-                for (side in intArrayOf(-1, 1)) { rockMat(hue, .9f, .4f, .2f); boxPrim(par, side * 2.2, 0.0, 0.0, 0.0, 0.0, 0.0, .4, 4.6, .4) }
-                rockMat(hue, .9f, .4f, .2f); boxPrim(par, 0.0, 2.4, 0.0, 0.0, 0.0, 0.0, 5.2, .4, .4)
+                for (side in intArrayOf(-1, 1)) { rockMat(hue, .9f, .4f, .2f); prim(box, par, side * 2.2, 0.0, 0.0, 0.0, 0.0, 0.0, .4, 4.6, .4) }
+                rockMat(hue, .9f, .4f, .2f); prim(box, par, 0.0, 2.4, 0.0, 0.0, 0.0, 0.0, 5.2, .4, .4)
                 additiveVeil(alt, .16f, whiteTex, par, 4.4, 4.4)
             }
         }
@@ -1059,7 +952,6 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     // ---- sprites ----
     private fun buildSprites(s: Simulation, e: GameEngine) {
         for (b in arrayOf(bGlow, bGlowFog, bMist, bSpore, bHole)) if (b !== bHole) b.clear()
-        sporeSphN = 0
         // bHole also carries the relics' glow queued earlier in this frame, so it is cleared after drawing.
         val t = s.elapsed
         val ember = surviveStage(s) == SurviveStage.RED
@@ -1087,16 +979,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val roll = hash(i, 3, 10)
             val col = if (ember) Palette.ember else if (roll < .08) Palette.purple else if (roll < .16) Palette.green else Palette.lemon
             val size = (.14 + hash(i, 4, 9) * .12) * (if (ember) 1.25 else 1.0) * 3.0
-            val sy = groundHeight(mx, mz) + sp.h + sin(t * .5 + seed) * .25
-            val sa = min(1.0, sporeOpacity(dist, tw) * (if (ember) 1.9 else 1.0))
-            if (feat.noQuads) {
-                if (sporeSphN < GameEngine.SPORE_COUNT && sa > .01) {
-                    val o = sporeSphN * 8
-                    sporeSph[o] = mx.toFloat(); sporeSph[o + 1] = sy.toFloat(); sporeSph[o + 2] = mz.toFloat(); sporeSph[o + 3] = (size * .13).toFloat()
-                    sporeSph[o + 4] = col[0] * 2f; sporeSph[o + 5] = col[1] * 2f; sporeSph[o + 6] = col[2] * 2f; sporeSph[o + 7] = sa.toFloat()
-                    sporeSphN++
-                }
-            } else bSpore.add(mx, sy, mz, size, size, col, sa)
+            bSpore.add(mx, groundHeight(mx, mz) + sp.h + sin(t * .5 + seed) * .25, mz, size, size, col, min(1.0, sporeOpacity(dist, tw) * (if (ember) 1.9 else 1.0)))
         }
         // Orb auras.
         for ((i, o) in e.orbs.withIndex()) {

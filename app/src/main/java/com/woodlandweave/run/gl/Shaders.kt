@@ -11,43 +11,19 @@ float gh(float x, float z) {
 """
 
 
-    /** Wind: the whole tree leans with the gust, crown vertices flutter. Shared by the colour and shadow passes. */
+    /** Wind (High tier): the whole tree leans with a gust. A smooth field in world space, so branches and crowns stay attached. */
     private const val WIND_FN = """
 uniform float uTime;
-uniform vec3 uSway;   // x: macro sway (m), y: flutter (m), z: > 0.5 = blades (sway by local height)
+uniform vec3 uSway;   // x: sway of a tree top (metres); y, z unused
 vec4 placeVertex(mat4 m, vec3 p) {
   vec4 w = m * vec4(p, 1.0);
-  if (uSway.x + uSway.y > 0.0) {
-    float h = uSway.z > 0.5 ? p.y * p.y : smoothstep(1.5, 15.0, w.y);
-    float ph = uTime * 1.25 + m[3].x * 0.21 + m[3].z * 0.17;
-    float gust = sin(ph) + 0.5 * sin(ph * 2.3 + 1.7) + 0.25 * sin(uTime * 0.37 + m[3].x * 0.05);
+  if (uSway.x > 0.0) {
+    float h = smoothstep(1.5, 15.0, w.y);
+    float ph = uTime * 1.25 + w.x * 0.21 + w.z * 0.17;
+    float gust = sin(ph) + 0.5 * sin(ph * 2.3 + 1.7) + 0.25 * sin(uTime * 0.37 + w.x * 0.05);
     w.xz += vec2(0.82, 0.57) * gust * uSway.x * h;
-    w.xyz += vec3(sin(uTime * 2.3 + p.x * 7.0 + m[3].z), sin(uTime * 1.9 + p.y * 6.0), cos(uTime * 2.1 + p.z * 7.0 + m[3].x)) * uSway.y;
   }
   return w;
-}
-"""
-
-    /** Procedural leaves: flattened, randomly oriented ellipsoids in a 3D cell lattice; no cards, no quads. */
-    private const val LEAF_FN = """
-float h31(vec3 p) { p = fract(p * vec3(0.1031, 0.1030, 0.0973)); p += dot(p, p.yxz + 33.33); return fract((p.x + p.y) * p.z); }
-vec3 h33(vec3 p) { return vec3(h31(p), h31(p + 17.1), h31(p + 41.7)); }
-float leafCov(vec3 p, out vec3 leafN, out float cid) {
-  vec3 q = p * 7.0;
-  vec3 ci = floor(q);
-  float best = 0.0; leafN = vec3(0.0, 1.0, 0.0); cid = 0.0;
-  for (int k = 0; k < 8; k++) {
-    vec3 cell = ci + vec3(float(k & 1), float((k >> 1) & 1), float((k >> 2) & 1)) - 0.5;
-    vec3 r = h33(cell);
-    vec3 cen = cell + 0.2 + r * 0.6;
-    vec3 ax = normalize(h33(cell + 7.7) * 2.0 - 1.0 + vec3(1e-3));
-    vec3 d = q - cen;
-    float t = dot(d, ax);
-    float e = length(d - ax * t) * 1.15 + abs(t) * 2.4;
-    float c = 1.0 - smoothstep(0.45, 0.9, e);
-    if (c > best) { best = c; leafN = ax; cid = r.x; }
-  }
-  return best;
 }
 """
 
@@ -60,11 +36,11 @@ layout(location=4) in vec4 iB;
 layout(location=5) in vec4 iC;
 layout(location=6) in vec4 iD;
 uniform mat4 uVP;
-out vec3 vN; out vec3 vW; out vec2 vUv; out float vLY; out vec3 vLP;
+out vec3 vN; out vec3 vW; out vec2 vUv; out float vLY;
 $WIND_FN
 void main() {
   mat4 m = mat4(iA, iB, iC, iD);
-  vLY = aPos.y; vLP = aPos;
+  vLY = aPos.y;
   vec4 w = placeVertex(m, aPos);
   vec3 s2 = vec3(dot(m[0].xyz, m[0].xyz), dot(m[1].xyz, m[1].xyz), dot(m[2].xyz, m[2].xyz));
   vN = mat3(m) * (aNor / max(s2, vec3(1e-6)));
@@ -76,10 +52,10 @@ void main() {
     val GROUND_VS = """#version 300 es
 layout(location=0) in vec2 aXZ;
 uniform mat4 uVP; uniform vec2 uOff;
-out vec3 vN; out vec3 vW; out vec2 vUv; out float vLY; out vec3 vLP;
+out vec3 vN; out vec3 vW; out vec2 vUv; out float vLY;
 $GROUND_FN
 void main() {
-  vLY = 0.0; vLP = vec3(0.0);
+  vLY = 0.0;
   vec2 w = aXZ + uOff;
   float h = gh(w.x, w.y);
   float e = 0.4;
@@ -92,32 +68,25 @@ void main() {
 }
 """
 
-    /** The lit fragment shader; [litFs] adds the quality defines (Q_MED, Q_SHADOW, Q_CASCADE2). */
+    /** The lit fragment shader; [litFs] adds the quality defines (Q_ENV, Q_SHADOW). */
     fun litFs(defines: String) = LIT_FS.replace("//DEFINES", defines)
 
     val LIT_FS = """#version 300 es
 precision highp float;
 precision highp sampler2DShadow;
 //DEFINES
-in vec3 vN; in vec3 vW; in vec2 vUv; in float vLY; in vec3 vLP;
+in vec3 vN; in vec3 vW; in vec2 vUv; in float vLY;
 uniform vec3 uColor, uEmissive, uFog, uCam, uFwd, uSky, uGroundC, uMoonDir, uMoon, uLampPos, uLampCol, uRedPos, uRedCol, uFloodDir, uFloodCol;
 uniform float uAlpha, uMaps, uFogNear, uFogFar, uHemi, uLampI, uRedI, uNormalScale, uRough, uLights, uRed, uFogOn, uEncode, uMetal;
 uniform int uMode;
 uniform vec2 uUvScale;
 uniform sampler2D uTex, uNorm, uRoughTex;
 uniform float uTime;
-#ifdef Q_MED
-$LEAF_FN
-vec3 translucent(vec3 l, vec3 v, vec3 n, vec3 irr, vec3 albedo) {
-  float back = pow(clamp(dot(-l, v), 0.0, 1.0), 2.0) * 0.55 + clamp(-dot(n, l), 0.0, 1.0) * 0.25;
-  return albedo * irr * back;
-}
-#endif
 #ifdef Q_SHADOW
 uniform float uShadowOn;
-uniform mat4 uLightVP0, uLightVP1;
-uniform sampler2DShadow uShadow0, uShadow1;
-uniform vec2 uShadowTexel;
+uniform mat4 uLightVP0;
+uniform sampler2DShadow uShadow0;
+uniform float uShadowTexel;
 float pcf3(sampler2DShadow s, vec3 c, float tx) {
   float sum = 0.0;
   for (int i = -1; i <= 1; i++) for (int j = -1; j <= 1; j++) sum += texture(s, vec3(c.xy + vec2(float(i), float(j)) * tx, c.z));
@@ -129,13 +98,7 @@ float shadowAt(vec3 wp, vec3 n) {
   vec4 l0 = uLightVP0 * vec4(p, 1.0);
   vec3 s0 = l0.xyz / l0.w * 0.5 + 0.5;
   if (s0.x > 0.01 && s0.x < 0.99 && s0.y > 0.01 && s0.y < 0.99 && s0.z < 1.0)
-    return pcf3(uShadow0, vec3(s0.xy, s0.z - 0.0008), uShadowTexel.x);
-#ifdef Q_CASCADE2
-  vec4 l1 = uLightVP1 * vec4(p, 1.0);
-  vec3 s1 = l1.xyz / l1.w * 0.5 + 0.5;
-  if (s1.x > 0.01 && s1.x < 0.99 && s1.y > 0.01 && s1.y < 0.99 && s1.z < 1.0)
-    return pcf3(uShadow1, vec3(s1.xy, s1.z - 0.0015), uShadowTexel.y);
-#endif
+    return pcf3(uShadow0, vec3(s0.xy, s0.z - 0.0008), uShadowTexel);
   return 1.0;
 }
 #endif
@@ -232,7 +195,7 @@ void main() {
     albedo = mix(albedo, albedo * vec3(.72, 1.18, .74), moss * .6);
     albedo *= 1. - damp * .3;
     albedo = mix(albedo, albedo * vec3(1.25, 1.02, .78), smoothstep(.55, .95, litN) * .35);
-#ifdef Q_MED
+#ifdef Q_ENV
     // Puddles: dark, glassy, flat water that mirrors the sky.
     float pn = sin(vW.x * .37 + sin(vW.z * .29) * 2.3) * sin(vW.z * .33 - sin(vW.x * .21) * 1.9) + .5 * sin(vW.x * 1.7 + vW.z * 1.3) * sin(vW.z * 1.9 - vW.x * 1.1);
     float pud = smoothstep(.55, .85, pn);
@@ -251,17 +214,6 @@ void main() {
     vec3 tint = mix(vec3(.18, .55, .35), vec3(.42, .26, .62), smoothstep(-.3, .3, sin(vLY * .35)));
     emissive += mix(tint, vec3(.95, .12, .06), uRed) * rim * near * .22 * smoothstep(.6, 2., vLY) * mix(uLights, .8, uRed);
   } else if (uMode == 5) {
-#ifdef Q_MED
-    vec3 leafN; float cid;
-    float cov = leafCov(vLP, leafN, cid);
-    float lodF = smoothstep(16., 30., dist);
-    cov = mix(cov, .8, lodF);
-    if (cov < .02) discard;
-    outA = smoothstep(.0, .35, cov);
-    albedo *= mix(mix(vec3(.65, .85, .55), vec3(1.5, 1.35, .8), cid), vec3(1.), lodF);
-    vec3 ln = leafN * (dot(leafN, n) < 0. ? -1. : 1.);
-    n = normalize(mix(n, ln, .55 * (1. - lodF)));
-#endif
     // Purple-green shards of light catching the leaf undersides.
     float under = smoothstep(.15, -.75, n.y);
     float shard = .55 + .45 * sin(vW.x * .8 + sin(vW.z * .6) * 2.2) * sin(vW.z * .7 - sin(vW.x * .5) * 1.8);
@@ -273,12 +225,6 @@ void main() {
     float pfar = smoothstep(3., 9., dist) * (1. - smoothstep(26., 40., dist));
     vec3 pTint = mix(vec3(.2, .55, .34), vec3(.5, .32, .7), .5 + .5 * sin(vW.x * .27 + vW.z * .19));
     emissive += mix(pTint, vec3(.95, .12, .06), uRed) * prim * (.18 + .3 * pfar) * mix(uLights, .8, uRed);
-#ifdef Q_MED
-  } else if (uMode == 7) {
-    // Grass blades: dark roots, bright tips, per-blade variation.
-    float hh = clamp(vLP.y, 0., 1.);
-    albedo = uColor * mix(vec3(.35, .5, .3), vec3(1.6, 1.45, .8), hh) * (.7 + .6 * h31(vec3(floor(vW.x * 3.), 0., floor(vW.z * 3.))));
-#endif
   }
   float alpha = pow(min(max(rough, 0.0525) + geometryRoughness, 1.0), 2.0);
   vec3 col = albedo / PI * (mix(uGroundC, uSky, n.y * 0.5 + 0.5) * uHemi);
@@ -290,11 +236,7 @@ void main() {
   vec3 tl = uLampPos - vW; float d = length(tl);
   vec3 lampIrr = uLampCol * (uLampI / max(pow(d, 1.6), 0.01)) * falloff(d, 27.0);
   col += light(n, v, tl / max(d, 1e-3), lampIrr, albedo, alpha);
-#ifdef Q_MED
-  if (uMode == 5 || uMode == 6 || uMode == 7) {
-    col += translucent(normalize(uMoonDir), v, n, uMoon * sh, albedo) * 0.7;
-    col += translucent(tl / max(d, 1e-3), v, n, lampIrr, albedo) * 0.6;
-  }
+#ifdef Q_ENV
   {
     // Cheap image-based specular: the sky/ground gradient mirrored by the surface (wet bark, puddles, leaves).
     vec3 rv = reflect(-v, n);
@@ -318,23 +260,16 @@ layout(location=4) in vec4 iB;
 layout(location=5) in vec4 iC;
 layout(location=6) in vec4 iD;
 uniform mat4 uLightVP;
-out vec3 vLP;
 $WIND_FN
 void main() {
   mat4 m = mat4(iA, iB, iC, iD);
-  vLP = aPos;
   gl_Position = uLightVP * placeVertex(m, aPos);
 }
 """
 
     val SHADOW_FS = """#version 300 es
-precision highp float;
-in vec3 vLP;
-uniform float uLeaf;
-$LEAF_FN
-void main() {
-  if (uLeaf > 0.5) { vec3 ln; float cid; if (leafCov(vLP, ln, cid) < 0.35) discard; }
-}
+precision mediump float;
+void main() {}
 """
 
     val SPRITE_VS = """#version 300 es
@@ -427,12 +362,10 @@ uniform sampler2D uDepth, uAO;
 uniform vec2 uNF, uTanAspect;
 uniform mat4 uInvVP, uVP;
 uniform vec3 uCamPos, uMoonDir, uMoonCol;
-uniform float uAoK, uShaftSteps, uShaftMax, uFogDens, uDofK, uFocus, uMotion, uGlowN;
-uniform vec4 uGlowA[40];
-uniform vec4 uGlowB[40];
+uniform float uAoK, uShaftSteps, uShaftMax, uFogDens, uDofK, uFocus, uMotion;
 #ifdef Q_SHAFTS
-uniform mat4 uLightVP0, uLightVP1;
-uniform sampler2DShadow uShadowC0, uShadowC1;
+uniform mat4 uLightVP0;
+uniform sampler2DShadow uShadowC0;
 #endif
 #endif
 out vec4 o;
@@ -496,11 +429,6 @@ float shadowMarch(vec3 wp) {
   vec4 l = uLightVP0 * vec4(wp, 1.0);
   vec3 s = l.xyz / l.w * 0.5 + 0.5;
   if (s.x > 0.0 && s.x < 1.0 && s.y > 0.0 && s.y < 1.0 && s.z < 1.0) return texture(uShadowC0, vec3(s.xy, s.z));
-#ifdef Q_CASCADE2
-  vec4 l1 = uLightVP1 * vec4(wp, 1.0);
-  vec3 s1 = l1.xyz / l1.w * 0.5 + 0.5;
-  if (s1.x > 0.0 && s1.x < 1.0 && s1.y > 0.0 && s1.y < 1.0 && s1.z < 1.0) return texture(uShadowC1, vec3(s1.xy, s1.z));
-#endif
   return 1.0;
 }
 // Light shafts: march the view ray through height fog, asking the shadow map where the moon reaches.
@@ -527,25 +455,6 @@ vec3 shafts(vec3 c, vec2 uv, float d) {
   return c * T + sc;
 }
 #endif
-// Glows of lamps, orbs and secrets: analytic light halos, depth-occluded. No billboards.
-vec3 glows(vec2 uv, float depth) {
-  float asp = resolution.x / resolution.y;
-  float sceneZ = linZ(depth);
-  vec3 acc = vec3(0.0);
-  for (int i = 0; i < 40; i++) {
-    if (float(i) >= uGlowN) break;
-    vec4 a = uGlowA[i]; vec4 b = uGlowB[i];
-    vec4 cp = uVP * vec4(a.xyz, 1.0);
-    if (cp.w < 0.3) continue;
-    vec2 sp = cp.xy / cp.w * 0.5 + 0.5;
-    vec2 dd = (uv - sp) * vec2(asp, 1.0);
-    float sr = a.w / (cp.w * uTanAspect.y) * 0.5;
-    float g = exp(-dot(dd, dd) / (sr * sr) * 1.6);
-    float vis = smoothstep(cp.w - a.w * 1.2, cp.w - a.w * 0.3, sceneZ);
-    acc += b.rgb * (g * vis * b.w);
-  }
-  return acc;
-}
 #endif
 float sdRoundBox(vec2 p, vec2 half_, float r) {
   vec2 q = abs(p) - half_ + r;
@@ -647,7 +556,6 @@ void main() {
 #ifdef Q_SHAFTS
     if (uShaftSteps > 0.5) c = shafts(c, uv, dd0);
 #endif
-    if (uGlowN > 0.5) c += glows(vUv, dd0);
   }
 #endif
 #ifdef Q_FULL

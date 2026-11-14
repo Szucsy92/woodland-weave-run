@@ -8,6 +8,7 @@ import java.nio.FloatBuffer
 import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.pow
 import kotlin.math.sin
@@ -86,51 +87,6 @@ object Geo {
             idx += b.toShort(); idx += c.toShort(); idx += d.toShort()
         }
         return MeshData(pos, uv, idx.toShortArray()).also { it.computeNormals() }
-    }
-
-    /** A cylinder closed with flat caps (for columns and lintels that must have no open ends). */
-    fun cylinderCapped(rTop: Float, rBottom: Float, h: Float, radial: Int): MeshData {
-        val body = cylinder(rTop, rBottom, h, radial, 1)
-        val bv = body.vertexCount
-        val pos = ArrayList<Float>(); val uv = ArrayList<Float>(); val nor = ArrayList<Float>(); val idx = ArrayList<Short>()
-        for (i in 0 until bv) { for (k in 0..2) { pos += body.pos[i * 3 + k]; nor += body.nor[i * 3 + k] }; uv += body.uv[i * 2]; uv += body.uv[i * 2 + 1] }
-        for (s in body.idx) idx += s
-        fun cap(y: Float, r: Float, up: Float) {
-            val c = pos.size / 3
-            pos += 0f; pos += y; pos += 0f; nor += 0f; nor += up; nor += 0f; uv += .5f; uv += .5f
-            for (ix in 0..radial) {
-                val th = ix.toFloat() / radial * 2f * PI.toFloat()
-                pos += r * sin(th); pos += y; pos += r * cos(th); nor += 0f; nor += up; nor += 0f; uv += .5f; uv += .5f
-            }
-            for (ix in 0 until radial) {
-                if (up > 0) { idx += c.toShort(); idx += (c + 2 + ix).toShort(); idx += (c + 1 + ix).toShort() }
-                else { idx += c.toShort(); idx += (c + 1 + ix).toShort(); idx += (c + 2 + ix).toShort() }
-            }
-        }
-        cap(h / 2, rTop, 1f); cap(-h / 2, rBottom, -1f)
-        return MeshData(pos.toFloatArray(), uv.toFloatArray(), idx.toShortArray()).also { it.nor = nor.toFloatArray() }
-    }
-
-    /** A grass blade: a curved, tapering strip ending in a point (unit height, base width ~0.1). */
-    fun blade(): MeshData {
-        val segs = 5
-        val pos = ArrayList<Float>(); val uv = ArrayList<Float>(); val idx = ArrayList<Short>()
-        for (i in 0..segs) {
-            val t = i.toFloat() / segs
-            val w = 0.05f * (1f - t).pow(0.85f)
-            val z = t * t * 0.28f
-            pos += -w; pos += t; pos += z; uv += 0f; uv += t
-            if (i < segs) { pos += w; pos += t; pos += z; uv += 1f; uv += t }
-        }
-        // Vertex layout: pairs for i < segs, then the single tip vertex.
-        for (i in 0 until segs) {
-            val a = i * 2; val b = i * 2 + 1
-            val c = if (i + 1 < segs) (i + 1) * 2 else segs * 2
-            val d = if (i + 1 < segs) (i + 1) * 2 + 1 else segs * 2
-            idx += a.toShort(); idx += b.toShort(); idx += c.toShort()
-            if (i + 1 < segs) { idx += b.toShort(); idx += d.toShort(); idx += c.toShort() }
-        }
-        return MeshData(pos.toFloatArray(), uv.toFloatArray(), idx.toShortArray()).also { it.computeNormals() }
     }
 
     fun icosphere(subdivisions: Int): MeshData {
@@ -320,6 +276,129 @@ object Geo {
 
     fun branch(): MeshData {
         val g = cylinder(.03f, .07f, 2.2f, 6, 8)
+        g.forEachVertex { _, p ->
+            val y = p[1] + 1.1f; val t = y / 2.2f
+            p[0] = p[0] + sin(t * 7.3f) * .09f * t + t * t * .25f; p[1] = y; p[2] = p[2] + sin(t * 5.1f + 1) * .08f * t
+        }
+        g.computeNormals()
+        return g
+    }
+
+
+    // ---- lifelike trees (Medium and High) ----
+
+    /**
+     * Builds the triangles for a swept tube whose rows each hold (radial + 1) vertices (the last repeats the first).
+     * Rows run from the first to the last ring; winding is flipped automatically so the faces look outward, and the
+     * normals along the seam are welded so the surface is truly round.
+     */
+    private fun finishTube(pos: FloatArray, uv: FloatArray, rows: Int, radial: Int, centers: FloatArray): MeshData {
+        val idx = ShortArray((rows - 1) * radial * 6)
+        var k = 0
+        for (iy in 0 until rows - 1) for (ix in 0 until radial) {
+            val a = iy * (radial + 1) + ix; val b = (iy + 1) * (radial + 1) + ix
+            val c = (iy + 1) * (radial + 1) + ix + 1; val d = iy * (radial + 1) + ix + 1
+            idx[k++] = a.toShort(); idx[k++] = b.toShort(); idx[k++] = d.toShort()
+            idx[k++] = b.toShort(); idx[k++] = c.toShort(); idx[k++] = d.toShort()
+        }
+        val m = MeshData(pos, uv, idx)
+        m.computeNormals()
+        var outward = 0f
+        for (row in 0 until rows) for (ix in 0 until radial) {
+            val v = row * (radial + 1) + ix
+            outward += m.nor[v * 3] * (pos[v * 3] - centers[row * 3]) + m.nor[v * 3 + 1] * (pos[v * 3 + 1] - centers[row * 3 + 1]) +
+                m.nor[v * 3 + 2] * (pos[v * 3 + 2] - centers[row * 3 + 2])
+        }
+        if (outward < 0f) {
+            var i = 0
+            while (i < idx.size) { val t = idx[i + 1]; idx[i + 1] = idx[i + 2]; idx[i + 2] = t; i += 3 }
+            m.computeNormals()
+        }
+        for (row in 0 until rows) {
+            val a = row * (radial + 1); val b = a + radial
+            var nx = m.nor[a * 3] + m.nor[b * 3]; var ny = m.nor[a * 3 + 1] + m.nor[b * 3 + 1]; var nz = m.nor[a * 3 + 2] + m.nor[b * 3 + 2]
+            val l = sqrt(nx * nx + ny * ny + nz * nz).coerceAtLeast(1e-8f)
+            nx /= l; ny /= l; nz /= l
+            m.nor[a * 3] = nx; m.nor[a * 3 + 1] = ny; m.nor[a * 3 + 2] = nz
+            m.nor[b * 3] = nx; m.nor[b * 3 + 1] = ny; m.nor[b * 3 + 2] = nz
+        }
+        return m
+    }
+
+    /**
+     * A trunk with a real shape: round cross-sections (28 sides), a buttress flare whose ridges run into the roots,
+     * slightly elliptical and lobed sections, shallow bark fissures and knots, a gentle sway of the centre line.
+     * Same height, radius and attachment points as the plain trunk, so branches and crowns still sit where they did.
+     */
+    fun trunkLifelike(): MeshData {
+        val radial = 28
+        // Rows run top to bottom: coarse up the stem, fine through the flare where the shape changes quickly.
+        val hs = ArrayList<Float>()
+        var h = 22f
+        while (h > 4.2f) { hs += h; h -= 1.2f }
+        h = 4.2f
+        while (h >= -0.001f) { hs += max(h, 0f); h -= 0.3f }
+        val rows = hs.size
+        val pos = FloatArray(rows * (radial + 1) * 3); val uv = FloatArray(rows * (radial + 1) * 2); val centers = FloatArray(rows * 3)
+        var n = 0
+        for (iy in 0 until rows) {
+            val y = hs[iy]
+            val wx = sin(y * .3f) * .09f + sin(y * .71f + 1.3f) * .05f
+            val wz = cos(y * .26f + .7f) * .08f
+            centers[iy * 3] = wx; centers[iy * 3 + 1] = y; centers[iy * 3 + 2] = wz
+            val r0 = .27f + .13f * (1f - y / 22f)
+            for (ix in 0..radial) {
+                val th = ix.toFloat() / radial * 2f * PI.toFloat()
+                val sx = sin(th); val cz = cos(th)
+                val a = atan2(cz, sx)
+                val knot = Math.pow(max(0.0, (sin(a * 3 + y * 1.7f) * sin(y * 2.3f + a)).toDouble()), 4.0).toFloat() * .15f
+                val swell = 1 + sin(a * 5 + y * .9f) * .06f + sin(a * 7 - y * .4f) * .03f + sin(a * 2 + y * .23f) * .05f +
+                    sin(a * 7 + sin(y * .5f) * 1.4f) * .018f + knot
+                val ell = 1 + sin(2 * a + y * .15f) * .06f
+                val foot = max(0f, 1 - y / 3.4f)
+                val ridge = Math.pow(max(0.0, cos(a * 5 + .4f).toDouble()), 2.2).toFloat()
+                val flare = 1 + foot * foot * (.55f + ridge * 1.6f)
+                val rr = r0 * swell * flare
+                pos[n * 3] = sx * rr * ell + wx; pos[n * 3 + 1] = y; pos[n * 3 + 2] = cz * rr / ell + wz
+                uv[n * 2] = ix.toFloat() / radial; uv[n * 2 + 1] = y / 22f
+                n++
+            }
+        }
+        return finishTube(pos, uv, rows, radial, centers)
+    }
+
+    /**
+     * A surface root: a smooth tube along +x that rises out of the trunk flare, meanders, tapers and dives into the
+     * soil. Wider than tall, with soft lumps, 12 sides and 24 steps.
+     */
+    fun rootLifelike(): MeshData {
+        val segs = 24; val radial = 12
+        val rows = segs + 1
+        val pos = FloatArray(rows * (radial + 1) * 3); val uv = FloatArray(rows * (radial + 1) * 2); val centers = FloatArray(rows * 3)
+        var n = 0
+        for (iy in 0..segs) {
+            val t = iy.toFloat() / segs
+            val x = -.3f + t * 2.7f
+            val cy = -t * t * .45f + sin(t * 6) * .04f + exp(-t * 4.5f) * .14f
+            val cz = sin(t * 5.3f) * .12f * t
+            centers[iy * 3] = x; centers[iy * 3 + 1] = cy; centers[iy * 3 + 2] = cz
+            val rad = .025f + .135f * (1f - t).pow(1.15f)
+            for (ix in 0..radial) {
+                val th = ix.toFloat() / radial * 2f * PI.toFloat()
+                val lump = 1 + sin(th * 3 + t * 11) * .07f + sin(th * 2 - t * 7) * .05f
+                pos[n * 3] = x
+                pos[n * 3 + 1] = cy + cos(th) * rad * .75f * lump
+                pos[n * 3 + 2] = cz + sin(th) * rad * lump
+                uv[n * 2] = ix.toFloat() / radial; uv[n * 2 + 1] = t
+                n++
+            }
+        }
+        return finishTube(pos, uv, rows, radial, centers)
+    }
+
+    /** The plain branch, with enough sides to be round up close. */
+    fun branchRound(): MeshData {
+        val g = cylinder(.03f, .07f, 2.2f, 10, 10)
         g.forEachVertex { _, p ->
             val y = p[1] + 1.1f; val t = y / 2.2f
             p[0] = p[0] + sin(t * 7.3f) * .09f * t + t * t * .25f; p[1] = y; p[2] = p[2] + sin(t * 5.1f + 1) * .08f * t

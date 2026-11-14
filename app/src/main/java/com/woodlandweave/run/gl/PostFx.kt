@@ -9,7 +9,7 @@ import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
 
-/** What the renderer hands the effect pass each frame (matrices, lights, shadow maps, glows). */
+/** What the renderer hands the effect pass each frame (matrices, lights, the shadow map). */
 class PostParams {
     val vp = FloatArray(16)
     val invVp = FloatArray(16)
@@ -19,19 +19,16 @@ class PostParams {
     var near = 0.1f; var far = 220f
     val moonDir = FloatArray(3)
     val moonCol = FloatArray(3)
-    var shadowTex0 = 0; var shadowTex1 = 0
-    val lightVp0 = FloatArray(16); val lightVp1 = FloatArray(16)
+    var shadowTex0 = 0
+    val lightVp0 = FloatArray(16)
     var motion = 0f
-    var glowCount = 0
-    val glowA = FloatArray(40 * 4)   // x y z radius
-    val glowB = FloatArray(40 * 4)   // r g b intensity
 }
 
 /**
  * Off-screen scene target (4x MSAA, like the web build's composer), resolved into a texture and drawn through the
  * effect shader. Linear RGBA16F like the web composer's half-float target; RGBA8 (gamma encoded) fallback.
  *
- * On higher tiers the same pass chain also resolves the depth buffer and runs bloom, SSAO, light shafts, glows,
+ * On higher tiers the same pass chain also resolves the depth buffer and runs bloom, SSAO, light shafts,
  * depth of field and film tone mapping. If a feature's shader fails to compile on a device, the tier silently
  * drops ([effective]) instead of crashing.
  */
@@ -365,9 +362,7 @@ class PostFx {
         }
         if (depthFx && f.shadows && pp.shadowTex0 != 0) {
             tex(4, pp.shadowTex0); GL.glUniform1i(loc("uShadowC0"), 4)
-            tex(5, if (pp.shadowTex1 != 0) pp.shadowTex1 else pp.shadowTex0); GL.glUniform1i(loc("uShadowC1"), 5)
             GL.glUniformMatrix4fv(loc("uLightVP0"), 1, false, pp.lightVp0, 0)
-            GL.glUniformMatrix4fv(loc("uLightVP1"), 1, false, pp.lightVp1, 0)
         }
         GL.glActiveTexture(GL.GL_TEXTURE0)
         GL.glUniform1f(loc("uSrcSrgb"), if (linear) 0f else 1f)
@@ -405,9 +400,6 @@ class PostFx {
             GL.glUniform1f(loc("uDofK"), if (f.dof) f.dofStrength else 0f)
             GL.glUniform1f(loc("uFocus"), f.focus)
             GL.glUniform1f(loc("uMotion"), if (f.motionBlur) pp.motion else 0f)
-            GL.glUniform1f(loc("uGlowN"), if (f.noQuads) pp.glowCount.toFloat() else 0f)
-            GL.glUniform4fv(loc("uGlowA"), 40, pp.glowA, 0)
-            GL.glUniform4fv(loc("uGlowB"), 40, pp.glowB, 0)
         }
         GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
         GL.glEnable(GL.GL_DEPTH_TEST)
