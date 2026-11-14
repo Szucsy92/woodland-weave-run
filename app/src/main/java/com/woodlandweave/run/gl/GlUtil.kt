@@ -38,6 +38,14 @@ object GlUtil {
         return p
     }
 
+    /** Like [program] but returns 0 instead of throwing, so an optional quality feature can fail without taking the game down. */
+    fun programOrNull(vs: String, fs: String): Int = try {
+        program(vs, fs)
+    } catch (e: Throwable) {
+        android.util.Log.e("WoodlandGL", "Optional shader failed, falling back: " + e.message)
+        0
+    }
+
     fun texture(bitmap: Bitmap, repeat: Boolean, mipmaps: Boolean, srgb: Boolean = false): Int {
         val t = IntArray(1)
         GL.glGenTextures(1, t, 0)

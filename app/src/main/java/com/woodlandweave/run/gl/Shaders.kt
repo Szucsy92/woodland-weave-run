@@ -10,6 +10,47 @@ float gh(float x, float z) {
 }
 """
 
+
+    /** Wind: the whole tree leans with the gust, crown vertices flutter. Shared by the colour and shadow passes. */
+    private const val WIND_FN = """
+uniform float uTime;
+uniform vec3 uSway;   // x: macro sway (m), y: flutter (m), z: > 0.5 = blades (sway by local height)
+vec4 placeVertex(mat4 m, vec3 p) {
+  vec4 w = m * vec4(p, 1.0);
+  if (uSway.x + uSway.y > 0.0) {
+    float h = uSway.z > 0.5 ? p.y * p.y : smoothstep(1.5, 15.0, w.y);
+    float ph = uTime * 1.25 + m[3].x * 0.21 + m[3].z * 0.17;
+    float gust = sin(ph) + 0.5 * sin(ph * 2.3 + 1.7) + 0.25 * sin(uTime * 0.37 + m[3].x * 0.05);
+    w.xz += vec2(0.82, 0.57) * gust * uSway.x * h;
+    w.xyz += vec3(sin(uTime * 2.3 + p.x * 7.0 + m[3].z), sin(uTime * 1.9 + p.y * 6.0), cos(uTime * 2.1 + p.z * 7.0 + m[3].x)) * uSway.y;
+  }
+  return w;
+}
+"""
+
+    /** Procedural leaves: flattened, randomly oriented ellipsoids in a 3D cell lattice; no cards, no quads. */
+    private const val LEAF_FN = """
+float h31(vec3 p) { p = fract(p * vec3(0.1031, 0.1030, 0.0973)); p += dot(p, p.yxz + 33.33); return fract((p.x + p.y) * p.z); }
+vec3 h33(vec3 p) { return vec3(h31(p), h31(p + 17.1), h31(p + 41.7)); }
+float leafCov(vec3 p, out vec3 leafN, out float cid) {
+  vec3 q = p * 7.0;
+  vec3 ci = floor(q);
+  float best = 0.0; leafN = vec3(0.0, 1.0, 0.0); cid = 0.0;
+  for (int k = 0; k < 8; k++) {
+    vec3 cell = ci + vec3(float(k & 1), float((k >> 1) & 1), float((k >> 2) & 1)) - 0.5;
+    vec3 r = h33(cell);
+    vec3 cen = cell + 0.2 + r * 0.6;
+    vec3 ax = normalize(h33(cell + 7.7) * 2.0 - 1.0 + vec3(1e-3));
+    vec3 d = q - cen;
+    float t = dot(d, ax);
+    float e = length(d - ax * t) * 1.15 + abs(t) * 2.4;
+    float c = 1.0 - smoothstep(0.45, 0.9, e);
+    if (c > best) { best = c; leafN = ax; cid = r.x; }
+  }
+  return best;
+}
+"""
+
     val LIT_VS = """#version 300 es
 layout(location=0) in vec3 aPos;
 layout(location=1) in vec3 aNor;
@@ -19,11 +60,12 @@ layout(location=4) in vec4 iB;
 layout(location=5) in vec4 iC;
 layout(location=6) in vec4 iD;
 uniform mat4 uVP;
-out vec3 vN; out vec3 vW; out vec2 vUv; out float vLY;
+out vec3 vN; out vec3 vW; out vec2 vUv; out float vLY; out vec3 vLP;
+$WIND_FN
 void main() {
   mat4 m = mat4(iA, iB, iC, iD);
-  vLY = aPos.y;
-  vec4 w = m * vec4(aPos, 1.0);
+  vLY = aPos.y; vLP = aPos;
+  vec4 w = placeVertex(m, aPos);
   vec3 s2 = vec3(dot(m[0].xyz, m[0].xyz), dot(m[1].xyz, m[1].xyz), dot(m[2].xyz, m[2].xyz));
   vN = mat3(m) * (aNor / max(s2, vec3(1e-6)));
   vW = w.xyz; vUv = aUv;
@@ -34,10 +76,10 @@ void main() {
     val GROUND_VS = """#version 300 es
 layout(location=0) in vec2 aXZ;
 uniform mat4 uVP; uniform vec2 uOff;
-out vec3 vN; out vec3 vW; out vec2 vUv; out float vLY;
+out vec3 vN; out vec3 vW; out vec2 vUv; out float vLY; out vec3 vLP;
 $GROUND_FN
 void main() {
-  vLY = 0.0;
+  vLY = 0.0; vLP = vec3(0.0);
   vec2 w = aXZ + uOff;
   float h = gh(w.x, w.y);
   float e = 0.4;
@@ -50,14 +92,53 @@ void main() {
 }
 """
 
+    /** The lit fragment shader; [litFs] adds the quality defines (Q_MED, Q_SHADOW, Q_CASCADE2). */
+    fun litFs(defines: String) = LIT_FS.replace("//DEFINES", defines)
+
     val LIT_FS = """#version 300 es
 precision highp float;
-in vec3 vN; in vec3 vW; in vec2 vUv; in float vLY;
+precision highp sampler2DShadow;
+//DEFINES
+in vec3 vN; in vec3 vW; in vec2 vUv; in float vLY; in vec3 vLP;
 uniform vec3 uColor, uEmissive, uFog, uCam, uFwd, uSky, uGroundC, uMoonDir, uMoon, uLampPos, uLampCol, uRedPos, uRedCol, uFloodDir, uFloodCol;
 uniform float uAlpha, uMaps, uFogNear, uFogFar, uHemi, uLampI, uRedI, uNormalScale, uRough, uLights, uRed, uFogOn, uEncode, uMetal;
 uniform int uMode;
 uniform vec2 uUvScale;
 uniform sampler2D uTex, uNorm, uRoughTex;
+uniform float uTime;
+#ifdef Q_MED
+$LEAF_FN
+vec3 translucent(vec3 l, vec3 v, vec3 n, vec3 irr, vec3 albedo) {
+  float back = pow(clamp(dot(-l, v), 0.0, 1.0), 2.0) * 0.55 + clamp(-dot(n, l), 0.0, 1.0) * 0.25;
+  return albedo * irr * back;
+}
+#endif
+#ifdef Q_SHADOW
+uniform float uShadowOn;
+uniform mat4 uLightVP0, uLightVP1;
+uniform sampler2DShadow uShadow0, uShadow1;
+uniform vec2 uShadowTexel;
+float pcf3(sampler2DShadow s, vec3 c, float tx) {
+  float sum = 0.0;
+  for (int i = -1; i <= 1; i++) for (int j = -1; j <= 1; j++) sum += texture(s, vec3(c.xy + vec2(float(i), float(j)) * tx, c.z));
+  return sum / 9.0;
+}
+float shadowAt(vec3 wp, vec3 n) {
+  if (uShadowOn < 0.5) return 1.0;
+  vec3 p = wp + n * 0.06;
+  vec4 l0 = uLightVP0 * vec4(p, 1.0);
+  vec3 s0 = l0.xyz / l0.w * 0.5 + 0.5;
+  if (s0.x > 0.01 && s0.x < 0.99 && s0.y > 0.01 && s0.y < 0.99 && s0.z < 1.0)
+    return pcf3(uShadow0, vec3(s0.xy, s0.z - 0.0008), uShadowTexel.x);
+#ifdef Q_CASCADE2
+  vec4 l1 = uLightVP1 * vec4(p, 1.0);
+  vec3 s1 = l1.xyz / l1.w * 0.5 + 0.5;
+  if (s1.x > 0.01 && s1.x < 0.99 && s1.y > 0.01 && s1.y < 0.99 && s1.z < 1.0)
+    return pcf3(uShadow1, vec3(s1.xy, s1.z - 0.0015), uShadowTexel.y);
+#endif
+  return 1.0;
+}
+#endif
 out vec4 o;
 const float PI = 3.14159265;
 vec3 srgbToLinear(vec3 c) {
@@ -141,6 +222,7 @@ void main() {
     n = perturb(n, vW, vec2(tuv.x, -tuv.y), mn);
   }
   vec3 emissive = uEmissive;
+  float outA = uAlpha;
   if (uMode == 3) {
     // Mossy patches, darker damp earth and leaf litter baked into the ground colour.
     float mossN = sin(vW.x * .21 + sin(vW.z * .17) * 2.) * sin(vW.z * .19 - sin(vW.x * .13) * 1.7);
@@ -150,6 +232,15 @@ void main() {
     albedo = mix(albedo, albedo * vec3(.72, 1.18, .74), moss * .6);
     albedo *= 1. - damp * .3;
     albedo = mix(albedo, albedo * vec3(1.25, 1.02, .78), smoothstep(.55, .95, litN) * .35);
+#ifdef Q_MED
+    // Puddles: dark, glassy, flat water that mirrors the sky.
+    float pn = sin(vW.x * .37 + sin(vW.z * .29) * 2.3) * sin(vW.z * .33 - sin(vW.x * .21) * 1.9) + .5 * sin(vW.x * 1.7 + vW.z * 1.3) * sin(vW.z * 1.9 - vW.x * 1.1);
+    float pud = smoothstep(.55, .85, pn);
+    albedo *= 1. - pud * .55;
+    rough = mix(rough, .05, pud);
+    rough = mix(rough, rough * .6, damp * .5);
+    n = normalize(mix(n, vec3(0., 1., 0.), pud * .9));
+#endif
   } else if (uMode == 4) {
     // Contact darkening and moss at the trunk foot, plus a soft wet-bark rim glint near the runner.
     float foot = 1. - smoothstep(1.0, 3.2, vLY);
@@ -160,6 +251,17 @@ void main() {
     vec3 tint = mix(vec3(.18, .55, .35), vec3(.42, .26, .62), smoothstep(-.3, .3, sin(vLY * .35)));
     emissive += mix(tint, vec3(.95, .12, .06), uRed) * rim * near * .22 * smoothstep(.6, 2., vLY) * mix(uLights, .8, uRed);
   } else if (uMode == 5) {
+#ifdef Q_MED
+    vec3 leafN; float cid;
+    float cov = leafCov(vLP, leafN, cid);
+    float lodF = smoothstep(16., 30., dist);
+    cov = mix(cov, .8, lodF);
+    if (cov < .02) discard;
+    outA = smoothstep(.0, .35, cov);
+    albedo *= mix(mix(vec3(.65, .85, .55), vec3(1.5, 1.35, .8), cid), vec3(1.), lodF);
+    vec3 ln = leafN * (dot(leafN, n) < 0. ? -1. : 1.);
+    n = normalize(mix(n, ln, .55 * (1. - lodF)));
+#endif
     // Purple-green shards of light catching the leaf undersides.
     float under = smoothstep(.15, -.75, n.y);
     float shard = .55 + .45 * sin(vW.x * .8 + sin(vW.z * .6) * 2.2) * sin(vW.z * .7 - sin(vW.x * .5) * 1.8);
@@ -171,16 +273,67 @@ void main() {
     float pfar = smoothstep(3., 9., dist) * (1. - smoothstep(26., 40., dist));
     vec3 pTint = mix(vec3(.2, .55, .34), vec3(.5, .32, .7), .5 + .5 * sin(vW.x * .27 + vW.z * .19));
     emissive += mix(pTint, vec3(.95, .12, .06), uRed) * prim * (.18 + .3 * pfar) * mix(uLights, .8, uRed);
+#ifdef Q_MED
+  } else if (uMode == 7) {
+    // Grass blades: dark roots, bright tips, per-blade variation.
+    float hh = clamp(vLP.y, 0., 1.);
+    albedo = uColor * mix(vec3(.35, .5, .3), vec3(1.6, 1.45, .8), hh) * (.7 + .6 * h31(vec3(floor(vW.x * 3.), 0., floor(vW.z * 3.))));
+#endif
   }
   float alpha = pow(min(max(rough, 0.0525) + geometryRoughness, 1.0), 2.0);
   vec3 col = albedo / PI * (mix(uGroundC, uSky, n.y * 0.5 + 0.5) * uHemi);
-  col += light(n, v, normalize(uMoonDir), uMoon, albedo, alpha);
+  float sh = 1.0;
+#ifdef Q_SHADOW
+  sh = shadowAt(vW, n);
+#endif
+  col += light(n, v, normalize(uMoonDir), uMoon * sh, albedo, alpha);
   vec3 tl = uLampPos - vW; float d = length(tl);
-  col += light(n, v, tl / max(d, 1e-3), uLampCol * (uLampI / max(pow(d, 1.6), 0.01)) * falloff(d, 27.0), albedo, alpha);
+  vec3 lampIrr = uLampCol * (uLampI / max(pow(d, 1.6), 0.01)) * falloff(d, 27.0);
+  col += light(n, v, tl / max(d, 1e-3), lampIrr, albedo, alpha);
+#ifdef Q_MED
+  if (uMode == 5 || uMode == 6 || uMode == 7) {
+    col += translucent(normalize(uMoonDir), v, n, uMoon * sh, albedo) * 0.7;
+    col += translucent(tl / max(d, 1e-3), v, n, lampIrr, albedo) * 0.6;
+  }
+  {
+    // Cheap image-based specular: the sky/ground gradient mirrored by the surface (wet bark, puddles, leaves).
+    vec3 rv = reflect(-v, n);
+    vec3 env = mix(uGroundC, uSky, clamp(rv.y * 0.5 + 0.5, 0.0, 1.0)) * uHemi;
+    float fr = pow(1.0 - clamp(dot(n, v), 0.0, 1.0), 5.0);
+    float sm = 1.0 - min(rough + geometryRoughness, 1.0);
+    col += env * (0.04 + 0.96 * fr) * sm * sm * 1.2;
+  }
+#endif
   tl = uRedPos - vW; d = length(tl);
   col += light(n, v, tl / max(d, 1e-3), uRedCol * (uRedI / max(pow(d, 1.1), 0.01)) * falloff(d, 70.0), albedo, alpha);
   col += light(n, v, normalize(uFloodDir), uFloodCol, albedo, alpha);
-  o = vec4(finish(col + emissive, depth), uAlpha);
+  o = vec4(finish(col + emissive, depth), outA);
+}
+"""
+
+    val SHADOW_VS = """#version 300 es
+layout(location=0) in vec3 aPos;
+layout(location=3) in vec4 iA;
+layout(location=4) in vec4 iB;
+layout(location=5) in vec4 iC;
+layout(location=6) in vec4 iD;
+uniform mat4 uLightVP;
+out vec3 vLP;
+$WIND_FN
+void main() {
+  mat4 m = mat4(iA, iB, iC, iD);
+  vLP = aPos;
+  gl_Position = uLightVP * placeVertex(m, aPos);
+}
+"""
+
+    val SHADOW_FS = """#version 300 es
+precision highp float;
+in vec3 vLP;
+uniform float uLeaf;
+$LEAF_FN
+void main() {
+  if (uLeaf > 0.5) { vec3 ln; float cid; if (leafCov(vLP, ln, cid) < 0.35) discard; }
 }
 """
 
@@ -242,7 +395,7 @@ void main() {
      * triangular dither so the dark fog gradients never band) and the CSS glass panels (backdrop blur,
      * saturate, tint, drop shadow).
      */
-    fun postFs(rings: Int, gap: Double, speed: Double): String {
+    fun postFs(rings: Int, gap: Double, speed: Double, defines: String = ""): String {
         fun f(v: Double) = String.format(java.util.Locale.US, "%.3f", v)
         return """#version 300 es
 precision highp float;
@@ -250,7 +403,9 @@ precision highp float;
 #define GAP ${f(gap)}
 #define WSPEED ${f(speed)}
 #define RING_GLOW 0.28
+$defines
 precision highp sampler2D;
+precision highp sampler2DShadow;
 in vec2 vUv;
 uniform sampler2D tDiffuse;
 uniform float blur, glitch, frost, lens, wave, waveT, warp, flash, hue, time;
@@ -263,6 +418,23 @@ uniform vec2 uRootDp;
 uniform vec4 uGlassRect[2];
 uniform vec4 uGlassParam[2];   // x blur sigma (dp), y saturate, z shadow (0/1), w opacity
 uniform float uGlassCount;
+#ifdef Q_FULL
+uniform sampler2D uBloom;
+uniform float uTone, uExposure, uBloomK, uGrain, uChroma;
+#endif
+#ifdef Q_DEPTH
+uniform sampler2D uDepth, uAO;
+uniform vec2 uNF, uTanAspect;
+uniform mat4 uInvVP, uVP;
+uniform vec3 uCamPos, uMoonDir, uMoonCol;
+uniform float uAoK, uShaftSteps, uShaftMax, uFogDens, uDofK, uFocus, uMotion, uGlowN;
+uniform vec4 uGlowA[40];
+uniform vec4 uGlowB[40];
+#ifdef Q_SHAFTS
+uniform mat4 uLightVP0, uLightVP1;
+uniform sampler2DShadow uShadowC0, uShadowC1;
+#endif
+#endif
 out vec4 o;
 vec3 srgbToLinear(vec3 c) {
   vec3 lo = c / 12.92;
@@ -294,6 +466,87 @@ vec3 sampleBlur(vec2 uv) {
 }
 // Interleaved gradient noise: cheap, blue-ish, no visible pattern.
 float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
+#ifdef Q_FULL
+vec3 acesFit(vec3 x) { return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
+#endif
+#ifdef Q_DEPTH
+float linZ(float d) { float z = d * 2.0 - 1.0; return 2.0 * uNF.x * uNF.y / ((uNF.y + uNF.x) - z * (uNF.y - uNF.x)); }
+vec3 worldAt(vec2 uv, float d) { vec4 p = uInvVP * vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0); return p.xyz / p.w; }
+vec3 dofGather(vec2 uv, vec3 c0) {
+  float asp = resolution.x / resolution.y;
+  float z = linZ(texture(uDepth, uv).r);
+  float coc = clamp(abs(z - uFocus) / max(z, 0.5) * uDofK, 0.0, 1.0);
+  coc = max(coc - 0.05, 0.0);
+  if (coc < 0.01) return c0;
+  float rad = coc * 0.013;
+  vec3 acc = c0; float ws = 1.0;
+  for (int i = 0; i < 14; i++) {
+    float fi = (float(i) + 0.5) / 14.0;
+    float a = float(i) * 2.39996323;
+    vec2 suv = uv + vec2(cos(a), sin(a)) * sqrt(fi) * rad * vec2(1.0 / asp, 1.0);
+    float sz = linZ(texture(uDepth, suv).r);
+    float sc = clamp(abs(sz - uFocus) / max(sz, 0.5) * uDofK, 0.0, 1.0);
+    float w = clamp(sc / max(coc, 0.01), 0.0, 1.0);
+    acc += tap(suv) * w; ws += w;
+  }
+  return acc / ws;
+}
+#ifdef Q_SHAFTS
+float shadowMarch(vec3 wp) {
+  vec4 l = uLightVP0 * vec4(wp, 1.0);
+  vec3 s = l.xyz / l.w * 0.5 + 0.5;
+  if (s.x > 0.0 && s.x < 1.0 && s.y > 0.0 && s.y < 1.0 && s.z < 1.0) return texture(uShadowC0, vec3(s.xy, s.z));
+#ifdef Q_CASCADE2
+  vec4 l1 = uLightVP1 * vec4(wp, 1.0);
+  vec3 s1 = l1.xyz / l1.w * 0.5 + 0.5;
+  if (s1.x > 0.0 && s1.x < 1.0 && s1.y > 0.0 && s1.y < 1.0 && s1.z < 1.0) return texture(uShadowC1, vec3(s1.xy, s1.z));
+#endif
+  return 1.0;
+}
+// Light shafts: march the view ray through height fog, asking the shadow map where the moon reaches.
+vec3 shafts(vec3 c, vec2 uv, float d) {
+  vec3 ro = uCamPos;
+  vec3 rd = worldAt(uv, d) - ro;
+  float len = length(rd);
+  rd /= max(len, 1e-3);
+  len = min(len, uShaftMax);
+  int N = int(uShaftSteps);
+  float dt = len / float(N);
+  float j = ign(gl_FragCoord.xy + vec2(time * 13.1, time * 7.3));
+  float cosT = dot(rd, uMoonDir);
+  float g = 0.55;
+  float phase = (1.0 - g * g) / (12.566 * pow(1.0 + g * g - 2.0 * g * cosT, 1.5));
+  float T = 1.0; vec3 sc = vec3(0.0);
+  for (int i = 0; i < 48; i++) {
+    if (i >= N) break;
+    vec3 p = ro + rd * ((float(i) + j) * dt);
+    float dens = uFogDens * exp(-max(p.y, 0.0) * 0.12);
+    sc += uMoonCol * (dens * shadowMarch(p) * phase * dt) * T;
+    T *= exp(-dens * dt * 0.6);
+  }
+  return c * T + sc;
+}
+#endif
+// Glows of lamps, orbs and secrets: analytic light halos, depth-occluded. No billboards.
+vec3 glows(vec2 uv, float depth) {
+  float asp = resolution.x / resolution.y;
+  float sceneZ = linZ(depth);
+  vec3 acc = vec3(0.0);
+  for (int i = 0; i < 40; i++) {
+    if (float(i) >= uGlowN) break;
+    vec4 a = uGlowA[i]; vec4 b = uGlowB[i];
+    vec4 cp = uVP * vec4(a.xyz, 1.0);
+    if (cp.w < 0.3) continue;
+    vec2 sp = cp.xy / cp.w * 0.5 + 0.5;
+    vec2 dd = (uv - sp) * vec2(asp, 1.0);
+    float sr = a.w / (cp.w * uTanAspect.y) * 0.5;
+    float g = exp(-dot(dd, dd) / (sr * sr) * 1.6);
+    float vis = smoothstep(cp.w - a.w * 1.2, cp.w - a.w * 0.3, sceneZ);
+    acc += b.rgb * (g * vis * b.w);
+  }
+  return acc;
+}
+#endif
 float sdRoundBox(vec2 p, vec2 half_, float r) {
   vec2 q = abs(p) - half_ + r;
   return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
@@ -364,6 +617,20 @@ void main() {
     vec3 left = sampleBlur(uv + split), right = sampleBlur(uv - split);
     c = mix(c, vec3(left.r, right.g, left.b), min(glitch * 0.85, 0.85));
   }
+#ifdef Q_FULL
+  if (uChroma > 0.0 && blur < 0.001 && glitch < 0.001) {
+    vec2 off = (uv - 0.5) * uChroma * dot(q, q) * 2.0;
+    c.r = tap(uv + off).r; c.b = tap(uv - off).b;
+  }
+#endif
+#ifdef Q_DEPTH
+  if (uMotion > 0.001) {
+    vec3 acc = c;
+    for (int i = 1; i < 6; i++) acc += tap(uv + (0.5 - uv) * uMotion * float(i) / 5.0);
+    c = acc / 6.0;
+  }
+  if (uDofK > 0.001) c = dofGather(uv, c);
+#endif
   float vignette = 1.0 - smoothstep(0.28, 0.78, length(vUv - 0.5));
   c *= mix(0.46, 1.0, vignette);
   float cold = dot(c, vec3(0.3, 0.55, 0.15));
@@ -373,6 +640,19 @@ void main() {
   c += vec3(0.55, 0.8, 1.0) * frost * (rim * 0.16 + rim * crystal * 0.5);
   c += (vec3(0.6, 0.25, 1.0) * w * 0.4 + vec3(0.85, 0.7, 1.0) * pow(w, 3.0) * 0.1) * RING_GLOW;
   c += vec3(0.78, 0.5, 1.0) * hring * 0.16;
+#ifdef Q_DEPTH
+  {
+    float dd0 = texture(uDepth, uv).r;
+    if (uAoK > 0.0) c *= mix(1.0, texture(uAO, vUv).r, uAoK);
+#ifdef Q_SHAFTS
+    if (uShaftSteps > 0.5) c = shafts(c, uv, dd0);
+#endif
+    if (uGlowN > 0.5) c += glows(vUv, dd0);
+  }
+#endif
+#ifdef Q_FULL
+  c += texture(uBloom, vUv).rgb * uBloomK;
+#endif
   c = mix(c, c * vec3(0.88, 0.78, 1.18) + vec3(0.0, 0.015, 0.04), warp * 0.3);
   c *= 1.0 - warp * 0.1 * (0.5 + 0.5 * sin(time * 2.0));
   if (abs(hue) > 0.001) {
@@ -381,6 +661,9 @@ void main() {
     c = max(c * ch + cross(k, c) * sh + k * dot(k, c) * (1.0 - ch), vec3(0.0));
   }
   c += vec3(0.82, 0.64, 1.0) * flash;
+#ifdef Q_FULL
+  if (uTone > 0.5) c = acesFit(c * uExposure);
+#endif
   // OutputPass: linear -> sRGB. From here on the picture is gamma encoded, like the browser's compositor.
   vec3 outS = linearToSrgb(clamp(c, 0.0, 1.0));
 
@@ -403,6 +686,9 @@ void main() {
       float inside = 1.0 - smoothstep(-0.5, 0.5, sd);
       if (inside > 0.0) {
         vec3 bl = backdrop(vUv, pr.x) * vig;
+#ifdef Q_FULL
+        if (uTone > 0.5) bl = acesFit(bl * uExposure);
+#endif
         vec3 bs = linearToSrgb(clamp(bl, 0.0, 1.0));
         float lum = dot(bs, vec3(0.213, 0.715, 0.072));
         bs = mix(vec3(lum), bs, pr.y);                                   // saturate()
@@ -417,8 +703,123 @@ void main() {
   // Triangular-PDF dither, one 8-bit step: removes banding in the dark gradients.
   vec2 fc = gl_FragCoord.xy + vec2(fract(time * 7.13) * 31.0, fract(time * 3.77) * 17.0);
   float dn = (ign(fc) + ign(fc + vec2(5.3, 11.7)) - 1.0) / 255.0;
+#ifdef Q_FULL
+  dn += (ign(fc * 1.37 + vec2(time * 61.0, 0.0)) - 0.5) * uGrain;
+#endif
   o = vec4(clamp(outS + dn, 0.0, 1.0), 1.0);
 }
 """
     }
+
+    /** Half-resolution screen-space ambient occlusion from the resolved depth. */
+    const val SSAO_FS = """#version 300 es
+precision highp float;
+precision highp sampler2D;
+in vec2 vUv;
+uniform sampler2D uDepth;
+uniform mat4 uProj;
+uniform vec2 uNF, uTanAspect, uTexel;
+uniform float uRadius;
+out vec4 o;
+float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
+float linZ(float d) { float z = d * 2.0 - 1.0; return 2.0 * uNF.x * uNF.y / ((uNF.y + uNF.x) - z * (uNF.y - uNF.x)); }
+vec3 vpos(vec2 uv) { float z = linZ(texture(uDepth, uv).r); return vec3((uv * 2.0 - 1.0) * uTanAspect * z, -z); }
+void main() {
+  vec3 p = vpos(vUv);
+  if (-p.z > 70.0) { o = vec4(1.0); return; }
+  vec3 px = vpos(vUv + vec2(uTexel.x, 0.0)), nx = vpos(vUv - vec2(uTexel.x, 0.0));
+  vec3 py = vpos(vUv + vec2(0.0, uTexel.y)), ny = vpos(vUv - vec2(0.0, uTexel.y));
+  vec3 dx = abs(px.z - p.z) < abs(nx.z - p.z) ? px - p : p - nx;
+  vec3 dy = abs(py.z - p.z) < abs(ny.z - p.z) ? py - p : p - ny;
+  vec3 n = normalize(cross(dx, dy));
+  if (dot(n, -p) < 0.0) n = -n;
+  vec3 tn = normalize(abs(n.x) > 0.9 ? cross(n, vec3(0.0, 1.0, 0.0)) : cross(n, vec3(1.0, 0.0, 0.0)));
+  vec3 bn = cross(n, tn);
+  float ang = ign(gl_FragCoord.xy) * 6.2831853;
+  float occ = 0.0;
+  for (int i = 0; i < SSAO_N; i++) {
+    float fi = (float(i) + 0.5) / float(SSAO_N);
+    float a = ang + float(i) * 2.399963;
+    float zz = fi; float rr = sqrt(1.0 - zz * zz);
+    vec3 d = tn * (cos(a) * rr) + bn * (sin(a) * rr) + n * zz;
+    vec3 sp = p + d * (uRadius * mix(0.2, 1.0, fi * fi));
+    vec4 pp = uProj * vec4(sp, 1.0);
+    vec2 suv = pp.xy / pp.w * 0.5 + 0.5;
+    float sd = vpos(suv).z;
+    float range = smoothstep(0.0, 1.0, uRadius / max(abs(p.z - sd), 1e-3));
+    occ += (sd >= sp.z + 0.03 ? 1.0 : 0.0) * range;
+  }
+  float ao = 1.0 - occ / float(SSAO_N);
+  o = vec4(vec3(pow(clamp(ao, 0.0, 1.0), 1.6)), 1.0);
+}
+"""
+
+    /** Depth-aware blur of the raw occlusion. */
+    const val AO_BLUR_FS = """#version 300 es
+precision highp float;
+precision highp sampler2D;
+in vec2 vUv;
+uniform sampler2D uAoIn, uDepth;
+uniform vec2 uTexel;
+out vec4 o;
+void main() {
+  float d0 = texture(uDepth, vUv).r;
+  float sum = 0.0, ws = 0.0;
+  for (int i = -2; i <= 2; i++) for (int j = -2; j <= 2; j++) {
+    vec2 uv = vUv + vec2(float(i), float(j)) * uTexel;
+    float w = exp(-abs(texture(uDepth, uv).r - d0) * 4000.0);
+    sum += texture(uAoIn, uv).r * w; ws += w;
+  }
+  o = vec4(vec3(sum / max(ws, 1e-4)), 1.0);
+}
+"""
+
+    /** Bloom downsample (first level also thresholds with a soft knee and a Karis average). */
+    const val BLOOM_DOWN_FS = """#version 300 es
+precision highp float;
+precision highp sampler2D;
+in vec2 vUv;
+uniform sampler2D uSrc;
+uniform vec2 uTexel;
+uniform float uPre, uThreshold;
+out vec4 o;
+vec3 s(vec2 uv) { return textureLod(uSrc, uv, 0.0).rgb; }
+void main() {
+  vec2 t = uTexel;
+  vec3 a = s(vUv + t * vec2(-1.0, -1.0)), b = s(vUv + t * vec2(1.0, -1.0));
+  vec3 c = s(vUv + t * vec2(-1.0, 1.0)), d = s(vUv + t * vec2(1.0, 1.0));
+  vec3 r;
+  if (uPre > 0.5) {
+    float wa = 1.0 / (1.0 + dot(a, vec3(0.3, 0.55, 0.15))), wb = 1.0 / (1.0 + dot(b, vec3(0.3, 0.55, 0.15)));
+    float wc = 1.0 / (1.0 + dot(c, vec3(0.3, 0.55, 0.15))), wd = 1.0 / (1.0 + dot(d, vec3(0.3, 0.55, 0.15)));
+    r = (a * wa + b * wb + c * wc + d * wd) / (wa + wb + wc + wd);
+    float br = max(r.r, max(r.g, r.b));
+    float knee = uThreshold * 0.5;
+    float soft = clamp(br - uThreshold + knee, 0.0, 2.0 * knee);
+    soft = soft * soft / (4.0 * knee + 1e-4);
+    r *= max(soft, br - uThreshold) / max(br, 1e-4);
+  } else {
+    r = (a + b + c + d + s(vUv) * 4.0) / 8.0;
+  }
+  o = vec4(min(r, vec3(60000.0)), 1.0);
+}
+"""
+
+    /** Bloom upsample: 9-tap tent, added onto the next larger level. */
+    const val BLOOM_UP_FS = """#version 300 es
+precision highp float;
+precision highp sampler2D;
+in vec2 vUv;
+uniform sampler2D uSrc;
+uniform vec2 uTexel;
+out vec4 o;
+vec3 s(vec2 uv) { return textureLod(uSrc, uv, 0.0).rgb; }
+void main() {
+  vec2 t = uTexel;
+  vec3 r = s(vUv) * 4.0
+    + (s(vUv + vec2(t.x, 0.0)) + s(vUv - vec2(t.x, 0.0)) + s(vUv + vec2(0.0, t.y)) + s(vUv - vec2(0.0, t.y))) * 2.0
+    + s(vUv + t) + s(vUv - t) + s(vUv + vec2(t.x, -t.y)) + s(vUv + vec2(-t.x, t.y));
+  o = vec4(r / 16.0, 1.0);
+}
+"""
 }

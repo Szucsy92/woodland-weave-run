@@ -9,6 +9,7 @@ import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.max
+import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -85,6 +86,51 @@ object Geo {
             idx += b.toShort(); idx += c.toShort(); idx += d.toShort()
         }
         return MeshData(pos, uv, idx.toShortArray()).also { it.computeNormals() }
+    }
+
+    /** A cylinder closed with flat caps (for columns and lintels that must have no open ends). */
+    fun cylinderCapped(rTop: Float, rBottom: Float, h: Float, radial: Int): MeshData {
+        val body = cylinder(rTop, rBottom, h, radial, 1)
+        val bv = body.vertexCount
+        val pos = ArrayList<Float>(); val uv = ArrayList<Float>(); val nor = ArrayList<Float>(); val idx = ArrayList<Short>()
+        for (i in 0 until bv) { for (k in 0..2) { pos += body.pos[i * 3 + k]; nor += body.nor[i * 3 + k] }; uv += body.uv[i * 2]; uv += body.uv[i * 2 + 1] }
+        for (s in body.idx) idx += s
+        fun cap(y: Float, r: Float, up: Float) {
+            val c = pos.size / 3
+            pos += 0f; pos += y; pos += 0f; nor += 0f; nor += up; nor += 0f; uv += .5f; uv += .5f
+            for (ix in 0..radial) {
+                val th = ix.toFloat() / radial * 2f * PI.toFloat()
+                pos += r * sin(th); pos += y; pos += r * cos(th); nor += 0f; nor += up; nor += 0f; uv += .5f; uv += .5f
+            }
+            for (ix in 0 until radial) {
+                if (up > 0) { idx += c.toShort(); idx += (c + 2 + ix).toShort(); idx += (c + 1 + ix).toShort() }
+                else { idx += c.toShort(); idx += (c + 1 + ix).toShort(); idx += (c + 2 + ix).toShort() }
+            }
+        }
+        cap(h / 2, rTop, 1f); cap(-h / 2, rBottom, -1f)
+        return MeshData(pos.toFloatArray(), uv.toFloatArray(), idx.toShortArray()).also { it.nor = nor.toFloatArray() }
+    }
+
+    /** A grass blade: a curved, tapering strip ending in a point (unit height, base width ~0.1). */
+    fun blade(): MeshData {
+        val segs = 5
+        val pos = ArrayList<Float>(); val uv = ArrayList<Float>(); val idx = ArrayList<Short>()
+        for (i in 0..segs) {
+            val t = i.toFloat() / segs
+            val w = 0.05f * (1f - t).pow(0.85f)
+            val z = t * t * 0.28f
+            pos += -w; pos += t; pos += z; uv += 0f; uv += t
+            if (i < segs) { pos += w; pos += t; pos += z; uv += 1f; uv += t }
+        }
+        // Vertex layout: pairs for i < segs, then the single tip vertex.
+        for (i in 0 until segs) {
+            val a = i * 2; val b = i * 2 + 1
+            val c = if (i + 1 < segs) (i + 1) * 2 else segs * 2
+            val d = if (i + 1 < segs) (i + 1) * 2 + 1 else segs * 2
+            idx += a.toShort(); idx += b.toShort(); idx += c.toShort()
+            if (i + 1 < segs) { idx += b.toShort(); idx += d.toShort(); idx += c.toShort() }
+        }
+        return MeshData(pos.toFloatArray(), uv.toFloatArray(), idx.toShortArray()).also { it.computeNormals() }
     }
 
     fun icosphere(subdivisions: Int): MeshData {
@@ -330,10 +376,10 @@ object Geo {
 class Mesh(data: MeshData, private val instanceCapacity: Int) {
     private val vao = IntArray(1)
     private val instVbo = IntArray(1)
+    private val vbo = IntArray(2)
     private val indexCount = data.idx.size
 
     init {
-        val vbo = IntArray(2)
         GL.glGenVertexArrays(1, vao, 0)
         GL.glGenBuffers(2, vbo, 0)
         GL.glGenBuffers(1, instVbo, 0)
@@ -363,6 +409,13 @@ class Mesh(data: MeshData, private val instanceCapacity: Int) {
         GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, vbo[1])
         GL.glBufferData(GL.GL_ELEMENT_ARRAY_BUFFER, indexCount * 2, idx, GL.GL_STATIC_DRAW)
         GL.glBindVertexArray(0)
+    }
+
+    /** Frees the GPU buffers (used when a quality tier swaps meshes). */
+    fun release() {
+        GL.glDeleteVertexArrays(1, vao, 0)
+        GL.glDeleteBuffers(2, vbo, 0)
+        GL.glDeleteBuffers(1, instVbo, 0)
     }
 
     fun draw(matrices: FloatBuffer, count: Int) {
