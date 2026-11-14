@@ -410,7 +410,7 @@ private fun SettingsPanel(ui: UiState, a: Actions, updates: UpdateController, on
                     Seg(listOf(GameMode.CLASSIC to "Classic", GameMode.SURVIVE to "Survive", GameMode.FREEROAM to "Freeroam"), s.mode, a.setMode)
                 }
                 SettingRow("Forest") { Seg(listOf(ForestMood.NIGHT to "Night", ForestMood.DAY to "Day", ForestMood.AUTO to "Auto"), s.mood, a.setMood) }
-                SettingRow("Graphics", hint = "Higher tiers add shadows, foliage, light shafts and more. Needs a strong GPU.") { Seg(listOf(Quality.LOW to "Low", Quality.MEDIUM to "Med", Quality.HIGH to "High", Quality.ULTRA to "Ultra"), s.quality, a.setQuality) }
+                SettingRow("Graphics", hint = "Medium: bloom, rounder shapes, shapelier trees. High adds shadows, light shafts, depth of field and more.") { Seg(listOf(Quality.LOW to "Low", Quality.MEDIUM to "Medium", Quality.HIGH to "High"), s.quality, a.setQuality) }
                 SettingRow("Controls") { Seg(listOf(false to "Tilt", true to "Touch"), s.touch, a.setTouch) }
                 SettingRow("Orientation") { Seg(listOf(false to "Landscape", true to "Any"), s.anyOrientation, a.setAnyOrientation) }
                 SettingRow("Audio") { OnOff(s.sound, a.setSound) }
