@@ -59,3 +59,17 @@ Not compiled or run on a device in the environment this was written in: build wi
   appears, so the picture can be judged.
 - The glass rectangle is now published straight from layout, and the card no longer slides in with a translation, so the
   blurred glass stays under the border while the card morphs.
+
+## Going in and out of halos, frost, day and night (from the screen recording)
+- Light sprites now dissolve over their whole radius (up to 18 m for the big forest halos) with a smootherstep curve, so
+  walking into a halo no longer floods the screen with white and leaving it no longer snaps back to dark. All tiers.
+- Every glow that reaches into the ground (forest halos, the fairy-ring glows, orb auras, the lantern and monolith glows)
+  carries its height above the ground and fades out softly towards it: no more flat, cut-off bottoms. All tiers.
+- The elastic fisheye on pickup (and when a power-up ends) no longer pulls in pixels from outside the picture, which
+  produced the horizontal edge smear in the video; it now zooms in towards the middle instead. All tiers.
+- Frost eases in (about 0.4 s) and melts out (about 0.6 s) instead of snapping.
+- Medium and High soften the lamp's near-field falloff (`Features.lampSoft`), so a trunk right next to the lamp no
+  longer burns out to white.
+- Day and night: switching the mood is a full 2.6 s eased crossfade; Auto still follows the clock. The forest halos melt
+  away with the daylight and come back with the night, orb auras and spores dim a little; Medium and High also dim the
+  lamp, lower exposure, bloom and light shafts in daylight.
