@@ -103,6 +103,7 @@ fun ForestApp(engine: GameEngine, gameView: GameView, actions: Actions, updates:
     val ui by engine.ui.collectAsState()
     val density = LocalDensity.current.density
     var settingsOpen by remember { mutableStateOf(false) }
+    var fxDrag by remember { mutableStateOf<FxDrag?>(null) }
     val settingsNow by rememberUpdatedState(settingsOpen)
     val uiNow by rememberUpdatedState(ui)
     val s = ui.settings
@@ -164,10 +165,11 @@ fun ForestApp(engine: GameEngine, gameView: GameView, actions: Actions, updates:
             if (running && ui.pause == PauseState.NONE) PauseButton(onClick = engine::pause)
             val panel = when { settingsOpen -> PanelKind.SETTINGS; menu -> PanelKind.MENU; paused -> PanelKind.PAUSE; else -> null }
             PanelHost(
-                panel, ui, actions, updates,
+                panel, ui, actions, updates, fxDrag, { fxDrag = it },
                 onSettings = { settingsOpen = true }, onCloseSettings = { settingsOpen = false },
                 onResume = engine::resume, onExit = { settingsOpen = false; engine.exitToMenu() },
             )
+            FxReadout(fxDrag)
         }
       }
     }
@@ -181,17 +183,20 @@ private fun Glass(alpha: Float, modifier: Modifier = Modifier, content: @Composa
     val glass = LocalGlass.current
     val density = LocalDensity.current.density
     val shape = RoundedCornerShape(10.dp)
-    var bounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
-    val b = bounds
-    SideEffect {
-        // backdrop-filter: blur(20px) saturate(70%) and the 0 16px 70px shadow are drawn by the GL effect pass.
-        glass?.set(0, if (b == null) null else GlassState.Panel(b.left / density, b.top / density, b.right / density, b.bottom / density, 20f, .7f, true, alpha))
+    val alphaNow by rememberUpdatedState(alpha)
+    val bounds = remember { arrayOfNulls<androidx.compose.ui.geometry.Rect>(1) }
+    // The GL pass draws backdrop-filter blur(20px) saturate(70%) and the shadow. The rectangle is handed over straight
+    // from layout, every frame it changes, so the blurred glass keeps up with the border while the card morphs.
+    fun publish() {
+        val b = bounds[0]
+        glass?.set(0, if (b == null) null else GlassState.Panel(b.left / density, b.top / density, b.right / density, b.bottom / density, 20f, .7f, true, alphaNow))
     }
+    SideEffect { publish() }
     DisposableEffect(Unit) { onDispose { glass?.set(0, null) } }
     Column(
         modifier
-            .graphicsLayer { this.alpha = alpha; translationY = (1f - alpha) * 6f * density }
-            .onGloballyPositioned { bounds = it.boundsInRoot() }
+            .graphicsLayer { this.alpha = alpha }
+            .onGloballyPositioned { bounds[0] = it.boundsInRoot(); publish() }
             .clip(shape)
             .then(if (glass == null) Modifier.background(GlassC) else Modifier)
             .border(1.dp, Edge, shape)
@@ -201,6 +206,31 @@ private fun Glass(alpha: Float, modifier: Modifier = Modifier, content: @Composa
     )
 }
 
+/** A floating readout of the effect being adjusted (the card is nearly invisible meanwhile). */
+@Composable
+private fun FxReadout(drag: FxDrag?) {
+    var last by remember { mutableStateOf(FxDrag("", 1f)) }
+    SideEffect { if (drag != null) last = drag }
+    val a by animateFloatAsState(if (drag != null) 1f else 0f, tween(if (drag != null) 120 else 300), label = "readout")
+    if (a <= 0.01f) return
+    val shape = RoundedCornerShape(10.dp)
+    Box(Modifier.fillMaxSize().safeDrawingPadding().padding(bottom = 28.dp), contentAlignment = Alignment.BottomCenter) {
+        Column(
+            Modifier.graphicsLayer { alpha = a }.clip(shape).background(Color(0xB30E0E14)).border(1.dp, Edge, shape).padding(horizontal = 18.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text("${last.label}   ${(last.value * 100).toInt()}%", color = TextC, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(7.dp))
+            Box(Modifier.width(170.dp).height(3.dp).background(Edge)) {
+                Box(Modifier.fillMaxHeight().fillMaxWidth((last.value / 1.5f).coerceIn(0f, 1f)).background(TextC))
+            }
+        }
+    }
+}
+
+/** What the player is dragging in the graphics fine-tuning right now. */
+private data class FxDrag(val label: String, val value: Float)
+
 private enum class PanelKind { MENU, PAUSE, SETTINGS }
 
 /**
@@ -209,7 +239,7 @@ private enum class PanelKind { MENU, PAUSE, SETTINGS }
  */
 @Composable
 private fun PanelHost(
-    kind: PanelKind?, ui: UiState, a: Actions, updates: UpdateController,
+    kind: PanelKind?, ui: UiState, a: Actions, updates: UpdateController, fxDrag: FxDrag?, onFxDrag: (FxDrag?) -> Unit,
     onSettings: () -> Unit, onCloseSettings: () -> Unit, onResume: () -> Unit, onExit: () -> Unit,
 ) {
     val ease = CubicBezierEasing(.25f, .1f, .25f, 1f)
@@ -221,13 +251,15 @@ private fun PanelHost(
     val target = kind ?: last
     if (kind == null && arrive.value <= 0.002f) return
     val noRipple = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    // While an effect slider is being dragged the card all but disappears, so the picture can be judged.
+    val dim by animateFloatAsState(if (fxDrag != null && kind == PanelKind.SETTINGS) .07f else 1f, tween(if (fxDrag != null) 140 else 380, easing = FastOutSlowInEasing), label = "dim")
     Box(
         Modifier.fillMaxSize().safeDrawingPadding().padding(18.dp)
             .then(if (kind == PanelKind.SETTINGS) Modifier.clickable(indication = null, interactionSource = noRipple, onClick = onCloseSettings) else Modifier),
         contentAlignment = Alignment.Center,
     ) {
         Glass(
-            arrive.value,
+            arrive.value * dim,
             // Taps inside the settings must not reach the "tap outside to close" layer.
             if (target == PanelKind.SETTINGS) Modifier.clickable(indication = null, interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }) {} else Modifier,
         ) {
@@ -244,7 +276,7 @@ private fun PanelHost(
                     when (k) {
                         PanelKind.MENU -> MenuContent(ui, a, updates, onSettings)
                         PanelKind.PAUSE -> PauseContent(onResume, onSettings, onExit)
-                        PanelKind.SETTINGS -> SettingsContent(ui, a, updates, onCloseSettings)
+                        PanelKind.SETTINGS -> SettingsContent(ui, a, updates, onCloseSettings, onFxDrag)
                     }
                 }
             }
@@ -440,7 +472,7 @@ private fun PauseContent(onResume: () -> Unit, onSettings: () -> Unit, onExit: (
 // ---- settings ----------------------------------------------------------------------------------
 
 @Composable
-private fun SettingsContent(ui: UiState, a: Actions, updates: UpdateController, onClose: () -> Unit) {
+private fun SettingsContent(ui: UiState, a: Actions, updates: UpdateController, onClose: () -> Unit, onFxDrag: (FxDrag?) -> Unit) {
     val s = ui.settings
     val inMenu = ui.phase == Phase.MENU
     Column(Modifier.widthIn(max = 320.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -468,7 +500,7 @@ private fun SettingsContent(ui: UiState, a: Actions, updates: UpdateController, 
                     Seg(listOf(Difficulty.EASY to "Easy", Difficulty.NORMAL to "Normal", Difficulty.HARD to "Hard"), s.difficulty, a.setDifficulty)
                 }
                 SettingRow("Forest") { Seg(listOf(ForestMood.NIGHT to "Night", ForestMood.DAY to "Day", ForestMood.AUTO to "Auto"), s.mood, a.setMood) }
-                GraphicsBlock(s, a)
+                GraphicsBlock(s, a, onFxDrag)
                 SettingRow("Controls") { Seg(listOf(false to "Tilt", true to "Touch"), s.touch, a.setTouch) }
                 SettingRow("Orientation") { Seg(listOf(false to "Landscape", true to "Any"), s.anyOrientation, a.setAnyOrientation) }
                 SettingRow("Audio") { OnOff(s.sound, a.setSound) }
@@ -481,7 +513,7 @@ private fun SettingsContent(ui: UiState, a: Actions, updates: UpdateController, 
 
 /** Graphics: three tabs, and an optional "Fine-tune" accordion with one slider per effect the chosen tab has. */
 @Composable
-private fun GraphicsBlock(s: Settings, a: Actions) {
+private fun GraphicsBlock(s: Settings, a: Actions, onDrag: (FxDrag?) -> Unit) {
     var open by remember { mutableStateOf(false) }
     val tier = s.quality
     Column(Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
@@ -503,14 +535,14 @@ private fun GraphicsBlock(s: Settings, a: Actions) {
                 exit = shrinkVertically(tween(260, easing = FastOutSlowInEasing)) + fadeOut(tween(160)),
             ) {
                 Column(Modifier.fillMaxWidth()) {
-                    FxSlider("Bloom", s.fx.bloom) { a.setFx("bloom", it) }
+                    FxSlider("Bloom", s.fx.bloom, onDrag) { a.setFx("bloom", it) }
                     if (tier == Quality.HIGH) {
-                        FxSlider("Filmic look", s.fx.tone) { a.setFx("tone", it) }
-                        FxSlider("Shadows", s.fx.shadows) { a.setFx("shadows", it) }
-                        FxSlider("Occlusion", s.fx.ao) { a.setFx("ao", it) }
-                        FxSlider("Light shafts", s.fx.shafts) { a.setFx("shafts", it) }
-                        FxSlider("Depth of field", s.fx.dof) { a.setFx("dof", it) }
-                        FxSlider("Motion blur", s.fx.motion) { a.setFx("motion", it) }
+                        FxSlider("Filmic look", s.fx.tone, onDrag) { a.setFx("tone", it) }
+                        FxSlider("Shadows", s.fx.shadows, onDrag) { a.setFx("shadows", it) }
+                        FxSlider("Occlusion", s.fx.ao, onDrag) { a.setFx("ao", it) }
+                        FxSlider("Light shafts", s.fx.shafts, onDrag) { a.setFx("shafts", it) }
+                        FxSlider("Depth of field", s.fx.dof, onDrag) { a.setFx("dof", it) }
+                        FxSlider("Motion blur", s.fx.motion, onDrag) { a.setFx("motion", it) }
                     }
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
                         Text(
@@ -541,13 +573,14 @@ private fun <T> Tabs(items: List<Pair<T, String>>, selected: T, onPick: (T) -> U
 }
 
 @Composable
-private fun FxSlider(label: String, value: Float, onChange: (Float) -> Unit) {
+private fun FxSlider(label: String, value: Float, onDrag: (FxDrag?) -> Unit, onChange: (Float) -> Unit) {
     var drag by remember { mutableStateOf<Float?>(null) }
+    DisposableEffect(Unit) { onDispose { onDrag(null) } }
     val v = drag ?: value
     Row(Modifier.fillMaxWidth().height(34.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = TextC, fontSize = 12.sp, modifier = Modifier.width(92.dp))
         Slider(
-            value = v, onValueChange = { drag = it; onChange(it) }, onValueChangeFinished = { drag = null },
+            value = v, onValueChange = { drag = it; onChange(it); onDrag(FxDrag(label, it)) }, onValueChangeFinished = { drag = null; onDrag(null) },
             valueRange = 0f..1.5f, modifier = Modifier.weight(1f),
             colors = SliderDefaults.colors(thumbColor = TextC, activeTrackColor = TextC, inactiveTrackColor = Edge),
         )
