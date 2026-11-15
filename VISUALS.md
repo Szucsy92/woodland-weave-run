@@ -37,3 +37,13 @@ Where to tune: `gl/Quality.kt` (all numbers), `Geo.trunkLifelike()` / `rootLifel
 `ORB_ALPHA` in `GameRenderer`.
 
 Not compiled or run on a device in the environment this was written in: build with CI and tune on hardware.
+
+## Menu and settings (UI)
+- The menu and pause cards are narrower (content 264 dp). One card hosts the menu, the pause menu and the settings:
+  switching between them glides its size (accordion) while the old content blurs and fades out and the new one blurs in
+  (the blur needs Android 12+; older versions fade only). The glass backdrop blur follows the card as it resizes.
+- The three game modes (Classic / Survive / Freeroam) moved from Settings to the bottom of the start screen.
+- Settings -> Graphics: three tabs (Low / Medium / High) with no description text. Medium and High have a collapsible
+  "Fine-tune" accordion: Medium has Bloom; High adds Filmic look, Shadows, Occlusion, Light shafts, Depth of field and
+  Motion blur. Each slider is a multiplier of the designed strength (0 = off, 100% = as designed, up to 150%), applied
+  live; "Reset" restores 100%. They are stored per setting (`FxTuning`) and apply to whichever tier has the effect.
