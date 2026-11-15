@@ -110,7 +110,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private val bGlow = Sprites(256, { glowTex }, true, false)
     private val bGlowFog = Sprites(64, { glowTex }, true, true)
     private val bMist = Sprites(16, { glowTex }, false, true)
-    private val bSpore = Sprites(128, { sporeTex }, true, false)
+    private val bSpore = Sprites(512, { sporeTex }, true, false)
     private val bHole = Sprites(1600, { holeGlowTex }, true, false)
 
     private val bufs = Array(KINDS) {
@@ -677,13 +677,33 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val px = if (taken != null) o.p.x + (cam.ex - o.p.x) * flow * .6 else o.p.x
             val pz = if (taken != null) o.p.z + (cam.ez - o.p.z) * flow * .6 else o.p.z
             val py = if (taken != null) base + (cam.ey - .35 - base) * flow else base + sin(t * 1.3 + i * 2) * .08
-            // A translucent glass-like sphere: alpha blending, no depth write, front faces only.
+            // A faint glass shell keeps the orb spherical while the particle cloud and plasma remain visible.
             GL.glEnable(GL.GL_BLEND); GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA); GL.glDepthMask(false)
             GL.glEnable(GL.GL_CULL_FACE); GL.glCullFace(GL.GL_BACK)
-            material(litProg, col, col, 1.6f, alpha = ORB_ALPHA * (1f - k.toFloat() * .6f), rough = .2f)
+            material(litProg, col, col, 1.0f, alpha = .12f * (1f - k.toFloat() * .65f), rough = .16f)
             place(parent, px, py, pz, 0.0, t * .8, 0.0, size)
             uploadOne(orb, parent)
-            GL.glDisable(GL.GL_CULL_FACE); GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
+            GL.glDisable(GL.GL_CULL_FACE)
+
+            // Three interlaced, animated plasma currents: cyan, electric blue and violet.
+            GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE)
+            val pulse = .94 + sin(t * 4.2 + i) * .06
+            val fade = (1.0 - k).toFloat()
+            material(litProg, Palette.secret, Palette.secret, 1.25f, alpha = .78f * fade, mode = 2, rough = .18f, fogOn = 0f)
+            prim(torusA, parent, 0.0, 0.0, 0.0, .58 + sin(t * 1.1) * .10, t * 1.25, .22, .34 * pulse, .34 * pulse, .34 * pulse)
+            material(litProg, Palette.freezer, Palette.freezer, 1.35f, alpha = .72f * fade, mode = 2, rough = .18f, fogOn = 0f)
+            prim(torusA, parent, 0.0, 0.0, 0.0, 1.42, -t * 1.05, .88 + sin(t * .8 + 1.0) * .12, .29 * pulse, .29 * pulse, .29 * pulse)
+            material(litProg, Palette.lavender, Palette.lavender, 1.1f, alpha = .62f * fade, mode = 2, rough = .18f, fogOn = 0f)
+            prim(torusB, parent, 0.0, 0.0, 0.0, .92, t * .72 + 1.7, 1.28, .48 * pulse, .48 * pulse, .48 * pulse)
+
+            // Bright inner energy nodes, deliberately offset so the core never looks mechanically symmetric.
+            material(litProg, Palette.secret, Palette.secret, 2.0f, alpha = .95f * fade, mode = 2, fogOn = 0f)
+            prim(orb, parent, -.105, .045, .035, 0.0, 0.0, 0.0, .105 * pulse, .105 * pulse, .105 * pulse)
+            material(litProg, Palette.freezer, Palette.freezer, 2.2f, alpha = .92f * fade, mode = 2, fogOn = 0f)
+            prim(orb, parent, .105, -.055, -.025, 0.0, 0.0, 0.0, .078 * pulse, .078 * pulse, .078 * pulse)
+            material(litProg, Palette.lavender, Palette.lavender, 1.8f, alpha = .82f * fade, mode = 2, fogOn = 0f)
+            prim(orb, parent, .025, .13, -.09, 0.0, 0.0, 0.0, .052 * pulse, .052 * pulse, .052 * pulse)
+            GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
         }
         if (s.mode != GameMode.FREEROAM) return
         for (g in e.gates) {
@@ -1030,6 +1050,30 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val pz = if (taken != null) o.p.z + (e.camera.ez - o.p.z) * flow * .6 else o.p.z
             val py = if (taken != null) base + (e.camera.ey - .35 - base) * flow else base + sin(t * 1.3 + i * 2) * .08
             bGlowFog.add(px, py, pz, size, size, col, a * (1.0 - dayLevel * .35), py - groundHeight(px, pz))
+
+            // Fibonacci-distributed motes form a dense, gently breathing spherical particle shell.
+            // The same shell is used on every quality tier; the existing sprite batch keeps it inexpensive.
+            if (k < .99) {
+                val count = if (feat.rank >= 1) 104 else 72
+                val golden = PI * (3.0 - sqrt(5.0))
+                for (n in 0 until count) {
+                    val yy = 1.0 - 2.0 * (n + .5) / count
+                    val rr = sqrt(max(0.0, 1.0 - yy * yy))
+                    val angle = n * golden + t * (.42 + (n % 7) * .018) + i * .7
+                    val wobble = .91 + .075 * sin(t * 3.1 + n * .71)
+                    val radius = .47 * wobble * (1.0 - k * .35)
+                    val sx = cos(angle) * rr * radius
+                    val sz = sin(angle) * rr * radius
+                    val sy = yy * radius
+                    val tint = when (n % 9) {
+                        0, 1, 2 -> Palette.freezer
+                        3, 4 -> Palette.lavender
+                        else -> Palette.secret
+                    }
+                    val dot = .055 + (n % 5) * .009
+                    bSpore.add(px + sx, py + sy, pz + sz, dot, dot, tint, (.56 + .28 * (.5 + .5 * sin(t * 5.0 + n))) * (1.0 - k))
+                }
+            }
         }
         // Low drifting mist ahead (ordinary alpha blending, not additive).
         for (i in 0 until 4) {
