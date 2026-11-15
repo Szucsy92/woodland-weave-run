@@ -94,13 +94,14 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private val effectState = EffectState()
 
     private class Sprites(val capacity: Int, val texture: () -> Int, val additive: Boolean, val fog: Boolean) {
-        val data: FloatBuffer = GlUtil.floatBuffer(capacity * 9)
+        val data: FloatBuffer = GlUtil.floatBuffer(capacity * 10)
         var count = 0
         fun clear() { data.clear(); count = 0 }
-        fun add(x: Double, y: Double, z: Double, sx: Double, sy: Double, c: FloatArray, a: Double) {
+        /** [ground] is how far the sprite's centre is above the ground; > 0 makes it fade out softly below ground level. */
+        fun add(x: Double, y: Double, z: Double, sx: Double, sy: Double, c: FloatArray, a: Double, ground: Double = 0.0) {
             if (count >= capacity || a <= 0.002) return
             data.put(x.toFloat()).put(y.toFloat()).put(z.toFloat()).put(sx.toFloat()).put(sy.toFloat())
-                .put(c[0]).put(c[1]).put(c[2]).put(a.toFloat().coerceIn(0f, 1f))
+                .put(c[0]).put(c[1]).put(c[2]).put(a.toFloat().coerceIn(0f, 1f)).put(ground.toFloat())
             count++
         }
     }
@@ -131,6 +132,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var encode = 1f
     private var camFwdX = 0f; private var camFwdY = 0f; private var camFwdZ = -1f
     private var dayLevel = -1.0
+    private var dayGoal = 0.0; private var dayFrom = 0.0; private var dayT = 1.0
+    private var lampDay = 1f
     private var wormBase = FloatArray(0); private var remBase = FloatArray(0); private var remSeed = -1
 
     // ---- props (trees and obstacles) ----
@@ -190,10 +193,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         GL.glGenVertexArrays(1, sv, 0); GL.glGenBuffers(1, sb, 0)
         spriteVao = sv[0]; spriteVbo = sb[0]
         GL.glBindVertexArray(spriteVao); GL.glBindBuffer(GL.GL_ARRAY_BUFFER, spriteVbo)
-        GL.glBufferData(GL.GL_ARRAY_BUFFER, 1600 * 36, null, GL.GL_STREAM_DRAW)
-        GL.glEnableVertexAttribArray(0); GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, false, 36, 0); GL.glVertexAttribDivisor(0, 1)
-        GL.glEnableVertexAttribArray(1); GL.glVertexAttribPointer(1, 2, GL.GL_FLOAT, false, 36, 12); GL.glVertexAttribDivisor(1, 1)
-        GL.glEnableVertexAttribArray(2); GL.glVertexAttribPointer(2, 4, GL.GL_FLOAT, false, 36, 20); GL.glVertexAttribDivisor(2, 1)
+        GL.glBufferData(GL.GL_ARRAY_BUFFER, 1600 * 40, null, GL.GL_STREAM_DRAW)
+        GL.glEnableVertexAttribArray(0); GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, false, 40, 0); GL.glVertexAttribDivisor(0, 1)
+        GL.glEnableVertexAttribArray(1); GL.glVertexAttribPointer(1, 2, GL.GL_FLOAT, false, 40, 12); GL.glVertexAttribDivisor(1, 1)
+        GL.glEnableVertexAttribArray(2); GL.glVertexAttribPointer(2, 4, GL.GL_FLOAT, false, 40, 20); GL.glVertexAttribDivisor(2, 1)
+        GL.glEnableVertexAttribArray(3); GL.glVertexAttribPointer(3, 1, GL.GL_FLOAT, false, 40, 36); GL.glVertexAttribDivisor(3, 1)
         GL.glBindVertexArray(0)
 
         post.create()
@@ -336,8 +340,20 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         // Day cycle: fog, moon light and hemisphere drift towards day colours, and towards blood near the pursuer.
         val hours = Calendar.getInstance().let { it.get(Calendar.HOUR_OF_DAY) + it.get(Calendar.MINUTE) / 60.0 }
         val target = daylightFor(e.settings.mood, hours)
-        dayLevel = if (dayLevel < 0) target else dayLevel + (target - dayLevel) * min(1.0, dt * 1.5)
+        if (dayLevel < 0) { dayLevel = target; dayGoal = target; dayFrom = target; dayT = 1.0 }
+        else {
+            // Switching the mood is a full, eased crossfade (2.6 s); the Auto mode's slow drift just follows the clock.
+            if (abs(target - dayGoal) > .06) { dayFrom = dayLevel; dayGoal = target; dayT = 0.0 }
+            else if (dayT >= 1.0) { dayLevel += (target - dayLevel) * min(1.0, dt * 1.5); dayGoal = target }
+            if (dayT < 1.0) {
+                dayT = min(1.0, dayT + dt / 2.6)
+                dayLevel = dayFrom + (dayGoal - dayFrom) * (dayT * dayT * dayT * (dayT * (dayT * 6 - 15) + 10))
+            }
+        }
         val k = dayLevel.toFloat()
+        // Medium and High also tune the look to the time of day: dimmer lamp, exposure, bloom and shafts in daylight.
+        lampDay = if (feat.rank >= 1) 1f - .7f * k else 1f
+        pp.exposureScale = 1f - .2f * k; pp.bloomScale = 1f - .3f * k; pp.shaftScale = 1f - .4f * k
         red = e.redMix.toFloat(); lights = 1f - e.dieRef.toFloat()
         fog = Palette.mix(Palette.mix(Palette.fog, Palette.dayFog, k), Palette.blood, red * .75f)
         sky = Palette.mix(Palette.mix(Palette.moon, Palette.dayMoon, k), Palette.pursuer, red * .8f)
@@ -411,7 +427,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val ml = sqrt(24f * 24f + 20f * 20f)
             u3(p, "uMoonDir", 0f, 24f / ml, -20f / ml)
             u3(p, "uMoon", moonCol[0] * moonI, moonCol[1] * moonI, moonCol[2] * moonI)
-            u3(p, "uLampPos", e.lampX.toFloat(), e.lampY.toFloat(), e.lampZ.toFloat()); u3(p, "uLampCol", Palette.lamp); u1(p, "uLampI", e.lampIntensity.toFloat())
+            u3(p, "uLampPos", e.lampX.toFloat(), e.lampY.toFloat(), e.lampZ.toFloat()); u3(p, "uLampCol", Palette.lamp); u1(p, "uLampI", e.lampIntensity.toFloat() * lampDay); u1(p, "uLampSoft", feat.lampSoft)
             u3(p, "uRedPos", (s.x + behindX * 5).toFloat(), (gy + 3.4).toFloat(), (s.z + behindZ * 5).toFloat())
             u3(p, "uRedCol", Palette.pursuer); u1(p, "uRedI", redI)
             u3(p, "uFloodDir", fdx, fdy, fdz)
@@ -974,6 +990,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         // bHole also carries the relics' glow queued earlier in this frame, so it is cleared after drawing.
         val t = s.elapsed
         val ember = surviveStage(s) == SurviveStage.RED
+        val haloDay = 1.0 - dayLevel * .85     // halos melt away as the day comes up and return with the night
         // Distant forest lights: green, purple and lavender glows that stutter out one by one in survive mode.
         val cols = arrayOf(Palette.green, Palette.purple, Palette.lavender, Palette.purple, Palette.lavender)
         for (light in forestLightsFor(s.mode, s.x, s.z)) {
@@ -985,7 +1002,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 val size = (if (high) 30.0 else if (i == 0) 24.0 else 20.0) * (1 + sin(t * .4 + i) * .08)
                 val px = if (high) lx + (if (i == 3) -3.5 else 3.5) + sin(t * .2 + i) * 2 else lx + (if (i == 0) -5.0 else if (i == 1) 5.0 else 0.0) + sin(t * .16 + i) * 1.5
                 val py = if (high) lg + 13.5 + sin(t * .24 + i) * 1.4 else lg
-                bGlow.add(px, py, lz, size, size, cols[i], (if (high) .14 else .66) * (1 - own) * flick)
+                bGlow.add(px, py, lz, size, size, cols[i], (if (high) .14 else .66) * (1 - own) * flick * haloDay, py - groundHeight(px, lz))
             }
         }
         // Spores.
@@ -998,7 +1015,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val roll = hash(i, 3, 10)
             val col = if (ember) Palette.ember else if (roll < .08) Palette.purple else if (roll < .16) Palette.green else Palette.lemon
             val size = (.14 + hash(i, 4, 9) * .12) * (if (ember) 1.25 else 1.0) * 3.0
-            bSpore.add(mx, groundHeight(mx, mz) + sp.h + sin(t * .5 + seed) * .25, mz, size, size, col, min(1.0, sporeOpacity(dist, tw) * (if (ember) 1.9 else 1.0)))
+            bSpore.add(mx, groundHeight(mx, mz) + sp.h + sin(t * .5 + seed) * .25, mz, size, size, col, min(1.0, sporeOpacity(dist, tw) * (if (ember) 1.9 else 1.0)) * (1.0 - dayLevel * .5))
         }
         // Orb auras.
         for ((i, o) in e.orbs.withIndex()) {
@@ -1012,7 +1029,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val px = if (taken != null) o.p.x + (e.camera.ex - o.p.x) * flow * .6 else o.p.x
             val pz = if (taken != null) o.p.z + (e.camera.ez - o.p.z) * flow * .6 else o.p.z
             val py = if (taken != null) base + (e.camera.ey - .35 - base) * flow else base + sin(t * 1.3 + i * 2) * .08
-            bGlowFog.add(px, py, pz, size, size, col, a)
+            bGlowFog.add(px, py, pz, size, size, col, a * (1.0 - dayLevel * .35), py - groundHeight(px, pz))
         }
         // Low drifting mist ahead (ordinary alpha blending, not additive).
         for (i in 0 until 4) {
@@ -1027,15 +1044,15 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 val pulse = (if (found) 1.4 else 1.0) * (.8 + sin(t * 1.6 + i) * .2)
                 val gyS = groundHeight(sec.x, sec.z)
                 when (sec.type) {
-                    SecretType.MONOLITH -> bGlowFog.add(sec.x, gyS + 2.4, sec.z, 5.0, 7.0, Palette.secret, min(1.0, .35 * pulse))
+                    SecretType.MONOLITH -> bGlowFog.add(sec.x, gyS + 2.4, sec.z, 5.0, 7.0, Palette.secret, min(1.0, .35 * pulse) * (1.0 - dayLevel * .35), 2.4)
                     SecretType.RING -> for (m in 0 until 11) {
                         val a = m / 11.0 * PI * 2 + t * .25
-                        bGlowFog.add(sec.x + cos(a) * 2.6, gyS + .3, sec.z + sin(a) * 2.6, .9, .9, Palette.green, min(1.0, .7 * pulse))
+                        bGlowFog.add(sec.x + cos(a) * 2.6, gyS + .3, sec.z + sin(a) * 2.6, .9, .9, Palette.green, min(1.0, .7 * pulse) * (1.0 - dayLevel * .35), .3)
                     }
-                    SecretType.LANTERN -> bGlowFog.add(sec.x + .06, gyS + 1.7, sec.z, 3.2, 3.2, Palette.lamp, min(1.0, .75 * pulse * (.85 + sin(t * 9 + i) * .15)))
+                    SecretType.LANTERN -> bGlowFog.add(sec.x + .06, gyS + 1.7, sec.z, 3.2, 3.2, Palette.lamp, min(1.0, .75 * pulse * (.85 + sin(t * 9 + i) * .15)) * (1.0 - dayLevel * .35), 1.7)
                 }
             }
-            for (g in e.gates) bGlow.add(g.x, groundHeight(g.x, g.z) + 3, g.z, 16.0, 16.0, Palette.ember, .32)
+            for (g in e.gates) bGlow.add(g.x, groundHeight(g.x, g.z) + 3, g.z, 16.0, 16.0, Palette.ember, .32 * haloDay, 3.0)
             var hi = 0
             for (h in holesAround(s.x, s.z, s.universe)) {
                 if (hypot(h.x - s.x, h.z - s.z) >= HOLE_SEE) continue
@@ -1070,9 +1087,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             if (b.additive) GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE) else GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
             GL.glDepthMask(false)
             GL.glActiveTexture(GL.GL_TEXTURE0); GL.glBindTexture(GL.GL_TEXTURE_2D, b.texture())
-            b.data.position(0).limit(b.count * 9)
+            b.data.position(0).limit(b.count * 10)
             GL.glBindVertexArray(spriteVao); GL.glBindBuffer(GL.GL_ARRAY_BUFFER, spriteVbo)
-            GL.glBufferSubData(GL.GL_ARRAY_BUFFER, 0, b.count * 36, b.data)
+            GL.glBufferSubData(GL.GL_ARRAY_BUFFER, 0, b.count * 40, b.data)
             GL.glDrawArraysInstanced(GL.GL_TRIANGLE_STRIP, 0, 4, b.count)
             GL.glBindVertexArray(0)
             b.data.limit(b.data.capacity())

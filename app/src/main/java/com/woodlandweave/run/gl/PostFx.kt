@@ -24,6 +24,8 @@ class PostParams {
     var motion = 0f
     var tune = FxTuning()
     var bloomThreshold = 0.3f
+    /** Day/night adjustments, 1 = night. */
+    var exposureScale = 1f; var bloomScale = 1f; var shaftScale = 1f
 }
 
 /**
@@ -383,8 +385,8 @@ class PostFx {
         GL.glUniform4fv(loc("uGlassParam"), 2, glassParam, 0)
         if (full) {
             GL.glUniform1f(loc("uTone"), if (f.tonemap) t.tone.coerceIn(0f, 1f) else 0f)
-            GL.glUniform1f(loc("uExposure"), f.exposure)
-            GL.glUniform1f(loc("uBloomK"), if (bloomTex.isNotEmpty() && t.bloom > 0.01f) f.bloomStrength * t.bloom else 0f)
+            GL.glUniform1f(loc("uExposure"), f.exposure * pp.exposureScale)
+            GL.glUniform1f(loc("uBloomK"), if (bloomTex.isNotEmpty() && t.bloom > 0.01f) f.bloomStrength * t.bloom * pp.bloomScale else 0f)
             GL.glUniform1f(loc("uGrain"), f.grain)
             GL.glUniform1f(loc("uChroma"), f.chroma)
         }
@@ -399,7 +401,7 @@ class PostFx {
             GL.glUniform1f(loc("uAoK"), if (useAo) (f.ssaoStrength * t.ao).coerceAtMost(1f) else 0f)
             GL.glUniform1f(loc("uShaftSteps"), if (f.shafts && f.shadows && pp.shadowTex0 != 0 && t.shafts > 0.01f) f.shaftSteps.toFloat() else 0f)
             GL.glUniform1f(loc("uShaftMax"), f.shaftMax)
-            GL.glUniform1f(loc("uFogDens"), f.fogDensity * t.shafts)
+            GL.glUniform1f(loc("uFogDens"), f.fogDensity * t.shafts * pp.shaftScale)
             GL.glUniform1f(loc("uDofK"), if (f.dof) f.dofStrength * t.dof else 0f)
             GL.glUniform1f(loc("uFocus"), f.focus)
             GL.glUniform1f(loc("uMotion"), if (f.motionBlur) pp.motion else 0f)

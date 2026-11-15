@@ -104,8 +104,9 @@ class EffectsModel {
         if (shock) for (i in 0 until SHOCKWAVE_RINGS) out.reach[i] = shockwaveReach(i, s.waveSpeed).toFloat()
         out.wave = if (shock) min(1.0, s.powerUpTime / .2) * min(1.0, (POWERUP_DURATION - s.powerUpTime) / .3) else 0.0
         val frostTarget = if (s.powerUp == PowerUpType.FREEZER) min(1.0, (POWERUP_DURATION - s.powerUpTime) / .9) else 0.0
-        frost += (frostTarget - frost) * min(1.0, delta * 4)
-        out.frost = if (frost < .005) 0.0 else frost
+        // Frost creeps in and melts away slowly: a full fade both ways, no snap.
+        frost += (frostTarget - frost) * min(1.0, delta * (if (frostTarget > frost) 2.4 else 1.6))
+        out.frost = if (frost < .002) 0.0 else frost
 
         // Survive atmosphere: the red onset hits with a short violent tear.
         if (surviveOn(s) && s.surviveTime >= 0) {

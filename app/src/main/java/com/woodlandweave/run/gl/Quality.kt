@@ -37,6 +37,9 @@ class Features(val quality: Quality) {
     val rockDetail = 3
     val lifelikeTrees = r >= 1
 
+    /** Softening of the lamp's near-field falloff (0 keeps the web look exactly). */
+    val lampSoft = if (r >= 2) 2.0f else if (r >= 1) 1.5f else 0f
+
     // Image
     val bloom = r >= 1
     val bloomLevels = if (r >= 2) 5 else 4

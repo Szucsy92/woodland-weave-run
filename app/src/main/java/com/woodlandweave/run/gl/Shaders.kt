@@ -77,6 +77,7 @@ precision highp sampler2DShadow;
 //DEFINES
 in vec3 vN; in vec3 vW; in vec2 vUv; in float vLY;
 uniform vec3 uColor, uEmissive, uFog, uCam, uFwd, uSky, uGroundC, uMoonDir, uMoon, uLampPos, uLampCol, uRedPos, uRedCol, uFloodDir, uFloodCol;
+uniform float uLampSoft;
 uniform float uAlpha, uMaps, uFogNear, uFogFar, uHemi, uLampI, uRedI, uNormalScale, uRough, uLights, uRed, uFogOn, uEncode, uMetal;
 uniform int uMode;
 uniform vec2 uUvScale;
@@ -235,7 +236,8 @@ void main() {
 #endif
   col += light(n, v, normalize(uMoonDir), uMoon * sh, albedo, alpha);
   vec3 tl = uLampPos - vW; float d = length(tl);
-  vec3 lampIrr = uLampCol * (uLampI / max(pow(d, 1.6), 0.01)) * falloff(d, 27.0);
+  // Medium and High soften the very near field, so a trunk next to the lamp no longer burns out to white.
+  vec3 lampIrr = uLampCol * (uLampI / max(pow(d, 1.6) + uLampSoft, 0.01)) * falloff(d, 27.0);
   col += light(n, v, tl / max(d, 1e-3), lampIrr, albedo, alpha);
 #ifdef Q_ENV
   {
@@ -277,24 +279,31 @@ void main() {}
 layout(location=0) in vec3 aPos;
 layout(location=1) in vec2 aSize;
 layout(location=2) in vec4 aCol;
+layout(location=3) in float aGround;   // height of the centre above the ground (0 = no ground fade)
 uniform mat4 uVP; uniform vec3 uRight, uUp, uCam, uFwd;
-out vec2 vUv; out vec4 vCol; out float vDepth; out float vFade;
+out vec2 vUv; out vec4 vCol; out float vDepth; out float vFade; out float vWY; out float vGY; out float vSoft;
 void main() {
   vec2 c = vec2(float(gl_VertexID & 1) * 2.0 - 1.0, float(gl_VertexID >> 1) * 2.0 - 1.0);
   vec3 w = aPos + uRight * c.x * aSize.x * 0.5 + uUp * c.y * aSize.y * 0.5;
   vUv = vec2(c.x * 0.5 + 0.5, 0.5 - c.y * 0.5); vCol = aCol;
   // three.js sprites fog on the view depth of their centre.
   vDepth = dot(aPos - uCam, uFwd);
-  // Passing through a light must not flash or pop: a sprite dissolves smoothly as the camera enters it.
-  float nearR = clamp(aSize.x * 0.45, 0.3, 6.0);
-  vFade = smoothstep(nearR * 0.22, nearR, distance(uCam, aPos));
+  // Passing through a light must not flash or pop: a sprite dissolves over its whole radius as the camera enters it
+  // (and returns the same way on the far side).
+  float nearR = clamp(aSize.x * 0.5, 0.3, 18.0);
+  float nt = clamp((distance(uCam, aPos) - nearR * 0.12) / (nearR * 0.88), 0.0, 1.0);
+  vFade = nt * nt * nt * (nt * (nt * 6.0 - 15.0) + 10.0);
+  // Glows that reach into the ground fade out softly towards it instead of ending in a hard edge.
+  vWY = w.y;
+  vGY = aGround > 0.0 ? aPos.y - aGround : -1000.0;
+  vSoft = clamp(aSize.x * 0.08, 0.25, 2.5);
   gl_Position = uVP * vec4(w, 1.0);
 }
 """
 
     val SPRITE_FS = """#version 300 es
 precision highp float;
-in vec2 vUv; in vec4 vCol; in float vDepth; in float vFade;
+in vec2 vUv; in vec4 vCol; in float vDepth; in float vFade; in float vWY; in float vGY; in float vSoft;
 uniform sampler2D uTex;
 uniform vec3 uFog;
 uniform float uFogNear, uFogFar, uFogOn, uEncode;
@@ -311,7 +320,7 @@ vec3 linearToSrgb(vec3 c) {
   );
 }
 void main() {
-  float a = texture(uTex, vUv).a * vCol.a * vFade;
+  float a = texture(uTex, vUv).a * vCol.a * vFade * smoothstep(0.0, vSoft, vWY - vGY);
   vec3 col = vCol.rgb;
   // SpriteMaterial fogs by default; the glow clusters, spores and black-hole halos switch it off.
   col = mix(col, uFog, smoothstep(uFogNear, uFogFar, vDepth) * uFogOn);
@@ -510,7 +519,10 @@ void main() {
     q = src; d = vec2(q.x / asp, q.y);
     hring = exp(-pow((rh - rs * 1.15) / (rs * 0.3), 2.0)) * hole.w;
   }
-  vec2 base = 0.5 + d * (1.0 + lens * dot(q, q) * 1.6);
+  // The elastic fisheye zooms in towards the middle instead of pulling in what lies outside the picture (no edge smear).
+  float lensEdge = (asp * 0.5) * (asp * 0.5) + 0.25;
+  float lensK = (1.0 + lens * dot(q, q) * 1.6) / max(1.0, 1.0 + lens * lensEdge * 1.6);
+  vec2 base = 0.5 + d * lensK;
   float w = 0.0;
   for (int i = 0; i < RINGS; i++) {
     float a = waveT - float(i) * GAP;
