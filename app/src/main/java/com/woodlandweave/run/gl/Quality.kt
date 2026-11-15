@@ -12,6 +12,20 @@ enum class Quality(val label: String) {
     LOW("Low"), MEDIUM("Medium"), HIGH("High");
 }
 
+/**
+ * The player's fine-tuning of each effect, as a multiplier of the tier's designed strength (1 = as designed, 0 = off).
+ * An effect the tier does not have is unaffected.
+ */
+data class FxTuning(
+    val bloom: Float = 1f,
+    val tone: Float = 1f,
+    val shadows: Float = 1f,
+    val ao: Float = 1f,
+    val shafts: Float = 1f,
+    val dof: Float = 1f,
+    val motion: Float = 1f,
+)
+
 /** Everything a tier switches on. All tunables live here. */
 class Features(val quality: Quality) {
     private val r = quality.ordinal

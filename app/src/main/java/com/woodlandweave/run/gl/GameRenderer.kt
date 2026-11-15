@@ -81,6 +81,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var feat = Features(Quality.LOW)
     private var appliedQuality: Quality? = null
     private var qualityCap = Quality.HIGH
+    private var shadowActive = false
     private var shadow: ShadowMap? = null
     private var shadowProg = 0
     private val pp = PostParams()
@@ -314,6 +315,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val e = engine; val s = e.sim; val cam = e.camera
         if (builtVersion != e.worldVersion) { rebuildProps(); builtVersion = e.worldVersion }
         animT += dt
+        val tune = e.settings.fx
+        pp.tune = tune
+        shadowActive = shadow != null && feat.shadows && tune.shadows > 0.01f
         if (post.depthFailed && qualityCap.ordinal > Quality.MEDIUM.ordinal) qualityCap = Quality.MEDIUM
         val wantQ = Quality.values()[minOf(e.settings.quality.ordinal, qualityCap.ordinal)]
         if (appliedQuality != wantQ) applyQuality(wantQ)
@@ -358,7 +362,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         lastCamX = cam.ex; lastCamZ = cam.ez
         // Motion blur grows smoothly with the runner's speed (nothing when walking, a light radial smear at a sprint).
         val sp01 = ((camSpeed - 3.0) / 15.0).coerceIn(0.0, 1.0)
-        pp.motion = (sp01 * sp01 * feat.motionBlurMax).toFloat()
+        pp.motion = (sp01 * sp01 * feat.motionBlurMax * pp.tune.motion).toFloat()
 
         post.bind()
         val clear = if (post.linear) fog else Palette.encodeSrgb(fog)
@@ -381,14 +385,14 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             u3(p, "uFwd", camFwdX, camFwdY, camFwdZ); u1(p, "uEncode", encode)
             u1(p, "uTime", animT.toFloat())
             val sm = shadow
-            if (sm != null && feat.shadows) {
+            if (sm != null && shadowActive) {
                 GL.glActiveTexture(GL.GL_TEXTURE5); GL.glBindTexture(GL.GL_TEXTURE_2D, sm.tex[0])
                 GL.glActiveTexture(GL.GL_TEXTURE0)
                 GL.glUniform1i(loc(p, "uShadow0"), 5)
                 GL.glUniformMatrix4fv(loc(p, "uLightVP0"), 1, false, sm.vp[0], 0)
                 GL.glUniform1f(loc(p, "uShadowTexel"), 1f / sm.res)
-                u1(p, "uShadowOn", 1f)
-            }
+                u1(p, "uShadowOn", 1f); u1(p, "uShadowK", min(1f, pp.tune.shadows))
+            } else u1(p, "uShadowOn", 0f)
             u3(p, "uFog", fog); u1(p, "uFogNear", fogNear); u1(p, "uFogFar", FOG_END.toFloat())
             u3(p, "uSky", sky); u3(p, "uGroundC", groundC); u1(p, "uHemi", hemi)
             val ml = sqrt(24f * 24f + 20f * 20f)
@@ -416,7 +420,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         // Forest.
         fillInstances(s, cam)
         val smap = shadow
-        if (smap != null && feat.shadows) {
+        if (smap != null && shadowActive) {
             shadowPass(smap, cam)
             post.bind()
             GL.glEnable(GL.GL_DEPTH_TEST)

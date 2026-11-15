@@ -83,7 +83,7 @@ uniform vec2 uUvScale;
 uniform sampler2D uTex, uNorm, uRoughTex;
 uniform float uTime;
 #ifdef Q_SHADOW
-uniform float uShadowOn;
+uniform float uShadowOn, uShadowK;
 uniform mat4 uLightVP0;
 uniform sampler2DShadow uShadow0;
 uniform float uShadowTexel;
@@ -92,7 +92,7 @@ float pcf3(sampler2DShadow s, vec3 c, float tx) {
   for (int i = -1; i <= 1; i++) for (int j = -1; j <= 1; j++) sum += texture(s, vec3(c.xy + vec2(float(i), float(j)) * tx, c.z));
   return sum / 9.0;
 }
-float shadowAt(vec3 wp, vec3 n) {
+float shadowRaw(vec3 wp, vec3 n) {
   if (uShadowOn < 0.5) return 1.0;
   vec3 p = wp + n * 0.06;
   vec4 l0 = uLightVP0 * vec4(p, 1.0);
@@ -101,6 +101,7 @@ float shadowAt(vec3 wp, vec3 n) {
     return pcf3(uShadow0, vec3(s0.xy, s0.z - 0.0008), uShadowTexel);
   return 1.0;
 }
+float shadowAt(vec3 wp, vec3 n) { return mix(1.0, shadowRaw(wp, n), uShadowK); }
 #endif
 out vec4 o;
 const float PI = 3.14159265;
@@ -570,7 +571,7 @@ void main() {
   }
   c += vec3(0.82, 0.64, 1.0) * flash;
 #ifdef Q_FULL
-  if (uTone > 0.5) c = acesFit(c * uExposure);
+  c = mix(c, acesFit(c * uExposure), uTone);
 #endif
   // OutputPass: linear -> sRGB. From here on the picture is gamma encoded, like the browser's compositor.
   vec3 outS = linearToSrgb(clamp(c, 0.0, 1.0));
@@ -595,7 +596,7 @@ void main() {
       if (inside > 0.0) {
         vec3 bl = backdrop(vUv, pr.x) * vig;
 #ifdef Q_FULL
-        if (uTone > 0.5) bl = acesFit(bl * uExposure);
+        bl = mix(bl, acesFit(bl * uExposure), uTone);
 #endif
         vec3 bs = linearToSrgb(clamp(bl, 0.0, 1.0));
         float lum = dot(bs, vec3(0.213, 0.715, 0.072));

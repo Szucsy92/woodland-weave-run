@@ -22,6 +22,7 @@ class PostParams {
     var shadowTex0 = 0
     val lightVp0 = FloatArray(16)
     var motion = 0f
+    var tune = FxTuning()
 }
 
 /**
@@ -328,8 +329,9 @@ class PostFx {
         if (blitChecks > 0) { blitChecks--; if (depthTex != 0 && GL.glGetError() != GL.GL_NO_ERROR) depthFailed = true }
         GL.glDisable(GL.GL_DEPTH_TEST); GL.glDisable(GL.GL_BLEND)
 
-        if (bloomDownProg != 0 && bloomTex.isNotEmpty()) bloomPass()
-        val useAo = ssaoProg != 0 && aoTex[0] != 0 && depthTex != 0
+        val t = pp.tune
+        if (bloomDownProg != 0 && bloomTex.isNotEmpty() && t.bloom > 0.01f) bloomPass()
+        val useAo = ssaoProg != 0 && aoTex[0] != 0 && depthTex != 0 && t.ao > 0.01f
         if (useAo) ssaoPass(pp)
 
         GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
@@ -379,9 +381,9 @@ class PostFx {
         GL.glUniform4fv(loc("uGlassRect"), 2, glassRect, 0)
         GL.glUniform4fv(loc("uGlassParam"), 2, glassParam, 0)
         if (full) {
-            GL.glUniform1f(loc("uTone"), if (f.tonemap) 1f else 0f)
+            GL.glUniform1f(loc("uTone"), if (f.tonemap) t.tone.coerceIn(0f, 1f) else 0f)
             GL.glUniform1f(loc("uExposure"), f.exposure)
-            GL.glUniform1f(loc("uBloomK"), if (bloomTex.isNotEmpty()) f.bloomStrength else 0f)
+            GL.glUniform1f(loc("uBloomK"), if (bloomTex.isNotEmpty() && t.bloom > 0.01f) f.bloomStrength * t.bloom else 0f)
             GL.glUniform1f(loc("uGrain"), f.grain)
             GL.glUniform1f(loc("uChroma"), f.chroma)
         }
@@ -393,11 +395,11 @@ class PostFx {
             GL.glUniform3f(loc("uCamPos"), pp.camX, pp.camY, pp.camZ)
             GL.glUniform3f(loc("uMoonDir"), pp.moonDir[0], pp.moonDir[1], pp.moonDir[2])
             GL.glUniform3f(loc("uMoonCol"), pp.moonCol[0], pp.moonCol[1], pp.moonCol[2])
-            GL.glUniform1f(loc("uAoK"), if (useAo) f.ssaoStrength else 0f)
-            GL.glUniform1f(loc("uShaftSteps"), if (f.shafts && f.shadows && pp.shadowTex0 != 0) f.shaftSteps.toFloat() else 0f)
+            GL.glUniform1f(loc("uAoK"), if (useAo) (f.ssaoStrength * t.ao).coerceAtMost(1f) else 0f)
+            GL.glUniform1f(loc("uShaftSteps"), if (f.shafts && f.shadows && pp.shadowTex0 != 0 && t.shafts > 0.01f) f.shaftSteps.toFloat() else 0f)
             GL.glUniform1f(loc("uShaftMax"), f.shaftMax)
-            GL.glUniform1f(loc("uFogDens"), f.fogDensity)
-            GL.glUniform1f(loc("uDofK"), if (f.dof) f.dofStrength else 0f)
+            GL.glUniform1f(loc("uFogDens"), f.fogDensity * t.shafts)
+            GL.glUniform1f(loc("uDofK"), if (f.dof) f.dofStrength * t.dof else 0f)
             GL.glUniform1f(loc("uFocus"), f.focus)
             GL.glUniform1f(loc("uMotion"), if (f.motionBlur) pp.motion else 0f)
         }
