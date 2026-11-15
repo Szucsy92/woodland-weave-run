@@ -4,11 +4,13 @@ import android.content.Context
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.woodlandweave.run.sim.Difficulty
+import com.woodlandweave.run.gl.FxTuning
 import com.woodlandweave.run.gl.Quality
 import com.woodlandweave.run.sim.ForestMood
 import com.woodlandweave.run.sim.GameMode
@@ -25,6 +27,7 @@ data class Settings(
     val mode: GameMode = GameMode.CLASSIC,
     val mood: ForestMood = ForestMood.NIGHT,
     val quality: Quality = Quality.LOW,
+    val fx: FxTuning = FxTuning(),
     val best: Int = 0,
     val last: Int = 0,
     val secrets: Set<String> = emptySet(),
@@ -48,6 +51,8 @@ class SettingsRepo(private val context: Context) {
         val secrets = stringSetPreferencesKey("secrets")
     }
 
+    private fun fxKey(name: String) = floatPreferencesKey("fx_$name")
+
     private inline fun <reified E : Enum<E>> Preferences.enumOf(
         key: Preferences.Key<String>, default: E,
     ): E = this[key]?.let { name -> enumValues<E>().firstOrNull { it.name == name } } ?: default
@@ -62,6 +67,10 @@ class SettingsRepo(private val context: Context) {
             mode = p.enumOf(K.mode, GameMode.CLASSIC),
             mood = p.enumOf(K.mood, ForestMood.NIGHT),
             quality = p.enumOf(K.quality, Quality.LOW),
+            fx = FxTuning(
+                bloom = p[fxKey("bloom")] ?: 1f, tone = p[fxKey("tone")] ?: 1f, shadows = p[fxKey("shadows")] ?: 1f,
+                ao = p[fxKey("ao")] ?: 1f, shafts = p[fxKey("shafts")] ?: 1f, dof = p[fxKey("dof")] ?: 1f, motion = p[fxKey("motion")] ?: 1f,
+            ),
             best = p[K.best] ?: 0,
             last = p[K.last] ?: 0,
             secrets = p[K.secrets] ?: emptySet(),
@@ -76,6 +85,7 @@ class SettingsRepo(private val context: Context) {
     suspend fun setMode(v: GameMode) = context.store.edit { it[K.mode] = v.name }
     suspend fun setMood(v: ForestMood) = context.store.edit { it[K.mood] = v.name }
     suspend fun setQuality(v: Quality) = context.store.edit { it[K.quality] = v.name }
+    suspend fun setFx(name: String, v: Float) = context.store.edit { it[fxKey(name)] = v }
     suspend fun setSecrets(v: Set<String>) = context.store.edit { it[K.secrets] = v }
     suspend fun recordScore(score: Int) = context.store.edit {
         it[K.last] = score
