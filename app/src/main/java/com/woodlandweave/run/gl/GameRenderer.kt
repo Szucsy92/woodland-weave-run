@@ -71,6 +71,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var groundVao = 0; private var groundIndexCount = 0
     private var barkTex = 0; private var barkN = 0; private var barkR = 0
     private var floorTex = 0; private var floorN = 0; private var floorR = 0
+    private var glowLow = 0; private var sporeLow = 0; private var glowSmooth = 0; private var sporeSmooth = 0
     private var glowTex = 0; private var sporeTex = 0; private var holeGlowTex = 0; private var ringTex = 0; private var whiteTex = 0
     private var spriteVao = 0; private var spriteVbo = 0
     private val post = PostFx()
@@ -170,8 +171,18 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
 
         barkTex = GlUtil.assetTexture(context, "wet-bark.jpg", srgb = true); barkN = GlUtil.assetTexture(context, "bark-normal.jpg"); barkR = GlUtil.assetTexture(context, "bark-rough.jpg")
         floorTex = GlUtil.assetTexture(context, "wet-ground.jpg", srgb = true); floorN = GlUtil.assetTexture(context, "ground-normal.jpg"); floorR = GlUtil.assetTexture(context, "ground-rough.jpg")
-        glowTex = GlUtil.glowTexture(floatArrayOf(0f, .2f, 1f), intArrayOf(255, 153, 0))
-        sporeTex = GlUtil.glowTexture(floatArrayOf(0f, .16f, .4f, 1f), intArrayOf(255, 235, 66, 0))
+        glowLow = GlUtil.glowTexture(floatArrayOf(0f, .2f, 1f), intArrayOf(255, 153, 0))
+        sporeLow = GlUtil.glowTexture(floatArrayOf(0f, .16f, .4f, 1f), intArrayOf(255, 235, 66, 0))
+        // Medium and High: the same glows with smooth profiles (no visible kink where the gradient changes slope).
+        glowSmooth = GlUtil.smoothGlowTexture { r ->
+            val s = r * r * (3f - 2f * r)
+            .62f * (1f - s).toDouble().pow(.9).toFloat() + .38f * kotlin.math.exp(-(r / .12f) * (r / .12f))
+        }
+        sporeSmooth = GlUtil.smoothGlowTexture { r ->
+            val t = ((r - .7f) / .3f).coerceIn(0f, 1f)
+            kotlin.math.exp(-(r / .38f) * (r / .38f)) * (1f - t * t * (3f - 2f * t))
+        }
+        glowTex = glowLow; sporeTex = sporeLow
         holeGlowTex = GlUtil.glowTexture(floatArrayOf(0f, .35f, 1f), intArrayOf(255, 89, 0))
         ringTex = GlUtil.ringTexture(); whiteTex = GlUtil.whiteTexture()
 
@@ -354,6 +365,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         System.arraycopy(vp, 0, pp.vp, 0, 16); System.arraycopy(proj, 0, pp.proj, 0, 16)
         Matrix.invertM(pp.invVp, 0, vp, 0)
         pp.camX = cam.ex.toFloat(); pp.camY = cam.ey.toFloat(); pp.camZ = cam.ez.toFloat()
+        // Bloom picks up lights, not the day sky: the threshold rises with the brightness of the fog.
+        pp.bloomThreshold = max(feat.bloomThreshold, (.2126f * fog[0] + .7152f * fog[1] + .0722f * fog[2]) * 1.6f + .12f)
         pp.near = .1f; pp.far = 220f; pp.aspect = aspectRatio
         pp.tanHalf = tan(Math.toRadians(FOV / 2.0)).toFloat()
         System.arraycopy(moonDirV, 0, pp.moonDir, 0, 3)
@@ -556,6 +569,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         }
         locs.clear()
         rebuildTierMeshes(feat)
+        glowTex = if (feat.smoothMeshes) glowSmooth else glowLow
+        sporeTex = if (feat.smoothMeshes) sporeSmooth else sporeLow
         appliedQuality = q
         // A tier the device could not reach must not be retried every frame.
         if (feat.quality.ordinal < q.ordinal) qualityCap = feat.quality

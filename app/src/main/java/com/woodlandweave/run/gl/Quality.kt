@@ -40,8 +40,9 @@ class Features(val quality: Quality) {
     // Image
     val bloom = r >= 1
     val bloomLevels = if (r >= 2) 5 else 4
-    val bloomThreshold = 0.9f
-    val bloomStrength = if (r >= 2) 0.28f else 0.24f
+    /** Base threshold in linear light; the renderer raises it on bright (day) scenes so the sky never blooms. */
+    val bloomThreshold = 0.30f
+    val bloomStrength = if (r >= 2) 0.45f else 0.50f
     val tonemap = r >= 2
     val exposure = 0.92f
     val grain = if (r >= 2) 0.012f else 0f

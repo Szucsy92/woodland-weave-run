@@ -278,20 +278,23 @@ layout(location=0) in vec3 aPos;
 layout(location=1) in vec2 aSize;
 layout(location=2) in vec4 aCol;
 uniform mat4 uVP; uniform vec3 uRight, uUp, uCam, uFwd;
-out vec2 vUv; out vec4 vCol; out float vDepth;
+out vec2 vUv; out vec4 vCol; out float vDepth; out float vFade;
 void main() {
   vec2 c = vec2(float(gl_VertexID & 1) * 2.0 - 1.0, float(gl_VertexID >> 1) * 2.0 - 1.0);
   vec3 w = aPos + uRight * c.x * aSize.x * 0.5 + uUp * c.y * aSize.y * 0.5;
   vUv = vec2(c.x * 0.5 + 0.5, 0.5 - c.y * 0.5); vCol = aCol;
   // three.js sprites fog on the view depth of their centre.
   vDepth = dot(aPos - uCam, uFwd);
+  // Passing through a light must not flash or pop: a sprite dissolves smoothly as the camera enters it.
+  float nearR = clamp(aSize.x * 0.45, 0.3, 6.0);
+  vFade = smoothstep(nearR * 0.22, nearR, distance(uCam, aPos));
   gl_Position = uVP * vec4(w, 1.0);
 }
 """
 
     val SPRITE_FS = """#version 300 es
 precision highp float;
-in vec2 vUv; in vec4 vCol; in float vDepth;
+in vec2 vUv; in vec4 vCol; in float vDepth; in float vFade;
 uniform sampler2D uTex;
 uniform vec3 uFog;
 uniform float uFogNear, uFogFar, uFogOn, uEncode;
@@ -308,7 +311,7 @@ vec3 linearToSrgb(vec3 c) {
   );
 }
 void main() {
-  float a = texture(uTex, vUv).a * vCol.a;
+  float a = texture(uTex, vUv).a * vCol.a * vFade;
   vec3 col = vCol.rgb;
   // SpriteMaterial fogs by default; the glow clusters, spores and black-hole halos switch it off.
   col = mix(col, uFog, smoothstep(uFogNear, uFogFar, vDepth) * uFogOn);
@@ -402,6 +405,11 @@ vec3 sampleBlur(vec2 uv) {
 float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
 #ifdef Q_FULL
 vec3 acesFit(vec3 x) { return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
+// Gentle highlight roll-off: bright lights bend towards white instead of clipping into flat blobs.
+vec3 softShoulder(vec3 x) {
+  vec3 over = max(x - 0.7, vec3(0.0));
+  return min(x, vec3(0.7)) + 0.3 * (1.0 - exp(-over / 0.3));
+}
 #endif
 #ifdef Q_DEPTH
 float linZ(float d) { float z = d * 2.0 - 1.0; return 2.0 * uNF.x * uNF.y / ((uNF.y + uNF.x) - z * (uNF.y - uNF.x)); }
@@ -571,7 +579,7 @@ void main() {
   }
   c += vec3(0.82, 0.64, 1.0) * flash;
 #ifdef Q_FULL
-  c = mix(c, acesFit(c * uExposure), uTone);
+  c = mix(softShoulder(c), acesFit(c * uExposure), uTone);
 #endif
   // OutputPass: linear -> sRGB. From here on the picture is gamma encoded, like the browser's compositor.
   vec3 outS = linearToSrgb(clamp(c, 0.0, 1.0));
@@ -596,7 +604,7 @@ void main() {
       if (inside > 0.0) {
         vec3 bl = backdrop(vUv, pr.x) * vig;
 #ifdef Q_FULL
-        bl = mix(bl, acesFit(bl * uExposure), uTone);
+        bl = mix(softShoulder(bl), acesFit(bl * uExposure), uTone);
 #endif
         vec3 bs = linearToSrgb(clamp(bl, 0.0, 1.0));
         float lum = dot(bs, vec3(0.213, 0.715, 0.072));

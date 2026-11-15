@@ -23,6 +23,7 @@ class PostParams {
     val lightVp0 = FloatArray(16)
     var motion = 0f
     var tune = FxTuning()
+    var bloomThreshold = 0.3f
 }
 
 /**
@@ -266,12 +267,12 @@ class PostFx {
         GL.glBindTexture(GL.GL_TEXTURE_2D, id)
     }
 
-    private fun bloomPass() {
+    private fun bloomPass(threshold: Float) {
         val n = bloomTex.size
         GL.glDisable(GL.GL_BLEND)
         GL.glUseProgram(bloomDownProg)
         GL.glUniform1i(loc(bloomDownProg, "uSrc"), 0)
-        GL.glUniform1f(loc(bloomDownProg, "uThreshold"), effective.bloomThreshold)
+        GL.glUniform1f(loc(bloomDownProg, "uThreshold"), threshold)
         for (i in 0 until n) {
             GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, bloomFbo[i])
             GL.glViewport(0, 0, bloomW[i], bloomH[i])
@@ -330,7 +331,7 @@ class PostFx {
         GL.glDisable(GL.GL_DEPTH_TEST); GL.glDisable(GL.GL_BLEND)
 
         val t = pp.tune
-        if (bloomDownProg != 0 && bloomTex.isNotEmpty() && t.bloom > 0.01f) bloomPass()
+        if (bloomDownProg != 0 && bloomTex.isNotEmpty() && t.bloom > 0.01f) bloomPass(pp.bloomThreshold)
         val useAo = ssaoProg != 0 && aoTex[0] != 0 && depthTex != 0 && t.ao > 0.01f
         if (useAo) ssaoPass(pp)
 

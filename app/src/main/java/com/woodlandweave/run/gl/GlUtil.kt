@@ -103,6 +103,26 @@ object GlUtil {
         return id
     }
 
+    /**
+     * A radial glow with a smooth, analytic profile (no linear kinks): [profile] maps the radius 0..1 to alpha 0..1.
+     * Used by the Medium and High tiers for softer lights.
+     */
+    fun smoothGlowTexture(profile: (Float) -> Float): Int {
+        val size = 192
+        val px = IntArray(size * size)
+        val c = (size - 1) / 2f
+        for (y in 0 until size) for (x in 0 until size) {
+            val r = kotlin.math.hypot(x - c, y - c) / c
+            val a = if (r >= 1f) 0f else profile(r).coerceIn(0f, 1f)
+            px[y * size + x] = ((a * 255f + 0.5f).toInt() shl 24) or 0xFFFFFF
+        }
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        bmp.setPixels(px, 0, size, 0, 0, size, size)
+        val id = texture(bmp, repeat = false, mipmaps = false)
+        bmp.recycle()
+        return id
+    }
+
     fun whiteTexture(): Int {
         val bmp = Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888)
         bmp.eraseColor(0xFFFFFFFF.toInt())
