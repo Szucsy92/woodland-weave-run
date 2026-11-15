@@ -47,3 +47,15 @@ Not compiled or run on a device in the environment this was written in: build wi
   "Fine-tune" accordion: Medium has Bloom; High adds Filmic look, Shadows, Occlusion, Light shafts, Depth of field and
   Motion blur. Each slider is a multiplier of the designed strength (0 = off, 100% = as designed, up to 150%), applied
   live; "Reset" restores 100%. They are stored per setting (`FxTuning`) and apply to whichever tier has the effect.
+
+## Lights (all tiers) and bloom
+- Light sprites dissolve smoothly as the camera enters them (distance-based, per sprite size), instead of flashing and
+  popping when you pass through. Forest lights, orb auras, secrets, spores and mist all use it.
+- Medium and High: the glow and spore sprites use smooth analytic profiles (no kink where the old gradient changed
+  slope), and highlights roll off softly instead of clipping (High uses the filmic curve).
+- Bloom is now clearly visible: the threshold is low (0.30 in linear light, raised automatically on bright day scenes so
+  the sky never blooms) and the strength is 0.50 (Medium) / 0.45 (High); the Bloom slider scales it from 0 to 150%.
+- While an effect slider is dragged the settings card fades to almost nothing and a small readout (name, percent, bar)
+  appears, so the picture can be judged.
+- The glass rectangle is now published straight from layout, and the card no longer slides in with a translation, so the
+  blurred glass stays under the border while the card morphs.
