@@ -1,7 +1,18 @@
 package com.woodlandweave.run.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterExitState
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.*
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -13,6 +24,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.*
@@ -20,6 +33,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
@@ -79,6 +94,7 @@ class Actions(
     val setMode: (GameMode) -> Unit,
     val setMood: (ForestMood) -> Unit,
     val setQuality: (Quality) -> Unit,
+    val setFx: (String, Float) -> Unit,
     val finish: () -> Unit,
 )
 
@@ -146,9 +162,12 @@ fun ForestApp(engine: GameEngine, gameView: GameView, actions: Actions, updates:
 
             if (running || ui.phase == Phase.FALLING) Hud(ui)
             if (running && ui.pause == PauseState.NONE) PauseButton(onClick = engine::pause)
-            if (menu && !settingsOpen) MenuPanel(ui, updates, onSettings = { settingsOpen = true })
-            if (paused && !settingsOpen) PausePanel(onResume = engine::resume, onSettings = { settingsOpen = true }, onExit = { settingsOpen = false; engine.exitToMenu() })
-            if (settingsOpen) SettingsPanel(ui, actions, updates, onClose = { settingsOpen = false })
+            val panel = when { settingsOpen -> PanelKind.SETTINGS; menu -> PanelKind.MENU; paused -> PanelKind.PAUSE; else -> null }
+            PanelHost(
+                panel, ui, actions, updates,
+                onSettings = { settingsOpen = true }, onCloseSettings = { settingsOpen = false },
+                onResume = engine::resume, onExit = { settingsOpen = false; engine.exitToMenu() },
+            )
         }
       }
     }
@@ -156,26 +175,22 @@ fun ForestApp(engine: GameEngine, gameView: GameView, actions: Actions, updates:
 
 // ---- glass pieces ------------------------------------------------------------------------------
 
+/** The frosted card. [alpha] fades it (and the GL backdrop blur behind it) in and out; its size follows the content. */
 @Composable
-private fun Glass(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+private fun Glass(alpha: Float, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     val glass = LocalGlass.current
     val density = LocalDensity.current.density
     val shape = RoundedCornerShape(10.dp)
-    // .forest-glass { animation: forest-arrive 1.2s ease }: fade in while rising 6px.
-    val arrive = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { arrive.animateTo(1f, tween(1200, easing = CubicBezierEasing(.25f, .1f, .25f, 1f))) }
     var bounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     val b = bounds
-    val a = arrive.value
     SideEffect {
         // backdrop-filter: blur(20px) saturate(70%) and the 0 16px 70px shadow are drawn by the GL effect pass.
-        glass?.set(0, if (b == null) null else GlassState.Panel(b.left / density, b.top / density, b.right / density, b.bottom / density, 20f, .7f, true, a))
+        glass?.set(0, if (b == null) null else GlassState.Panel(b.left / density, b.top / density, b.right / density, b.bottom / density, 20f, .7f, true, alpha))
     }
     DisposableEffect(Unit) { onDispose { glass?.set(0, null) } }
     Column(
         modifier
-            .widthIn(max = 356.dp)
-            .graphicsLayer { alpha = arrive.value; translationY = (1f - arrive.value) * 6f * density }
+            .graphicsLayer { this.alpha = alpha; translationY = (1f - alpha) * 6f * density }
             .onGloballyPositioned { bounds = it.boundsInRoot() }
             .clip(shape)
             .then(if (glass == null) Modifier.background(GlassC) else Modifier)
@@ -184,6 +199,57 @@ private fun Glass(modifier: Modifier = Modifier, content: @Composable ColumnScop
         horizontalAlignment = Alignment.CenterHorizontally,
         content = content,
     )
+}
+
+private enum class PanelKind { MENU, PAUSE, SETTINGS }
+
+/**
+ * One card for the menu, the pause menu and the settings. Switching between them morphs the card (its size glides to
+ * the new content, an accordion), while the old content blurs and fades out and the new one blurs in.
+ */
+@Composable
+private fun PanelHost(
+    kind: PanelKind?, ui: UiState, a: Actions, updates: UpdateController,
+    onSettings: () -> Unit, onCloseSettings: () -> Unit, onResume: () -> Unit, onExit: () -> Unit,
+) {
+    val ease = CubicBezierEasing(.25f, .1f, .25f, 1f)
+    val arrive = remember { Animatable(0f) }
+    LaunchedEffect(kind != null) { arrive.animateTo(if (kind != null) 1f else 0f, tween(if (kind != null) 700 else 260, easing = ease)) }
+    // While the card fades out, keep showing what it last held.
+    var last by remember { mutableStateOf(PanelKind.MENU) }
+    SideEffect { if (kind != null) last = kind }
+    val target = kind ?: last
+    if (kind == null && arrive.value <= 0.002f) return
+    val noRipple = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    Box(
+        Modifier.fillMaxSize().safeDrawingPadding().padding(18.dp)
+            .then(if (kind == PanelKind.SETTINGS) Modifier.clickable(indication = null, interactionSource = noRipple, onClick = onCloseSettings) else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        Glass(
+            arrive.value,
+            // Taps inside the settings must not reach the "tap outside to close" layer.
+            if (target == PanelKind.SETTINGS) Modifier.clickable(indication = null, interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }) {} else Modifier,
+        ) {
+            AnimatedContent(
+                targetState = target,
+                transitionSpec = {
+                    (fadeIn(tween(280, delayMillis = 140)) togetherWith fadeOut(tween(170)))
+                        .using(SizeTransform(clip = false) { _, _ -> tween(420, easing = FastOutSlowInEasing) })
+                },
+                label = "panel",
+            ) { k ->
+                val blurRadius by transition.animateDp(label = "blur", transitionSpec = { tween(320) }) { if (it == EnterExitState.Visible) 0.dp else 14.dp }
+                Box(Modifier.blur(blurRadius, BlurredEdgeTreatment.Unbounded)) {
+                    when (k) {
+                        PanelKind.MENU -> MenuContent(ui, a, updates, onSettings)
+                        PanelKind.PAUSE -> PauseContent(onResume, onSettings, onExit)
+                        PanelKind.SETTINGS -> SettingsContent(ui, a, updates, onCloseSettings)
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -331,22 +397,23 @@ private fun DrawScope.frameGlow(c: Color, d: Float) {
 }
 
 @Composable
-private fun MenuPanel(ui: UiState, updates: UpdateController, onSettings: () -> Unit) {
+private fun MenuContent(ui: UiState, a: Actions, updates: UpdateController, onSettings: () -> Unit) {
     val s = ui.settings
-    Box(Modifier.fillMaxSize().safeDrawingPadding().padding(18.dp), contentAlignment = Alignment.Center) {
-        Glass(Modifier.fillMaxWidth(.95f)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { Title(if (ui.phase == Phase.FALLEN) "tap and run again!" else "tap and run!") }
-                IconBtn("⚙", onSettings)
-            }
-            Spacer(Modifier.height(8.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                Score("Last", s.last, Modifier.weight(1f))
-                Box(Modifier.width(1.dp).height(40.dp).background(Edge))
-                Score("Best", s.best, Modifier.weight(1f))
-            }
-            UpdateBanner(updates)
+    Column(Modifier.widthIn(max = 264.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { Title(if (ui.phase == Phase.FALLEN) "tap and run again!" else "tap and run!") }
+            IconBtn("⚙", onSettings)
         }
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Score("Last", s.last, Modifier.weight(1f))
+            Box(Modifier.width(1.dp).height(40.dp).background(Edge))
+            Score("Best", s.best, Modifier.weight(1f))
+        }
+        UpdateBanner(updates)
+        Spacer(Modifier.height(12.dp))
+        // The three game modes live here, right where a run starts.
+        Seg(listOf(GameMode.CLASSIC to "Classic", GameMode.SURVIVE to "Survive", GameMode.FREEROAM to "Freeroam"), s.mode, a.setMode, fill = true)
     }
 }
 
@@ -362,55 +429,46 @@ private fun Score(label: String, value: Int, modifier: Modifier) {
 }
 
 @Composable
-private fun PausePanel(onResume: () -> Unit, onSettings: () -> Unit, onExit: () -> Unit) {
-    Box(Modifier.fillMaxSize().safeDrawingPadding().padding(18.dp), contentAlignment = Alignment.Center) {
-        Glass(Modifier.fillMaxWidth(.95f)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f).heightIn(min = 44.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onResume).padding(horizontal = 6.dp), contentAlignment = Alignment.CenterStart) { Title("resume") }
-                Box(Modifier.width(1.dp).height(34.dp).background(Edge))
-                Row(Modifier.padding(start = 10.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) { IconBtn("⚙", onSettings); IconBtn("✕", onExit) }
-            }
-        }
+private fun PauseContent(onResume: () -> Unit, onSettings: () -> Unit, onExit: () -> Unit) {
+    Row(Modifier.widthIn(max = 264.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.weight(1f).heightIn(min = 44.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onResume).padding(horizontal = 6.dp), contentAlignment = Alignment.CenterStart) { Title("resume") }
+        Box(Modifier.width(1.dp).height(34.dp).background(Edge))
+        Row(Modifier.padding(start = 10.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) { IconBtn("⚙", onSettings); IconBtn("✕", onExit) }
     }
 }
 
 // ---- settings ----------------------------------------------------------------------------------
 
 @Composable
-private fun SettingsPanel(ui: UiState, a: Actions, updates: UpdateController, onClose: () -> Unit) {
+private fun SettingsContent(ui: UiState, a: Actions, updates: UpdateController, onClose: () -> Unit) {
     val s = ui.settings
     val inMenu = ui.phase == Phase.MENU
-    Box(
-        Modifier.fillMaxSize().safeDrawingPadding().padding(18.dp).clickable(indication = null, interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, onClick = onClose),
-        contentAlignment = Alignment.Center,
-    ) {
-        Glass(Modifier.fillMaxWidth(.9f).clickable(indication = null, interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }) {}) {
-            Box(Modifier.fillMaxWidth()) {
-                Box(Modifier.align(Alignment.CenterStart)) { IconBtn("←", onClose) }
-                Text("Settings", color = Muted, fontSize = 11.sp, letterSpacing = 1.sp, fontWeight = FontWeight.Medium, modifier = Modifier.align(Alignment.Center))
-            }
-            Column(
-                Modifier.heightIn(max = 340.dp)
-                    // mask-image: the list fades out over 26px at both ends.
-                    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-                    .drawWithContent {
-                        drawContent()
-                        val f = (26.dp.toPx() / size.height).coerceIn(0f, .5f)
-                        drawRect(
-                            Brush.verticalGradient(0f to Color.Transparent, f to Color.Black, (1f - f) to Color.Black, 1f to Color.Transparent),
-                            blendMode = BlendMode.DstIn,
-                        )
-                    }
-                    .verticalScroll(rememberScrollState()),
-            ) {
+    Column(Modifier.widthIn(max = 320.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.fillMaxWidth()) {
+            Box(Modifier.align(Alignment.CenterStart)) { IconBtn("←", onClose) }
+            Text("Settings", color = Muted, fontSize = 11.sp, letterSpacing = 1.sp, fontWeight = FontWeight.Medium, modifier = Modifier.align(Alignment.Center))
+        }
+        Column(
+            Modifier.heightIn(max = 340.dp)
+                // mask-image: the list fades out over 26px at both ends.
+                .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                .drawWithContent {
+                    drawContent()
+                    val f = (26.dp.toPx() / size.height).coerceIn(0f, .5f)
+                    drawRect(
+                        Brush.verticalGradient(0f to Color.Transparent, f to Color.Black, (1f - f) to Color.Black, 1f to Color.Transparent),
+                        blendMode = BlendMode.DstIn,
+                    )
+                }
+                .verticalScroll(rememberScrollState()),
+        ) {
+            // Rows that open or close (the graphics fine-tuning) glide the list's height like an accordion.
+            Column(Modifier.fillMaxWidth().animateContentSize(tween(320, easing = FastOutSlowInEasing))) {
                 SettingRow("Difficulty", topLine = false, hint = if (!inMenu) "Applies from the next run." else null) {
                     Seg(listOf(Difficulty.EASY to "Easy", Difficulty.NORMAL to "Normal", Difficulty.HARD to "Hard"), s.difficulty, a.setDifficulty)
                 }
-                SettingRow("Mode", hint = if (!inMenu) "Applies from the next run." else null) {
-                    Seg(listOf(GameMode.CLASSIC to "Classic", GameMode.SURVIVE to "Survive", GameMode.FREEROAM to "Freeroam"), s.mode, a.setMode)
-                }
                 SettingRow("Forest") { Seg(listOf(ForestMood.NIGHT to "Night", ForestMood.DAY to "Day", ForestMood.AUTO to "Auto"), s.mood, a.setMood) }
-                SettingRow("Graphics", hint = "Medium: bloom, rounder shapes, shapelier trees. High adds shadows, light shafts, depth of field and more.") { Seg(listOf(Quality.LOW to "Low", Quality.MEDIUM to "Medium", Quality.HIGH to "High"), s.quality, a.setQuality) }
+                GraphicsBlock(s, a)
                 SettingRow("Controls") { Seg(listOf(false to "Tilt", true to "Touch"), s.touch, a.setTouch) }
                 SettingRow("Orientation") { Seg(listOf(false to "Landscape", true to "Any"), s.anyOrientation, a.setAnyOrientation) }
                 SettingRow("Audio") { OnOff(s.sound, a.setSound) }
@@ -418,6 +476,82 @@ private fun SettingsPanel(ui: UiState, a: Actions, updates: UpdateController, on
                 UpdateRow(updates)
             }
         }
+    }
+}
+
+/** Graphics: three tabs, and an optional "Fine-tune" accordion with one slider per effect the chosen tab has. */
+@Composable
+private fun GraphicsBlock(s: Settings, a: Actions) {
+    var open by remember { mutableStateOf(false) }
+    val tier = s.quality
+    Column(Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Edge))
+        Spacer(Modifier.height(7.dp))
+        Text("Graphics", color = TextC, fontSize = 13.sp)
+        Tabs(listOf(Quality.LOW to "Low", Quality.MEDIUM to "Medium", Quality.HIGH to "High"), tier, a.setQuality)
+        if (tier != Quality.LOW) {
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).clickable { open = !open }.padding(vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text("Fine-tune", color = Muted, fontSize = 11.sp)
+                Text(if (open) "▴" else "▾", color = Muted, fontSize = 11.sp)
+            }
+            AnimatedVisibility(
+                visible = open,
+                enter = expandVertically(tween(320, easing = FastOutSlowInEasing)) + fadeIn(tween(320)),
+                exit = shrinkVertically(tween(260, easing = FastOutSlowInEasing)) + fadeOut(tween(160)),
+            ) {
+                Column(Modifier.fillMaxWidth()) {
+                    FxSlider("Bloom", s.fx.bloom) { a.setFx("bloom", it) }
+                    if (tier == Quality.HIGH) {
+                        FxSlider("Filmic look", s.fx.tone) { a.setFx("tone", it) }
+                        FxSlider("Shadows", s.fx.shadows) { a.setFx("shadows", it) }
+                        FxSlider("Occlusion", s.fx.ao) { a.setFx("ao", it) }
+                        FxSlider("Light shafts", s.fx.shafts) { a.setFx("shafts", it) }
+                        FxSlider("Depth of field", s.fx.dof) { a.setFx("dof", it) }
+                        FxSlider("Motion blur", s.fx.motion) { a.setFx("motion", it) }
+                    }
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                        Text(
+                            "Reset", color = Muted, fontSize = 11.sp,
+                            modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { for (k in listOf("bloom", "tone", "shadows", "ao", "shafts", "dof", "motion")) a.setFx(k, 1f) }.padding(horizontal = 8.dp, vertical = 6.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Tabs with an underline: the chosen one is bright, the others muted. */
+@Composable
+private fun <T> Tabs(items: List<Pair<T, String>>, selected: T, onPick: (T) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(top = 2.dp)) {
+        for ((value, label) in items) {
+            val on = value == selected
+            val line by animateColorAsState(if (on) TextC else Edge, tween(220), label = "tab")
+            Column(Modifier.weight(1f).clickable { onPick(value) }.padding(top = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(label, color = if (on) TextC else Muted, fontSize = 12.sp, fontWeight = if (on) FontWeight.Medium else FontWeight.Normal)
+                Spacer(Modifier.height(7.dp))
+                Box(Modifier.fillMaxWidth().height(2.dp).background(line))
+            }
+        }
+    }
+}
+
+@Composable
+private fun FxSlider(label: String, value: Float, onChange: (Float) -> Unit) {
+    var drag by remember { mutableStateOf<Float?>(null) }
+    val v = drag ?: value
+    Row(Modifier.fillMaxWidth().height(34.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = TextC, fontSize = 12.sp, modifier = Modifier.width(92.dp))
+        Slider(
+            value = v, onValueChange = { drag = it; onChange(it) }, onValueChangeFinished = { drag = null },
+            valueRange = 0f..1.5f, modifier = Modifier.weight(1f),
+            colors = SliderDefaults.colors(thumbColor = TextC, activeTrackColor = TextC, inactiveTrackColor = Edge),
+        )
+        Text("${(v * 100).toInt()}%", color = Muted, fontSize = 10.sp, modifier = Modifier.width(36.dp), textAlign = TextAlign.End)
     }
 }
 
@@ -435,13 +569,13 @@ private fun SettingRow(label: String, hint: String? = null, topLine: Boolean = t
 }
 
 @Composable
-private fun <T> Seg(items: List<Pair<T, String>>, selected: T, onPick: (T) -> Unit) {
+private fun <T> Seg(items: List<Pair<T, String>>, selected: T, onPick: (T) -> Unit, fill: Boolean = false) {
     val shape = RoundedCornerShape(8.dp)
-    Row(Modifier.clip(shape).border(1.dp, Edge, shape)) {
+    Row((if (fill) Modifier.fillMaxWidth() else Modifier).clip(shape).border(1.dp, Edge, shape)) {
         for ((value, label) in items) {
             val on = value == selected
             Box(
-                Modifier.heightIn(min = 34.dp).background(if (on) Color(0x1FFFFFFF) else Color.Transparent)
+                (if (fill) Modifier.weight(1f) else Modifier).heightIn(min = 34.dp).background(if (on) Color(0x1FFFFFFF) else Color.Transparent)
                     .clickable { onPick(value) }.padding(horizontal = 10.dp, vertical = 6.dp),
                 contentAlignment = Alignment.Center,
             ) { Text(label, color = if (on) TextC else Muted, fontSize = 11.sp, textAlign = TextAlign.Center) }
