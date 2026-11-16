@@ -44,12 +44,12 @@ class Features(val quality: Quality) {
     val bloom = r >= 1
     val bloomLevels = if (r >= 2) 5 else 4
     /** Base threshold in linear light; the renderer raises it on bright (day) scenes so the sky never blooms. */
-    val bloomThreshold = 0.30f
-    val bloomStrength = if (r >= 2) 0.45f else 0.50f
+    val bloomThreshold = 0.48f
+    val bloomStrength = if (r >= 2) 0.24f else 0.28f
     val tonemap = r >= 2
     val exposure = 0.92f
-    val grain = if (r >= 2) 0.012f else 0f
-    val chroma = if (r >= 2) 0.006f else 0f
+    val grain = if (r >= 2) 0.006f else 0f
+    val chroma = if (r >= 2) 0.0015f else 0f
 
     // Lighting and atmosphere (High)
     val env = r >= 2
@@ -59,19 +59,19 @@ class Features(val quality: Quality) {
     val shadowExtent = 28f
     val ssao = r >= 2
     val ssaoSamples = 8
-    val ssaoRadius = 0.58f
-    val ssaoStrength = 0.94f
+    val ssaoRadius = 0.50f
+    val ssaoStrength = 0.78f
     val shafts = r >= 2
     // A few extra, jittered samples improve beam continuity without a full-resolution raymarch.
     val shaftSteps = 16
     val shaftMax = 38f
-    val fogDensity = 0.023f
+    val fogDensity = 0.017f
     val dof = r >= 2
-    val dofStrength = 1.3f
-    val focus = 15f
+    val dofStrength = 0.62f
+    val focus = 18f
     val motionBlur = r >= 2
     /** Motion blur at full speed, as a fraction of the screen (it scales with speed below that). */
-    val motionBlurMax = 0.020f
+    val motionBlurMax = 0.012f
 
     val needsDepth get() = ssao || shafts || dof || motionBlur
 

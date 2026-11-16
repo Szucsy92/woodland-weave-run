@@ -363,8 +363,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val warmFog = floatArrayOf(0.34f, 0.19f, 0.13f)
         lampDay = if (feat.rank >= 1) 1f - .62f * k else 1f
         pp.exposureScale = .94f + .10f * k + .025f * dusk
-        pp.bloomScale = 1f - .20f * k + .06f * dusk
-        pp.shaftScale = .88f + .30f * dusk - .12f * k
+        pp.bloomScale = .82f - .12f * k + .035f * dusk
+        pp.shaftScale = .78f + .22f * dusk - .16f * k
         red = e.redMix.toFloat(); lights = 1f - e.dieRef.toFloat()
         fog = Palette.mix(Palette.mix(Palette.fog, Palette.dayFog, k), warmFog, dusk * .22f)
         sky = Palette.mix(Palette.mix(Palette.moon, Palette.dayMoon, k), warmSky, dusk * .30f)
@@ -393,7 +393,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         Matrix.invertM(pp.invVp, 0, vp, 0)
         pp.camX = cam.ex.toFloat(); pp.camY = cam.ey.toFloat(); pp.camZ = cam.ez.toFloat()
         // Bloom picks up lights, not the day sky: the threshold rises with the brightness of the fog.
-        pp.bloomThreshold = max(feat.bloomThreshold, (.2126f * fog[0] + .7152f * fog[1] + .0722f * fog[2]) * 1.6f + .12f)
+        pp.bloomThreshold = max(feat.bloomThreshold, (.2126f * fog[0] + .7152f * fog[1] + .0722f * fog[2]) * 1.45f + .18f)
         pp.near = .1f; pp.far = 220f; pp.aspect = aspectRatio
         pp.tanHalf = tan(Math.toRadians(FOV / 2.0)).toFloat()
         System.arraycopy(moonDirV, 0, pp.moonDir, 0, 3)

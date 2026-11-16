@@ -586,6 +586,14 @@ void main() {
   }
   if (uDofK > 0.001) c = dofGather(uv, c);
 #endif
+#ifdef Q_FULL
+  // A restrained linear-light detail recovery counters the softness of the bloom/AA chain.
+  // Keep the radius at one render pixel so bark, leaves and silhouettes gain definition without halos.
+  vec2 px = 1.0 / resolution;
+  vec3 around = (tap(uv + vec2(px.x, 0.0)) + tap(uv - vec2(px.x, 0.0))
+               + tap(uv + vec2(0.0, px.y)) + tap(uv - vec2(0.0, px.y))) * 0.25;
+  c = max(c + (c - around) * 0.16, vec3(0.0));
+#endif
   float vignette = 1.0 - smoothstep(0.28, 0.78, length(vUv - 0.5));
   c *= mix(0.46, 1.0, vignette);
   float cold = dot(c, vec3(0.3, 0.55, 0.15));
@@ -776,7 +784,7 @@ void main() {
   vec3 r = s(vUv) * 4.0
     + (s(vUv + vec2(t.x, 0.0)) + s(vUv - vec2(t.x, 0.0)) + s(vUv + vec2(0.0, t.y)) + s(vUv - vec2(0.0, t.y))) * 2.0
     + s(vUv + t) + s(vUv - t) + s(vUv + vec2(t.x, -t.y)) + s(vUv + vec2(-t.x, t.y));
-  o = vec4(r / 16.0, 1.0);
+  o = vec4(r / 16.0 * 0.72, 1.0);
 }
 """
 }
