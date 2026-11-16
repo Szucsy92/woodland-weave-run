@@ -73,3 +73,14 @@ Not compiled or run on a device in the environment this was written in: build wi
 - Day and night: switching the mood is a full 2.6 s eased crossfade; Auto still follows the clock. The forest halos melt
   away with the daylight and come back with the night, orb auras and spores dim a little; Medium and High also dim the
   lamp, lower exposure, bloom and light shafts in daylight.
+
+## Real point lights, twilight, frame stats
+- **Point lights (Medium: 2, High: 4):** orbs, the forest halos, gates, secrets and wormholes really light the trunks, the
+  ground and the rocks around them, in their own colour. Only the nearest few count; each light fades in and out smoothly
+  as it joins or leaves that set (about 0.3 s time constant), so nothing pops. The falloff has a soft core, so passing
+  through a light never flashes. They dim by day.
+- **Twilight (Medium and High):** between night and day (the 2.6 s mood crossfade, and the three hours around sunrise and
+  sunset in Auto) the fog turns rosy, the light golden and the sun drops from 50 to about 16 degrees, so shadows grow long.
+  The shadow map and the light shafts follow the sun's direction.
+- **Frame stats:** Settings -> Frame stats shows fps, average ms, the worst frame of the last half second (where stutter
+  shows up), the render density and the tier, top right. Green at 55 fps and above, yellow above 40, red below.
