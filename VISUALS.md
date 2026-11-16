@@ -74,24 +74,6 @@ Not compiled or run on a device in the environment this was written in: build wi
   away with the daylight and come back with the night, orb auras and spores dim a little; Medium and High also dim the
   lamp, lower exposure, bloom and light shafts in daylight.
 
-## Real point lights, twilight, frame stats
-- **Point lights (Medium: 2, High: 4):** orbs, the forest halos, gates, secrets and wormholes really light the trunks, the
-  ground and the rocks around them, in their own colour. Only the nearest few count; each light fades in and out smoothly
-  as it joins or leaves that set (about 0.3 s time constant), so nothing pops. The falloff has a soft core, so passing
-  through a light never flashes. They dim by day.
-- **Twilight (Medium and High):** between night and day (the 2.6 s mood crossfade, and the three hours around sunrise and
-  sunset in Auto) the fog turns rosy, the light golden and the sun drops from 50 to about 16 degrees, so shadows grow long.
-  The shadow map and the light shafts follow the sun's direction.
-- **Frame stats:** Settings -> Frame stats shows fps, average ms, the worst frame of the last half second (where stutter
-  shows up), the render density and the tier, top right. Green at 55 fps and above, yellow above 40, red below.
+## Local power-up light spill (native renderer)
 
-
-## Unified dual-reference energy orb (native renderer)
-
-The power-up orb now combines both supplied visual references as one animated object:
-- a Fibonacci-distributed spherical particle shell with independently breathing/flickering points;
-- three moving, differently tilted plasma bands plus fine cyan/blue/violet filament paths;
-- three orbiting cyan/blue inner energy knots with white-hot centres;
-- additive blending and tier-scaled particle counts (LOW 76, MEDIUM 124, HIGH 176 shell points per orb).
-
-The existing pickup position, collection animation, type colour, and aura remain in place. The added shell and filaments are drawn through the existing sprite batch, while the plasma bands reuse the renderer's existing torus meshes. This avoids adding a new shader or GL resource and keeps the effect compatible with the current GLES 3.0 pipeline.
+The closest uncollected power-up now contributes a compact coloured point light to the lit scene. Its tint follows the pickup type (freezer, ghost or shockwave), its intensity fades with camera distance, and its radius is deliberately limited to keep the additional GLES 3.0 fragment work bounded. Low, Medium and High use progressively stronger output. The light affects normal-mapped bark, ground and other lit materials through the existing GGX lighting path; it is separate from the orb's additive glow sprites.
