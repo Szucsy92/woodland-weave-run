@@ -354,15 +354,21 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             }
         }
         val k = dayLevel.toFloat()
-        // Medium and High also tune the look to the time of day: dimmer lamp, exposure, bloom and shafts in daylight.
-        lampDay = if (feat.rank >= 1) 1f - .7f * k else 1f
-        pp.exposureScale = 1f - .2f * k; pp.bloomScale = 1f - .3f * k; pp.shaftScale = 1f - .4f * k
+        // Filmic day / golden-hour / night balance. A bell-shaped twilight blend gives dawn
+        // and dusk a warm rim without introducing another light pass or extra GPU work.
+        val dusk = (1f - kotlin.math.abs(2f * k - 1f)).coerceIn(0f, 1f)
+        val warmSky = floatArrayOf(0.92f, 0.43f, 0.20f)
+        val warmFog = floatArrayOf(0.34f, 0.19f, 0.13f)
+        lampDay = if (feat.rank >= 1) 1f - .62f * k else 1f
+        pp.exposureScale = .94f + .10f * k + .025f * dusk
+        pp.bloomScale = 1f - .20f * k + .06f * dusk
+        pp.shaftScale = .88f + .30f * dusk - .12f * k
         red = e.redMix.toFloat(); lights = 1f - e.dieRef.toFloat()
-        fog = Palette.mix(Palette.mix(Palette.fog, Palette.dayFog, k), Palette.blood, red * .75f)
-        sky = Palette.mix(Palette.mix(Palette.moon, Palette.dayMoon, k), Palette.pursuer, red * .8f)
+        fog = Palette.mix(Palette.mix(Palette.fog, Palette.dayFog, k), warmFog, dusk * .22f)
+        sky = Palette.mix(Palette.mix(Palette.moon, Palette.dayMoon, k), warmSky, dusk * .30f)
         groundC = Palette.mix(fog, Palette.pursuer, red * .55f)
-        moonCol = Palette.mix(Palette.mix(Palette.moon, Palette.dayMoon, k), Palette.pursuer, red * .6f)
-        hemi = .85f + k * 1.6f + red * 1.4f
+        moonCol = Palette.mix(Palette.mix(Palette.moon, Palette.dayMoon, k), warmSky, dusk * .16f)
+        hemi = .82f + k * 1.62f + dusk * .08f + red * 1.4f
         fogNear = 7f - k * 3f
         val moonI = .7f + k * 1.3f
 
@@ -411,6 +417,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val fl = sqrt(fdx * fdx + fdy * fdy + fdz * fdz); fdx /= fl; fdy /= fl; fdz /= fl
 
         fun scene(p: Int) {
+            // The runner and opaque world meshes share this material/light uniform set:
+            // local orb lights, sky/ground bounce, directional shadows and the day/night palette
+            // therefore affect the character as well as nearby scenery.
             GL.glUseProgram(p)
             GL.glUniformMatrix4fv(loc(p, "uVP"), 1, false, vp, 0)
             u3(p, "uCam", cam.ex.toFloat(), cam.ey.toFloat(), cam.ez.toFloat())

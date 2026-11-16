@@ -204,15 +204,19 @@ void main() {
     float pn = sin(vW.x * .37 + sin(vW.z * .29) * 2.3) * sin(vW.z * .33 - sin(vW.x * .21) * 1.9) + .5 * sin(vW.x * 1.7 + vW.z * 1.3) * sin(vW.z * 1.9 - vW.x * 1.1);
     float pud = smoothstep(.55, .85, pn);
     albedo *= 1. - pud * .55;
-    rough = mix(rough, .05, pud);
-    rough = mix(rough, rough * .6, damp * .5);
-    n = normalize(mix(n, vec3(0., 1., 0.), pud * .9));
+    float wet = clamp(damp * .52 + pud * .95, 0.0, 1.0);
+    // Wet ground darkens slightly and tightens the GGX highlight; puddles flatten their normal.
+    albedo *= 1.0 - wet * .16;
+    rough = mix(rough, max(.055, rough * .30), wet);
+    n = normalize(mix(n, vec3(0., 1., 0.), pud * .92));
 #endif
   } else if (uMode == 4) {
     // Contact darkening and moss at the trunk foot, plus a soft wet-bark rim glint near the runner.
-    float foot = 1. - smoothstep(1.0, 3.2, vLY);
-    albedo = mix(albedo, albedo * vec3(.75, 1.15, .72), foot * .55);
-    albedo *= mix(.45, 1., smoothstep(.9, 2.4, vLY)) * mix(1., .7, smoothstep(10., 18., vLY));
+    float foot = 1. - smoothstep(.72, 2.8, vLY);
+    float rootCrease = foot * (0.5 + 0.5 * sin(vW.x * 3.7 + vW.z * 2.9));
+    albedo = mix(albedo, albedo * vec3(.70, 1.08, .68), foot * .48);
+    albedo *= 1.0 - rootCrease * .12;
+    albedo *= mix(.52, 1., smoothstep(.72, 2.4, vLY)) * mix(1., .72, smoothstep(10., 18., vLY));
     float near = 1. - smoothstep(4., 14., dist);
     float rim = pow(1. - abs(dot(n, v)), 3.);
     vec3 tint = mix(vec3(.18, .55, .35), vec3(.42, .26, .62), smoothstep(-.3, .3, sin(vLY * .35)));
@@ -257,8 +261,12 @@ void main() {
     vec3 rv = reflect(-v, n);
     vec3 env = mix(uGroundC, uSky, clamp(rv.y * 0.5 + 0.5, 0.0, 1.0)) * uHemi;
     float fr = pow(1.0 - clamp(dot(n, v), 0.0, 1.0), 5.0);
-    float sm = 1.0 - min(rough + geometryRoughness, 1.0);
-    col += env * (0.04 + 0.96 * fr) * sm * sm * 1.2;
+    float sm = 1.0 - min(rough + geometryRoughness * .65, 1.0);
+    // Fresnel-weighted, roughness-filtered environment reflection. The sky/ground gradient
+    // gives puddles a broad reflection while bark keeps a narrow, restrained wet glint.
+    float envF = mix(.035, .72, fr);
+    float envGain = sm * sm * (0.18 + 1.05 * fr);
+    col += env * envF * envGain * 1.35;
   }
 #endif
   tl = uRedPos - vW; d = length(tl);
@@ -472,17 +480,22 @@ vec3 shafts(vec3 c, vec2 uv, float d) {
   float dt = len / float(N);
   float j = ign(gl_FragCoord.xy + vec2(time * 13.1, time * 7.3));
   float cosT = dot(rd, uMoonDir);
-  float g = 0.55;
-  float phase = (1.0 - g * g) / (12.566 * pow(1.0 + g * g - 2.0 * g * cosT, 1.5));
+  float g = 0.62;
+  float phase = (1.0 - g * g) / (12.566 * pow(max(1.0 + g * g - 2.0 * g * cosT, 0.12), 1.5));
   float T = 1.0; vec3 sc = vec3(0.0);
   for (int i = 0; i < 48; i++) {
     if (i >= N) break;
     vec3 p = ro + rd * ((float(i) + j) * dt);
-    float dens = uFogDens * exp(-max(p.y, 0.0) * 0.12);
-    sc += uMoonCol * (dens * shadowMarch(p) * phase * dt) * T;
-    T *= exp(-dens * dt * 0.6);
+    float heightFog = exp(-max(p.y, 0.0) * 0.105);
+    float canopy = 0.88 + 0.12 * sin(p.x * 0.31 + p.z * 0.23) * sin(p.z * 0.27 - p.x * 0.17);
+    float dens = uFogDens * heightFog * canopy;
+    float vis = shadowMarch(p);
+    // A small ambient term keeps the beam visible at soft shadow edges without flattening contrast.
+    vec3 inscatter = uMoonCol * (phase * vis + 0.035) * dens * dt;
+    sc += inscatter * T;
+    T *= exp(-dens * dt * 0.58);
   }
-  return c * T + sc;
+  return c * T + sc * 1.08;
 }
 #endif
 #endif
@@ -688,10 +701,13 @@ void main() {
     vec2 suv = pp.xy / pp.w * 0.5 + 0.5;
     float sd = vpos(suv).z;
     float range = smoothstep(0.0, 1.0, uRadius / max(abs(p.z - sd), 1e-3));
-    occ += (sd >= sp.z + 0.03 ? 1.0 : 0.0) * range;
+    float hit = sd >= sp.z + 0.025 ? 1.0 : 0.0;
+    // Bias the kernel toward short distances: roots, stones and ground contacts get
+    // a readable local crease, while broad distant forms remain softly lit.
+    occ += hit * range * mix(1.18, 0.78, fi);
   }
   float ao = 1.0 - occ / float(SSAO_N);
-  o = vec4(vec3(pow(clamp(ao, 0.0, 1.0), 1.6)), 1.0);
+  o = vec4(vec3(pow(clamp(ao, 0.0, 1.0), 1.78)), 1.0);
 }
 """
 

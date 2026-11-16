@@ -59,12 +59,13 @@ class Features(val quality: Quality) {
     val shadowExtent = 28f
     val ssao = r >= 2
     val ssaoSamples = 8
-    val ssaoRadius = 0.7f
-    val ssaoStrength = 0.85f
+    val ssaoRadius = 0.58f
+    val ssaoStrength = 0.94f
     val shafts = r >= 2
-    val shaftSteps = 12
-    val shaftMax = 32f
-    val fogDensity = 0.020f
+    // A few extra, jittered samples improve beam continuity without a full-resolution raymarch.
+    val shaftSteps = 16
+    val shaftMax = 38f
+    val fogDensity = 0.023f
     val dof = r >= 2
     val dofStrength = 1.3f
     val focus = 15f
