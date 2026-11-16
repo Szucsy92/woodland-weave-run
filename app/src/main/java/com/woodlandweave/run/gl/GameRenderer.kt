@@ -92,6 +92,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private val moonDirV = run { val ml = sqrt(24f * 24f + 20f * 20f); floatArrayOf(0f, 24f / ml, -20f / ml) }
     private val effects = EffectsModel()
     private val effectState = EffectState()
+    // Reused upload buffers for four GLES 3.0 local-light slots.
+    private val localLightPositions = FloatArray(16)
+    private val localLightColors = FloatArray(16)
 
     private class Sprites(val capacity: Int, val texture: () -> Int, val additive: Boolean, val fog: Boolean) {
         val data: FloatBuffer = GlUtil.floatBuffer(capacity * 10)
@@ -428,20 +431,40 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             u3(p, "uMoonDir", 0f, 24f / ml, -20f / ml)
             u3(p, "uMoon", moonCol[0] * moonI, moonCol[1] * moonI, moonCol[2] * moonI)
             u3(p, "uLampPos", e.lampX.toFloat(), e.lampY.toFloat(), e.lampZ.toFloat()); u3(p, "uLampCol", Palette.lamp); u1(p, "uLampI", e.lampIntensity.toFloat() * lampDay); u1(p, "uLampSoft", feat.lampSoft)
-            // Only the closest uncollected power-up contributes a local light. This keeps the
-            // shader cost constant while making nearby pickups illuminate the forest naturally.
-            val glowOrb = e.orbs.asSequence().filter { it.taken == null }
-                .minByOrNull { o -> (o.p.x - cam.ex) * (o.p.x - cam.ex) + (o.p.z - cam.ez) * (o.p.z - cam.ez) }
-            if (glowOrb != null) {
-                val oy = groundHeight(glowOrb.p.x, glowOrb.p.z) + 1.15
-                u3(p, "uOrbPos", glowOrb.p.x.toFloat(), oy.toFloat(), glowOrb.p.z.toFloat())
-                val oc = orbColor(glowOrb.p.type)
-                u3(p, "uOrbCol", oc)
-                val od = hypot(glowOrb.p.x - cam.ex, glowOrb.p.z - cam.ez)
-                u1(p, "uOrbI", (if (feat.rank >= 2) 19f else if (feat.rank >= 1) 13f else 8f) * (1f - (od / 19.0).toFloat().coerceIn(0f, 1f)))
-            } else {
-                u3(p, "uOrbPos", 0f, -1000f, 0f); u3(p, "uOrbCol", 0f, 0f, 0f); u1(p, "uOrbI", 0f)
-            }
+            // Select only the nearest uncollected pickups. The tier controls both the number
+            // of active lights and their reach; distance and a gentle energy pulse avoid a flat glow.
+            java.util.Arrays.fill(localLightPositions, 0f)
+            java.util.Arrays.fill(localLightColors, 0f)
+            val lightCount = if (feat.rank >= 2) 4 else if (feat.rank >= 1) 2 else 1
+            val baseIntensity = if (feat.rank >= 2) 19f else if (feat.rank >= 1) 13f else 8f
+            val lightRadius = if (feat.rank >= 2) 15.5f else if (feat.rank >= 1) 14f else 12.5f
+            e.orbs.asSequence()
+                .filter { it.taken == null }
+                .map { orbState ->
+                    val dx = orbState.p.x - cam.ex
+                    val dz = orbState.p.z - cam.ez
+                    Triple(orbState, dx * dx + dz * dz, hypot(dx, dz))
+                }
+                .filter { it.third < 23.0 }
+                .sortedBy { it.second }
+                .take(lightCount)
+                .forEachIndexed { index, entry ->
+                    val orbState = entry.first
+                    val distanceFade = (1.0 - (entry.third / 23.0)).coerceIn(0.0, 1.0).toFloat()
+                    val pulse = 0.92f + 0.08f * sin(animT.toFloat() * (2.0f + index * 0.17f) + index * 1.31f)
+                    val offset = index * 4
+                    localLightPositions[offset] = orbState.p.x.toFloat()
+                    localLightPositions[offset + 1] = (groundHeight(orbState.p.x, orbState.p.z) + 1.15).toFloat()
+                    localLightPositions[offset + 2] = orbState.p.z.toFloat()
+                    localLightPositions[offset + 3] = baseIntensity * distanceFade * pulse
+                    val tint = orbColor(orbState.p.type)
+                    localLightColors[offset] = tint[0]
+                    localLightColors[offset + 1] = tint[1]
+                    localLightColors[offset + 2] = tint[2]
+                    localLightColors[offset + 3] = lightRadius
+                }
+            GL.glUniform4fv(loc(p, "uLocalPos[0]"), 4, localLightPositions, 0)
+            GL.glUniform4fv(loc(p, "uLocalColor[0]"), 4, localLightColors, 0)
             u3(p, "uRedPos", (s.x + behindX * 5).toFloat(), (gy + 3.4).toFloat(), (s.z + behindZ * 5).toFloat())
             u3(p, "uRedCol", Palette.pursuer); u1(p, "uRedI", redI)
             u3(p, "uFloodDir", fdx, fdy, fdz)

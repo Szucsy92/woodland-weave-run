@@ -76,8 +76,10 @@ precision highp float;
 precision highp sampler2DShadow;
 //DEFINES
 in vec3 vN; in vec3 vW; in vec2 vUv; in float vLY;
-uniform vec3 uColor, uEmissive, uFog, uCam, uFwd, uSky, uGroundC, uMoonDir, uMoon, uLampPos, uLampCol, uRedPos, uRedCol, uFloodDir, uFloodCol, uOrbPos, uOrbCol;
-uniform float uLampSoft, uOrbI;
+uniform vec3 uColor, uEmissive, uFog, uCam, uFwd, uSky, uGroundC, uMoonDir, uMoon, uLampPos, uLampCol, uRedPos, uRedCol, uFloodDir, uFloodCol;
+uniform vec4 uLocalPos[4]; // xyz = light position, w = intensity
+uniform vec4 uLocalColor[4]; // rgb = light colour, w = radius
+uniform float uLampSoft;
 uniform float uAlpha, uMaps, uFogNear, uFogFar, uHemi, uLampI, uRedI, uNormalScale, uRough, uLights, uRed, uFogOn, uEncode, uMetal;
 uniform int uMode;
 uniform vec2 uUvScale;
@@ -239,11 +241,16 @@ void main() {
   // Medium and High soften the very near field, so a trunk next to the lamp no longer burns out to white.
   vec3 lampIrr = uLampCol * (uLampI / max(pow(d, 1.6) + uLampSoft, 0.01)) * falloff(d, 27.0);
   col += light(n, v, tl / max(d, 1e-3), lampIrr, albedo, alpha);
-  // Nearby power-ups cast a soft, coloured local light onto bark, moss and wet ground.
-  // A compact radius keeps the extra fragment work local and avoids distant-light clutter.
-  tl = uOrbPos - vW; d = length(tl);
-  float orbAtten = (uOrbI / max(d * d * 0.22 + 0.8, 0.01)) * falloff(d, 13.5);
-  col += light(n, v, tl / max(d, 1e-3), uOrbCol * orbAtten, albedo, alpha);
+  // A small, quality-tiered set of nearby pickups contributes coloured local illumination.
+  // The fixed compile-time loop keeps GLES 3.0 work predictable; inactive slots have zero intensity.
+  for (int i = 0; i < LOCAL_LIGHT_COUNT; ++i) {
+    if (uLocalPos[i].w > 0.001) {
+      tl = uLocalPos[i].xyz - vW;
+      d = length(tl);
+      float localAtten = (uLocalPos[i].w / max(d * d * 0.22 + 0.8, 0.01)) * falloff(d, uLocalColor[i].w);
+      col += light(n, v, tl / max(d, 1e-3), uLocalColor[i].rgb * localAtten, albedo, alpha);
+    }
+  }
 #ifdef Q_ENV
   {
     // Cheap image-based specular: the sky/ground gradient mirrored by the surface (wet bark, puddles, leaves).

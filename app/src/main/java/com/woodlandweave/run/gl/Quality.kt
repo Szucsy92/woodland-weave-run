@@ -78,6 +78,8 @@ class Features(val quality: Quality) {
     fun litDefines(): String = buildString {
         if (env) append("#define Q_ENV\n")
         if (shadows) append("#define Q_SHADOW\n")
+        // Low keeps one local light, Medium uses two, High uses four.
+        append("#define LOCAL_LIGHT_COUNT ${if (r >= 2) 4 else if (r >= 1) 2 else 1}\n")
     }
 
     /** `#define`s for the effect shader. */
