@@ -789,6 +789,23 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             place(parent, px, py, pz, 0.0, t * .8, 0.0, size)
             uploadOne(orb, parent)
             GL.glDisable(GL.GL_CULL_FACE); GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
+
+            // One unified energy orb: three animated plasma bands wrap a dense, living particle shell.
+            // The bands deliberately use different axes/speeds so the silhouette never reads as a static ring.
+            val pulse = 1.0 + sin(t * 3.1 + i * 1.7) * .055
+            place(parent, px, py, pz, 0.0, t * .22 + i, t * .11, 1.0)
+            GL.glEnable(GL.GL_BLEND); GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE)
+            GL.glDepthMask(false); GL.glDisable(GL.GL_CULL_FACE)
+            material(litProg, floatArrayOf(.08f, .72f, 1f), mode = 2, alpha = .58f)
+            prim(torusA, parent, 0.0, 0.0, 0.0, .52 + sin(t * 1.35 + i) * .16, t * .72 + i, .22, .40 * pulse, .40 * pulse, .40 * pulse)
+            material(litProg, floatArrayOf(.20f, .38f, 1f), mode = 2, alpha = .44f)
+            prim(torusB, parent, 0.0, 0.0, 0.0, 1.08, -t * .91 + i, .82 + sin(t * 1.1 + i) * .18, .63 * pulse, .63 * pulse, .63 * pulse)
+            material(litProg, floatArrayOf(.62f, .20f, 1f), mode = 2, alpha = .36f)
+            prim(torusC, parent, 0.0, 0.0, 0.0, 1.72, t * .58 + i, -.58, .95 * pulse, .95 * pulse, .95 * pulse)
+            // Fine filaments: a second, offset set of narrow bands gives the flowing plasma its layered look.
+            material(litProg, floatArrayOf(.12f, .88f, 1f), mode = 2, alpha = .30f)
+            prim(torusB, parent, 0.0, 0.0, 0.0, .34, t * 1.18 + i * 2, 1.35, .49 * pulse, .49 * pulse, .49 * pulse)
+            GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
         }
         if (s.mode != GameMode.FREEROAM) return
         for (g in e.gates) {
@@ -1135,6 +1152,62 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val pz = if (taken != null) o.p.z + (e.camera.ez - o.p.z) * flow * .6 else o.p.z
             val py = if (taken != null) base + (e.camera.ey - .35 - base) * flow else base + sin(t * 1.3 + i * 2) * .08
             bGlowFog.add(px, py, pz, size, size, col, a * (1.0 - dayLevel * .35), py - groundHeight(px, pz))
+
+            // Fibonacci-distributed points keep a genuinely spherical shell without a visible latitude/longitude grid.
+            // Animate the shell with layered noise-like waves; each point has its own phase and radial breathing.
+            if (k < .98) {
+                val particleCount = when (feat.quality) { Quality.HIGH -> 176; Quality.MEDIUM -> 124; else -> 76 }
+                val cyan = floatArrayOf(.12f, .88f, 1f)
+                val blue = floatArrayOf(.12f, .52f, 1f)
+                val violet = floatArrayOf(.62f, .25f, 1f)
+                val ice = floatArrayOf(.72f, .98f, 1f)
+                val golden = PI * (3.0 - sqrt(5.0))
+                val shell = .92 + sin(t * 2.2 + i * 1.9) * .045
+                for (n in 0 until particleCount) {
+                    val yN = 1.0 - 2.0 * (n + .5) / particleCount
+                    val ring = sqrt(max(0.0, 1.0 - yN * yN))
+                    val angle = n * golden + t * (.18 + (n % 7) * .012) * (if (n % 2 == 0) 1 else -1)
+                    val phase = t * (1.7 + (n % 11) * .13) + n * 1.73 + i * 2.1
+                    val ripple = 1.0 + sin(phase) * .045 + sin(phase * .47 + angle * 3) * .035
+                    val r = shell * ripple
+                    val x = px + cos(angle) * ring * r
+                    val y = py + yN * r
+                    val z = pz + sin(angle) * ring * r
+                    val bright = .24 + .48 * (.5 + .5 * sin(phase * 1.7))
+                    val c = if (n % 9 == 0) violet else if (n % 4 == 0) blue else cyan
+                    val dot = if (n % 13 == 0) .105 else .052 + (n % 5) * .008
+                    bHole.add(x, y, z, dot, dot, c, bright * (1.0 - dayLevel * .12))
+                }
+                // Three loose, animated filament paths sweep across the shell like translucent plasma ribbons.
+                for (strand in 0 until 3) {
+                    for (step in 0 until 34) {
+                        val u = step / 33.0
+                        val a = u * PI * 2.0 + t * (.42 + strand * .13) + strand * 2.1 + i
+                        val lat = sin(u * PI * 2.0 + t * (.7 + strand * .11) + strand * 1.8) * (.42 + strand * .08)
+                        val rr = .88 + sin(a * 2.0 + t * 1.6 + strand) * .035
+                        val ring = cos(lat)
+                        val fx = px + cos(a) * ring * rr
+                        val fy = py + sin(lat) * rr
+                        val fz = pz + sin(a) * ring * rr
+                        val fc = if ((step + strand) % 5 == 0) violet else if (strand == 1) blue else cyan
+                        val flicker = .35 + .45 * (.5 + .5 * sin(t * 5.0 + step * .7 + strand * 2.4))
+                        val fs = .045 + .025 * (.5 + .5 * sin(step * .9 + t * 3.0 + strand))
+                        bHole.add(fx, fy, fz, fs, fs, fc, flicker)
+                    }
+                }
+                // Three bright cyan/blue plasma knots orbit inside the shell, with soft overlapping halos.
+                for (core in 0 until 3) {
+                    val aCore = t * (if (core == 1) -.72 else .56) + core * (PI * 2 / 3) + i
+                    val rr = .34 + sin(t * 2.6 + core * 2 + i) * .055
+                    val cx = px + cos(aCore) * rr
+                    val cy = py + sin(t * 2.1 + core * 2.1 + i) * .22
+                    val cz = pz + sin(aCore) * rr
+                    val cc = if (core == 1) floatArrayOf(.18f, .38f, 1f) else cyan
+                    val corePulse = .82 + .18 * sin(t * 4.2 + core + i)
+                    bHole.add(cx, cy, cz, .30 * corePulse, .30 * corePulse, cc, .88)
+                    bHole.add(cx, cy, cz, .13 * corePulse, .13 * corePulse, ice, 1.0)
+                }
+            }
         }
         // Low drifting mist ahead (ordinary alpha blending, not additive).
         for (i in 0 until 4) {
