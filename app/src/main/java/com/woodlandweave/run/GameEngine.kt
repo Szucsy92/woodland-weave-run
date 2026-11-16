@@ -8,7 +8,6 @@ import com.woodlandweave.run.audio.Sting
 import com.woodlandweave.run.data.Settings
 import com.woodlandweave.run.data.SettingsRepo
 import com.woodlandweave.run.gl.GlassState
-import com.woodlandweave.run.gl.PerfStats
 import com.woodlandweave.run.sim.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -62,8 +61,6 @@ class GameEngine(
     val camera = CameraPose()
     /** Where the UI's glass panels are, for the effect pass's backdrop blur. */
     val glass = GlassState()
-    /** Frame statistics for the optional on-screen overlay. */
-    val perf = PerfStats()
     private val commands = ConcurrentLinkedQueue<() -> Unit>()
 
     // Input (written by sensor / touch threads).
