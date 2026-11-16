@@ -24,6 +24,8 @@ object Palette {
     val rock = lin(0x3a4048); val plant = lin(0x22301f)
     val ember = lin(0xff2a1a); val pursuer = lin(0xff1e10); val blood = lin(0x3a0605)
     val freezer = lin(0x2b6cff); val ghost = lin(0x2ee88a); val shock = lin(0xb04dff); val secret = lin(0x7fe8d8)
+    // Twilight: a rosy haze and a low golden sun between night and day.
+    val duskFog = lin(0x4a2a3a); val duskLight = lin(0xffa45c); val duskSky = lin(0xf0a07c)
     val dayFog = lin(0x8f9b98); val dayMoon = lin(0xdfe6e2); val ghostGlow = lin(0xeaf6ff)
 
     fun mix(a: FloatArray, b: FloatArray, t: Float) = FloatArray(3) { a[it] + (b[it] - a[it]) * t }

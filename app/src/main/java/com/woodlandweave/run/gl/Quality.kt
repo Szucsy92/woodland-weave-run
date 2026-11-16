@@ -37,6 +37,9 @@ class Features(val quality: Quality) {
     val rockDetail = 3
     val lifelikeTrees = r >= 1
 
+    /** Real point lights from orbs, halos, gates, secrets and wormholes (the nearest ones, faded smoothly in and out). */
+    val pointLights = if (r >= 2) 4 else if (r >= 1) 2 else 0
+
     /** Softening of the lamp's near-field falloff (0 keeps the web look exactly). */
     val lampSoft = if (r >= 2) 2.0f else if (r >= 1) 1.5f else 0f
 

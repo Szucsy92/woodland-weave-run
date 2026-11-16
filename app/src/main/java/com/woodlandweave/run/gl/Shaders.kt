@@ -78,6 +78,9 @@ precision highp sampler2DShadow;
 in vec3 vN; in vec3 vW; in vec2 vUv; in float vLY;
 uniform vec3 uColor, uEmissive, uFog, uCam, uFwd, uSky, uGroundC, uMoonDir, uMoon, uLampPos, uLampCol, uRedPos, uRedCol, uFloodDir, uFloodCol;
 uniform float uLampSoft;
+uniform vec4 uPL[6];    // xyz position, w radius
+uniform vec3 uPLC[6];   // colour * intensity * fade
+uniform float uPLN;
 uniform float uAlpha, uMaps, uFogNear, uFogFar, uHemi, uLampI, uRedI, uNormalScale, uRough, uLights, uRed, uFogOn, uEncode, uMetal;
 uniform int uMode;
 uniform vec2 uUvScale;
@@ -239,6 +242,16 @@ void main() {
   // Medium and High soften the very near field, so a trunk next to the lamp no longer burns out to white.
   vec3 lampIrr = uLampCol * (uLampI / max(pow(d, 1.6) + uLampSoft, 0.01)) * falloff(d, 27.0);
   col += light(n, v, tl / max(d, 1e-3), lampIrr, albedo, alpha);
+  // Orbs, halos, gates and portals really light their surroundings. The falloff has a soft core, so passing through
+  // a light never flashes.
+  for (int i = 0; i < 6; i++) {
+    if (float(i) >= uPLN) break;
+    vec3 lv = uPL[i].xyz - vW;
+    float ld = length(lv);
+    float R = uPL[i].w;
+    float at = falloff(ld, R) / (1.0 + (ld * ld) / (0.04 * R * R));
+    col += light(n, v, lv / max(ld, 1e-3), uPLC[i] * at, albedo, alpha);
+  }
 #ifdef Q_ENV
   {
     // Cheap image-based specular: the sky/ground gradient mirrored by the surface (wet bark, puddles, leaves).

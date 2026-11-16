@@ -110,7 +110,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private val bGlow = Sprites(256, { glowTex }, true, false)
     private val bGlowFog = Sprites(64, { glowTex }, true, true)
     private val bMist = Sprites(16, { glowTex }, false, true)
-    private val bSpore = Sprites(512, { sporeTex }, true, false)
+    private val bSpore = Sprites(128, { sporeTex }, true, false)
     private val bHole = Sprites(1600, { holeGlowTex }, true, false)
 
     private val bufs = Array(KINDS) {
@@ -330,6 +330,13 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val e = engine; val s = e.sim; val cam = e.camera
         if (builtVersion != e.worldVersion) { rebuildProps(); builtVersion = e.worldVersion }
         animT += dt
+        perfAcc += dt; perfFrames++; if (dt > perfWorst) perfWorst = dt
+        if (perfAcc >= .5) {
+            val ps = e.perf
+            ps.fps = (perfFrames / perfAcc).toFloat(); ps.avgMs = (perfAcc / perfFrames * 1000).toFloat(); ps.worstMs = (perfWorst * 1000).toFloat()
+            ps.density = scaler.density; ps.tier = feat.quality.label
+            perfAcc = 0.0; perfFrames = 0; perfWorst = 0.0
+        }
         val tune = e.settings.fx
         pp.tune = tune
         shadowActive = shadow != null && feat.shadows && tune.shadows > 0.01f
@@ -355,13 +362,17 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         lampDay = if (feat.rank >= 1) 1f - .7f * k else 1f
         pp.exposureScale = 1f - .2f * k; pp.bloomScale = 1f - .3f * k; pp.shaftScale = 1f - .4f * k
         red = e.redMix.toFloat(); lights = 1f - e.dieRef.toFloat()
-        fog = Palette.mix(Palette.mix(Palette.fog, Palette.dayFog, k), Palette.blood, red * .75f)
-        sky = Palette.mix(Palette.mix(Palette.moon, Palette.dayMoon, k), Palette.pursuer, red * .8f)
+        // Twilight (Medium and High): between night and day the light turns golden-pink and the sun sits low.
+        val dusk = if (feat.rank >= 1) (4f * k * (1f - k)).pow(1.1f) else 0f
+        fog = Palette.mix(Palette.mix(Palette.mix(Palette.fog, Palette.dayFog, k), Palette.duskFog, dusk * .7f), Palette.blood, red * .75f)
+        sky = Palette.mix(Palette.mix(Palette.mix(Palette.moon, Palette.dayMoon, k), Palette.duskSky, dusk * .6f), Palette.pursuer, red * .8f)
         groundC = Palette.mix(fog, Palette.pursuer, red * .55f)
-        moonCol = Palette.mix(Palette.mix(Palette.moon, Palette.dayMoon, k), Palette.pursuer, red * .6f)
-        hemi = .85f + k * 1.6f + red * 1.4f
+        moonCol = Palette.mix(Palette.mix(Palette.mix(Palette.moon, Palette.dayMoon, k), Palette.duskLight, dusk * .85f), Palette.pursuer, red * .6f)
+        hemi = .85f + k * 1.6f + red * 1.4f + dusk * .2f
+        val elev = Math.toRadians(50.0 - 38.0 * dusk * .9)            // 50 degrees high, 16 at the twilight peak: long shadows
+        moonDirV[0] = 0f; moonDirV[1] = sin(elev).toFloat(); moonDirV[2] = -cos(elev).toFloat()
         fogNear = 7f - k * 3f
-        val moonI = .7f + k * 1.3f
+        val moonI = .7f + k * 1.3f + dusk * .45f
 
         // Camera: lookAt, then the same local pitch / yaw / roll nudges three.js applied.
         Matrix.setLookAtM(view, 0, cam.ex.toFloat(), cam.ey.toFloat(), cam.ez.toFloat(), cam.tx.toFloat(), cam.ty.toFloat(), cam.tz.toFloat(), 0f, 1f, 0f)
@@ -393,6 +404,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val sp01 = ((camSpeed - 3.0) / 15.0).coerceIn(0.0, 1.0)
         pp.motion = (sp01 * sp01 * feat.motionBlurMax * pp.tune.motion).toFloat()
 
+        updatePointLights(s, e, dt)
         post.bind()
         val clear = if (post.linear) fog else Palette.encodeSrgb(fog)
         GL.glClearColor(clear[0], clear[1], clear[2], 1f)
@@ -413,6 +425,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             u3(p, "uCam", cam.ex.toFloat(), cam.ey.toFloat(), cam.ez.toFloat())
             u3(p, "uFwd", camFwdX, camFwdY, camFwdZ); u1(p, "uEncode", encode)
             u1(p, "uTime", animT.toFloat())
+            GL.glUniform4fv(loc(p, "uPL"), 6, plPos, 0); GL.glUniform3fv(loc(p, "uPLC"), 6, plCol, 0); u1(p, "uPLN", plCount.toFloat())
             val sm = shadow
             if (sm != null && shadowActive) {
                 GL.glActiveTexture(GL.GL_TEXTURE5); GL.glBindTexture(GL.GL_TEXTURE_2D, sm.tex[0])
@@ -425,7 +438,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             u3(p, "uFog", fog); u1(p, "uFogNear", fogNear); u1(p, "uFogFar", FOG_END.toFloat())
             u3(p, "uSky", sky); u3(p, "uGroundC", groundC); u1(p, "uHemi", hemi)
             val ml = sqrt(24f * 24f + 20f * 20f)
-            u3(p, "uMoonDir", 0f, 24f / ml, -20f / ml)
+            u3(p, "uMoonDir", moonDirV[0], moonDirV[1], moonDirV[2])
             u3(p, "uMoon", moonCol[0] * moonI, moonCol[1] * moonI, moonCol[2] * moonI)
             u3(p, "uLampPos", e.lampX.toFloat(), e.lampY.toFloat(), e.lampZ.toFloat()); u3(p, "uLampCol", Palette.lamp); u1(p, "uLampI", e.lampIntensity.toFloat() * lampDay); u1(p, "uLampSoft", feat.lampSoft)
             u3(p, "uRedPos", (s.x + behindX * 5).toFloat(), (gy + 3.4).toFloat(), (s.z + behindZ * 5).toFloat())
@@ -554,6 +567,98 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     }
 
 
+    // ---- real point lights (Medium and High) ----
+    private class Cand { var id = 0; var x = 0.0; var y = 0.0; var z = 0.0; var r = 1.0; var cr = 0f; var cg = 0f; var cb = 0f; var score = 0.0 }
+    private class PLight { var id = 0; var x = 0f; var y = 0f; var z = 0f; var r = 1f; var cr = 0f; var cg = 0f; var cb = 0f; var w = 0f; var target = 0f; var live = false }
+    private val cands = Array(64) { Cand() }
+    private var candN = 0
+    private val plSlots = Array(6) { PLight() }
+    private val plPos = FloatArray(6 * 4)
+    private val plCol = FloatArray(6 * 3)
+    private var plCount = 0
+    private var perfAcc = 0.0; private var perfFrames = 0; private var perfWorst = 0.0
+
+    private fun lid(kind: Int, x: Double, z: Double) = kind * 1_000_003 + (x * 8).toInt() * 31 + (z * 8).toInt()
+
+    private fun addCand(id: Int, x: Double, y: Double, z: Double, r: Double, c: FloatArray, intensity: Double, cam: CameraPose) {
+        if (candN >= cands.size || intensity <= .01) return
+        val d = hypot(hypot(x - cam.ex, y - cam.ey), z - cam.ez)
+        if (d > r * 1.5) return
+        val k = cands[candN++]
+        k.id = id; k.x = x; k.y = y; k.z = z; k.r = r
+        k.cr = (c[0] * intensity).toFloat(); k.cg = (c[1] * intensity).toFloat(); k.cb = (c[2] * intensity).toFloat()
+        k.score = intensity * r * r / (d * d + r * r * .25)
+    }
+
+    /**
+     * Gathers the lights worth lighting the scene with, keeps the nearest few and fades each one smoothly in and out
+     * as it enters or leaves that set, so no light ever pops.
+     */
+    private fun updatePointLights(s: Simulation, e: GameEngine, dt: Double) {
+        val n = feat.pointLights
+        if (n == 0) { plCount = 0; for (p in plSlots) { p.live = false; p.w = 0f }; return }
+        val cam = e.camera; val t = s.elapsed
+        val lightDay = 1.0 - dayLevel * .8
+        candN = 0
+        for (o in e.orbs) {
+            val taken = o.taken
+            val kk = if (taken != null) min(1.0, (t - taken) / .25) else 0.0
+            val base = groundHeight(o.p.x, o.p.z) + 1.15
+            val flow = min(1.0, kk * 1.5)
+            val px = if (taken != null) o.p.x + (cam.ex - o.p.x) * flow * .6 else o.p.x
+            val pz = if (taken != null) o.p.z + (cam.ez - o.p.z) * flow * .6 else o.p.z
+            val py = if (taken != null) base + (cam.ey - .35 - base) * flow else base
+            addCand(lid(1, o.p.x, o.p.z), px, py, pz, 10.0, orbColor(o.p.type), 14.0 * (1 - kk) * lightDay, cam)
+        }
+        val own0 = min(1.0, max(0.0, e.dieRef * 1.6))
+        for (light in forestLightsFor(s.mode, s.x, s.z)) {
+            val col = when ((light.x.toInt() xor light.z.toInt()) and 3) { 0 -> Palette.green; 1 -> Palette.purple; else -> Palette.lavender }
+            addCand(lid(2, light.x, light.z), light.x, groundHeight(light.x, light.z) + 4.2, light.z, 26.0, col, 16.0 * (1 - own0) * lightDay, cam)
+        }
+        if (s.mode == GameMode.FREEROAM) {
+            for (sec in e.secrets) {
+                val gy = groundHeight(sec.x, sec.z)
+                when (sec.type) {
+                    SecretType.MONOLITH -> addCand(lid(3, sec.x, sec.z), sec.x, gy + 2.4, sec.z, 12.0, Palette.secret, 10.0 * lightDay, cam)
+                    SecretType.RING -> addCand(lid(4, sec.x, sec.z), sec.x, gy + .8, sec.z, 8.0, Palette.green, 9.0 * lightDay, cam)
+                    SecretType.LANTERN -> addCand(lid(5, sec.x, sec.z), sec.x + .06, gy + 1.7, sec.z, 9.0, Palette.lamp, 10.0 * lightDay, cam)
+                }
+            }
+            for (g in e.gates) addCand(lid(6, g.x, g.z), g.x, groundHeight(g.x, g.z) + 3, g.z, 18.0, Palette.ember, 12.0 * lightDay, cam)
+            if (s.warp < 0) for (h in holesAround(s.x, s.z, s.universe)) {
+                if (hypot(h.x - s.x, h.z - s.z) >= HOLE_SEE) continue
+                addCand(lid(7, h.x, h.z), h.x, groundHeight(h.x, h.z) + HOLE_HEIGHT, h.z, 22.0, Palette.purple, 15.0 * lightDay, cam)
+            }
+        }
+        for (p in plSlots) p.target = 0f
+        var chosen = 0L
+        repeat(n) {
+            var best = -1; var bs = 0.0
+            for (i in 0 until candN) if ((chosen shr i) and 1L == 0L && cands[i].score > bs) { bs = cands[i].score; best = i }
+            if (best < 0) return@repeat
+            chosen = chosen or (1L shl best)
+            val c = cands[best]
+            var slot = plSlots.firstOrNull { it.live && it.id == c.id }
+            if (slot == null) slot = plSlots.firstOrNull { !it.live }?.also { it.id = c.id; it.live = true; it.w = 0f }
+            if (slot != null) {
+                slot.x = c.x.toFloat(); slot.y = c.y.toFloat(); slot.z = c.z.toFloat(); slot.r = c.r.toFloat()
+                slot.cr = c.cr; slot.cg = c.cg; slot.cb = c.cb
+                slot.target = 1f
+            }
+        }
+        plCount = 0
+        val rate = min(1.0, dt * 3.5).toFloat()
+        for (p in plSlots) {
+            if (!p.live) continue
+            p.w += (p.target - p.w) * rate
+            if (p.target == 0f && p.w < .01f) { p.live = false; continue }
+            if (p.w < .004f) continue
+            val i = plCount++
+            plPos[i * 4] = p.x; plPos[i * 4 + 1] = p.y; plPos[i * 4 + 2] = p.z; plPos[i * 4 + 3] = p.r
+            plCol[i * 3] = p.cr * p.w; plCol[i * 3 + 1] = p.cg * p.w; plCol[i * 3 + 2] = p.cb * p.w
+        }
+    }
+
     // ---- graphics tiers ----
     private fun setSway(p: Int, a: Float, b: Float, c: Float) = GL.glUniform3f(loc(p, "uSway"), a, b, c)
 
@@ -677,33 +782,13 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val px = if (taken != null) o.p.x + (cam.ex - o.p.x) * flow * .6 else o.p.x
             val pz = if (taken != null) o.p.z + (cam.ez - o.p.z) * flow * .6 else o.p.z
             val py = if (taken != null) base + (cam.ey - .35 - base) * flow else base + sin(t * 1.3 + i * 2) * .08
-            // A faint glass shell keeps the orb spherical while the particle cloud and plasma remain visible.
+            // A translucent glass-like sphere: alpha blending, no depth write, front faces only.
             GL.glEnable(GL.GL_BLEND); GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA); GL.glDepthMask(false)
             GL.glEnable(GL.GL_CULL_FACE); GL.glCullFace(GL.GL_BACK)
-            material(litProg, col, col, 1.0f, alpha = .12f * (1f - k.toFloat() * .65f), rough = .16f)
+            material(litProg, col, col, 1.6f, alpha = ORB_ALPHA * (1f - k.toFloat() * .6f), rough = .2f)
             place(parent, px, py, pz, 0.0, t * .8, 0.0, size)
             uploadOne(orb, parent)
-            GL.glDisable(GL.GL_CULL_FACE)
-
-            // Three interlaced, animated plasma currents: cyan, electric blue and violet.
-            GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE)
-            val pulse = .94 + sin(t * 4.2 + i) * .06
-            val fade = (1.0 - k).toFloat()
-            material(litProg, Palette.secret, Palette.secret, 1.25f, alpha = .78f * fade, mode = 2, rough = .18f, fogOn = 0f)
-            prim(torusA, parent, 0.0, 0.0, 0.0, .58 + sin(t * 1.1) * .10, t * 1.25, .22, .34 * pulse, .34 * pulse, .34 * pulse)
-            material(litProg, Palette.freezer, Palette.freezer, 1.35f, alpha = .72f * fade, mode = 2, rough = .18f, fogOn = 0f)
-            prim(torusA, parent, 0.0, 0.0, 0.0, 1.42, -t * 1.05, .88 + sin(t * .8 + 1.0) * .12, .29 * pulse, .29 * pulse, .29 * pulse)
-            material(litProg, Palette.lavender, Palette.lavender, 1.1f, alpha = .62f * fade, mode = 2, rough = .18f, fogOn = 0f)
-            prim(torusB, parent, 0.0, 0.0, 0.0, .92, t * .72 + 1.7, 1.28, .48 * pulse, .48 * pulse, .48 * pulse)
-
-            // Bright inner energy nodes, deliberately offset so the core never looks mechanically symmetric.
-            material(litProg, Palette.secret, Palette.secret, 2.0f, alpha = .95f * fade, mode = 2, fogOn = 0f)
-            prim(orb, parent, -.105, .045, .035, 0.0, 0.0, 0.0, .105 * pulse, .105 * pulse, .105 * pulse)
-            material(litProg, Palette.freezer, Palette.freezer, 2.2f, alpha = .92f * fade, mode = 2, fogOn = 0f)
-            prim(orb, parent, .105, -.055, -.025, 0.0, 0.0, 0.0, .078 * pulse, .078 * pulse, .078 * pulse)
-            material(litProg, Palette.lavender, Palette.lavender, 1.8f, alpha = .82f * fade, mode = 2, fogOn = 0f)
-            prim(orb, parent, .025, .13, -.09, 0.0, 0.0, 0.0, .052 * pulse, .052 * pulse, .052 * pulse)
-            GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
+            GL.glDisable(GL.GL_CULL_FACE); GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
         }
         if (s.mode != GameMode.FREEROAM) return
         for (g in e.gates) {
@@ -1050,30 +1135,6 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val pz = if (taken != null) o.p.z + (e.camera.ez - o.p.z) * flow * .6 else o.p.z
             val py = if (taken != null) base + (e.camera.ey - .35 - base) * flow else base + sin(t * 1.3 + i * 2) * .08
             bGlowFog.add(px, py, pz, size, size, col, a * (1.0 - dayLevel * .35), py - groundHeight(px, pz))
-
-            // Fibonacci-distributed motes form a dense, gently breathing spherical particle shell.
-            // The same shell is used on every quality tier; the existing sprite batch keeps it inexpensive.
-            if (k < .99) {
-                val count = if (feat.rank >= 1) 104 else 72
-                val golden = PI * (3.0 - sqrt(5.0))
-                for (n in 0 until count) {
-                    val yy = 1.0 - 2.0 * (n + .5) / count
-                    val rr = sqrt(max(0.0, 1.0 - yy * yy))
-                    val angle = n * golden + t * (.42 + (n % 7) * .018) + i * .7
-                    val wobble = .91 + .075 * sin(t * 3.1 + n * .71)
-                    val radius = .47 * wobble * (1.0 - k * .35)
-                    val sx = cos(angle) * rr * radius
-                    val sz = sin(angle) * rr * radius
-                    val sy = yy * radius
-                    val tint = when (n % 9) {
-                        0, 1, 2 -> Palette.freezer
-                        3, 4 -> Palette.lavender
-                        else -> Palette.secret
-                    }
-                    val dot = .055 + (n % 5) * .009
-                    bSpore.add(px + sx, py + sy, pz + sz, dot, dot, tint, (.56 + .28 * (.5 + .5 * sin(t * 5.0 + n))) * (1.0 - k))
-                }
-            }
         }
         // Low drifting mist ahead (ordinary alpha blending, not additive).
         for (i in 0 until 4) {
