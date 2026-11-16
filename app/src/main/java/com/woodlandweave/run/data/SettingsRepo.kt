@@ -21,6 +21,7 @@ import kotlin.math.max
 data class Settings(
     val sound: Boolean = true,
     val haptics: Boolean = true,
+    val showPerf: Boolean = false,
     val touch: Boolean = false,
     val anyOrientation: Boolean = false,
     val difficulty: Difficulty = Difficulty.EASY,
@@ -40,6 +41,7 @@ class SettingsRepo(private val context: Context) {
     private object K {
         val sound = booleanPreferencesKey("sound")
         val haptics = booleanPreferencesKey("haptics")
+        val showPerf = booleanPreferencesKey("show_perf")
         val touch = booleanPreferencesKey("touch")
         val orient = booleanPreferencesKey("any_orientation")
         val difficulty = stringPreferencesKey("difficulty")
@@ -61,6 +63,7 @@ class SettingsRepo(private val context: Context) {
         Settings(
             sound = p[K.sound] ?: true,
             haptics = p[K.haptics] ?: true,
+            showPerf = p[K.showPerf] ?: false,
             touch = p[K.touch] ?: false,
             anyOrientation = p[K.orient] ?: false,
             difficulty = p.enumOf(K.difficulty, Difficulty.EASY),
@@ -79,6 +82,7 @@ class SettingsRepo(private val context: Context) {
 
     suspend fun setSound(v: Boolean) = context.store.edit { it[K.sound] = v }
     suspend fun setHaptics(v: Boolean) = context.store.edit { it[K.haptics] = v }
+    suspend fun setShowPerf(v: Boolean) = context.store.edit { it[K.showPerf] = v }
     suspend fun setTouch(v: Boolean) = context.store.edit { it[K.touch] = v }
     suspend fun setAnyOrientation(v: Boolean) = context.store.edit { it[K.orient] = v }
     suspend fun setDifficulty(v: Difficulty) = context.store.edit { it[K.difficulty] = v.name }
