@@ -146,10 +146,12 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var builtVersion = -1
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
-        litProg = GlUtil.program(Shaders.LIT_VS, Shaders.litFs(""))
-        groundProg = GlUtil.program(Shaders.GROUND_VS, Shaders.litFs(""))
-        shadow = null; shadowProg = 0
+        // The lit shader needs the tier defines (LOCAL_LIGHT_COUNT, Q_ENV, Q_SHADOW); start on the LOW tier.
         feat = Features(Quality.LOW); appliedQuality = null
+        val startDefs = feat.litDefines()
+        litProg = GlUtil.program(Shaders.LIT_VS, Shaders.litFs(startDefs))
+        groundProg = GlUtil.program(Shaders.GROUND_VS, Shaders.litFs(startDefs))
+        shadow = null; shadowProg = 0
         spriteProg = GlUtil.program(Shaders.SPRITE_VS, Shaders.SPRITE_FS)
         locs.clear()
         meshes = arrayOf(
@@ -426,10 +428,12 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             u3(p, "uFwd", camFwdX, camFwdY, camFwdZ); u1(p, "uEncode", encode)
             u1(p, "uTime", animT.toFloat())
             val sm = shadow
+            // A sampler2DShadow left on its default unit 0 shares it with the sampler2D uTex: GLES then raises
+            // INVALID_OPERATION and drops every draw. Always point it at its own unit, shadows on or off.
+            GL.glUniform1i(loc(p, "uShadow0"), 5)
             if (sm != null && shadowActive) {
                 GL.glActiveTexture(GL.GL_TEXTURE5); GL.glBindTexture(GL.GL_TEXTURE_2D, sm.tex[0])
                 GL.glActiveTexture(GL.GL_TEXTURE0)
-                GL.glUniform1i(loc(p, "uShadow0"), 5)
                 GL.glUniformMatrix4fv(loc(p, "uLightVP0"), 1, false, sm.vp[0], 0)
                 GL.glUniform1f(loc(p, "uShadowTexel"), 1f / sm.res)
                 u1(p, "uShadowOn", 1f); u1(p, "uShadowK", min(1f, pp.tune.shadows))

@@ -358,6 +358,8 @@ class PostFx {
         if (glassCount > 0) GL.glGenerateMipmap(GL.GL_TEXTURE_2D)
         GL.glUseProgram(program)
         GL.glUniform1i(loc("tDiffuse"), 0)
+        // Same rule as in the lit shader: the shadow sampler must never sit on unit 0 beside a sampler2D.
+        GL.glUniform1i(loc("uShadowC0"), 4)
         val full = f.rank >= 1
         if (full && bloomTex.isNotEmpty()) { tex(3, bloomTex[0]); GL.glUniform1i(loc("uBloom"), 3) }
         val depthFx = f.needsDepth && depthTex != 0
