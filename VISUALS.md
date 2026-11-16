@@ -84,3 +84,14 @@ Not compiled or run on a device in the environment this was written in: build wi
   The shadow map and the light shafts follow the sun's direction.
 - **Frame stats:** Settings -> Frame stats shows fps, average ms, the worst frame of the last half second (where stutter
   shows up), the render density and the tier, top right. Green at 55 fps and above, yellow above 40, red below.
+
+
+## Unified dual-reference energy orb (native renderer)
+
+The power-up orb now combines both supplied visual references as one animated object:
+- a Fibonacci-distributed spherical particle shell with independently breathing/flickering points;
+- three moving, differently tilted plasma bands plus fine cyan/blue/violet filament paths;
+- three orbiting cyan/blue inner energy knots with white-hot centres;
+- additive blending and tier-scaled particle counts (LOW 76, MEDIUM 124, HIGH 176 shell points per orb).
+
+The existing pickup position, collection animation, type colour, and aura remain in place. The added shell and filaments are drawn through the existing sprite batch, while the plasma bands reuse the renderer's existing torus meshes. This avoids adding a new shader or GL resource and keeps the effect compatible with the current GLES 3.0 pipeline.
