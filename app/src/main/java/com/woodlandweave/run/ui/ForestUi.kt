@@ -62,7 +62,6 @@ import com.woodlandweave.run.GameEngine
 import com.woodlandweave.run.UiState
 import com.woodlandweave.run.data.Settings
 import com.woodlandweave.run.gl.GlassState
-import com.woodlandweave.run.gl.PerfStats
 import com.woodlandweave.run.gl.Quality
 import com.woodlandweave.run.gl.GameView
 import com.woodlandweave.run.sim.*
@@ -72,9 +71,6 @@ import com.woodlandweave.run.update.UpdateState
 import com.woodlandweave.run.update.describeUpdateEvent
 import kotlinx.coroutines.launch
 import kotlin.math.abs
-import kotlin.math.roundToInt
-import kotlinx.coroutines.delay
-import androidx.compose.ui.text.font.FontFamily
 import kotlin.math.exp
 import kotlin.math.hypot
 
@@ -99,7 +95,6 @@ class Actions(
     val setMood: (ForestMood) -> Unit,
     val setQuality: (Quality) -> Unit,
     val setFx: (String, Float) -> Unit,
-    val setShowPerf: (Boolean) -> Unit,
     val finish: () -> Unit,
 )
 
@@ -175,7 +170,6 @@ fun ForestApp(engine: GameEngine, gameView: GameView, actions: Actions, updates:
                 onResume = engine::resume, onExit = { settingsOpen = false; engine.exitToMenu() },
             )
             FxReadout(fxDrag)
-            if (ui.settings.showPerf) PerfOverlay(engine.perf)
         }
       }
     }
@@ -210,27 +204,6 @@ private fun Glass(alpha: Float, modifier: Modifier = Modifier, content: @Composa
         horizontalAlignment = Alignment.CenterHorizontally,
         content = content,
     )
-}
-
-/** Frame rate and frame time in the top right corner: the average, and the slowest frame (where stutter shows up). */
-@Composable
-private fun PerfOverlay(p: PerfStats) {
-    var line by remember { mutableStateOf("") }
-    var fps by remember { mutableStateOf(0f) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            fps = p.fps
-            line = "${p.fps.roundToInt()} fps  ${"%.1f".format(p.avgMs)} ms  max ${p.worstMs.roundToInt()} ms  ${"%.2f".format(p.density)}x  ${p.tier}"
-            delay(250)
-        }
-    }
-    val tint = if (fps >= 55f) Color(0xFF8FE3A0) else if (fps >= 40f) Color(0xFFE9D27A) else Color(0xFFF08A7A)
-    Box(Modifier.fillMaxSize().safeDrawingPadding().padding(top = 6.dp, end = 10.dp), contentAlignment = Alignment.TopEnd) {
-        Text(
-            line, color = tint, fontSize = 10.sp, fontFamily = FontFamily.Monospace,
-            modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(Color(0x80000000)).padding(horizontal = 8.dp, vertical = 4.dp),
-        )
-    }
 }
 
 /** A floating readout of the effect being adjusted (the card is nearly invisible meanwhile). */
@@ -532,7 +505,6 @@ private fun SettingsContent(ui: UiState, a: Actions, updates: UpdateController, 
                 SettingRow("Orientation") { Seg(listOf(false to "Landscape", true to "Any"), s.anyOrientation, a.setAnyOrientation) }
                 SettingRow("Audio") { OnOff(s.sound, a.setSound) }
                 SettingRow("Haptics") { OnOff(s.haptics, a.setHaptics) }
-                SettingRow("Frame stats") { OnOff(s.showPerf, a.setShowPerf) }
                 UpdateRow(updates)
             }
         }
