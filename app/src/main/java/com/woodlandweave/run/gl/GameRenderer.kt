@@ -353,7 +353,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val tune = e.settings.fx
         pp.tune = tune
         pp.sharpen = feat.sharpen * tune.sharp
-        fogFar = FOG_END * feat.fogFarScale
+        fogFar = (FOG_END * feat.fogFarScale).toFloat()
         shadowActive = shadow != null && feat.shadows && tune.shadows > 0.01f
         if (post.depthFailed && qualityCap.ordinal > Quality.MEDIUM.ordinal) qualityCap = Quality.MEDIUM
         val wantQ = Quality.values()[minOf(e.settings.quality.ordinal, qualityCap.ordinal)]
