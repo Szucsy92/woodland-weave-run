@@ -9,7 +9,7 @@ import com.woodlandweave.run.GameEngine
  * (starting at the web build's 1.5x) to what the device can hold at 60 fps.
  */
 class GameView(context: Context, engine: GameEngine) : GLSurfaceView(context) {
-    companion object { const val MAX_DENSITY = 2.0f }
+    companion object { const val MAX_DENSITY = 3.0f }
 
     init {
         setEGLContextClientVersion(3)

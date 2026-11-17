@@ -77,3 +77,17 @@ Not compiled or run on a device in the environment this was written in: build wi
 ## Local power-up light spill (native renderer)
 
 Uncollected power-ups contribute compact coloured point lights to the lit scene. Their tint follows the pickup type (freezer, ghost or shockwave), their intensity fades with camera distance and pulses gently with the orb's energy, and their radius is deliberately limited to keep GLES 3.0 fragment work bounded. Low / Medium / High evaluate at most 1 / 2 / 4 nearby pickups respectively. The lights affect normal-mapped bark, ground and other lit materials through the existing GGX lighting path; they are separate from the orb's additive glow sprites. The local lights do not yet cast their own shadow maps: the existing 2048 directional moon shadow remains a separate system.
+
+## Fades, shadows for lights, sharpness
+- **Lights fade, never pop or flash.** Sprites dissolve over their whole radius when you pass through them (smootherstep);
+  the forest halos, gates and secrets also fade with distance, so none appears or disappears when the lattice of lights
+  shifts under the runner; the survive-mode flicker eases on and off; a new orb grows in over 1.4 s and a collected one
+  shrinks away together with its plasma rings and its light.
+- **Light no longer shines through trees.** The pickup lights and the lamp are blocked by the trunks between them and the
+  shaded point (analytic, soft-edged cylinder test, six trunks per light), and the pickup lights stay low: they no longer
+  light the crowns far above.
+- **Sharper picture, all tiers.** The render starts at 2.25x density (it was 1.5x, which on a 2.7x screen was about half
+  the native resolution) and the surface can be as fine as 3x; it only gives ground when 60 fps is lost (floor 1.5x).
+  Contrast-adaptive sharpening is on for every tier (0.30 / 0.36 / 0.40), textures use a negative LOD bias, and Medium
+  and High see 12% further before the fog closes in. Settings -> Graphics -> Fine-tune now has a Sharpness slider on every
+  tier.

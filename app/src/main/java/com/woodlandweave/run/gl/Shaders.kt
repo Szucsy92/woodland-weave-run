@@ -78,6 +78,8 @@ precision highp sampler2DShadow;
 in vec3 vN; in vec3 vW; in vec2 vUv; in float vLY;
 uniform vec3 uColor, uEmissive, uFog, uCam, uFwd, uSky, uGroundC, uMoonDir, uMoon, uLampPos, uLampCol, uRedPos, uRedCol, uFloodDir, uFloodCol;
 uniform vec4 uLocalPos[4]; // xyz = light position, w = intensity
+uniform vec4 uOcc[30];      // trunks that can block a light: xz, radius (6 per light; slots 0..3 pickups, 4 the lamp)
+uniform float uLodBias;
 uniform vec4 uLocalColor[4]; // rgb = light colour, w = radius
 uniform float uLampSoft;
 uniform float uAlpha, uMaps, uFogNear, uFogFar, uHemi, uLampI, uRedI, uNormalScale, uRough, uLights, uRed, uFogOn, uEncode, uMetal;
@@ -128,6 +130,23 @@ vec3 linearToSrgb(vec3 c) {
   );
 }
 float falloff(float d, float cutoff) { float r = d / cutoff; return pow(clamp(1.0 - r * r * r * r, 0.0, 1.0), 2.0); }
+// Analytic shadow of the nearby trunks (vertical cylinders) for a point light: the ray from the light to the shaded
+// point must clear every listed trunk. Soft edges; a point on the trunk itself is never blocked by its own trunk.
+float trunkShadow(int slot, vec3 lp, vec3 p) {
+  vec2 a = lp.xz; vec2 ab = p.xz - a;
+  float len2 = max(dot(ab, ab), 1e-4);
+  float s = 1.0;
+  for (int j = 0; j < 6; j++) {
+    vec4 t = uOcc[slot * 6 + j];
+    if (t.z <= 0.0) break;
+    vec2 ac = t.xy - a;
+    float h = clamp(dot(ac, ab) / len2, 0.0, 1.0);
+    float dd = length(ac - ab * h);
+    float self = smoothstep(t.z * 1.05, t.z * 1.5, length(p.xz - t.xy));
+    s *= mix(1.0, smoothstep(t.z * 0.75, t.z * 1.35, dd), self);
+  }
+  return s;
+}
 float vGGX(float a, float nl, float nv) {
   float a2 = a * a;
   float gv = nl * sqrt(a2 + (1.0 - a2) * nv * nv);
@@ -182,9 +201,9 @@ void main() {
   vec2 tuv = vec2(vUv.x * uUvScale.x, (1.0 - vUv.y) * uUvScale.y);
   if (uMaps > 0.5) {
     // The colour maps are SRGB8_ALPHA8 textures: the sampler already returns filtered linear light.
-    albedo *= texture(uTex, tuv).rgb;
-    rough *= texture(uRoughTex, tuv).g;
-    vec3 mn = texture(uNorm, tuv).xyz * 2.0 - 1.0;
+    albedo *= texture(uTex, tuv, uLodBias).rgb;
+    rough *= texture(uRoughTex, tuv, uLodBias).g;
+    vec3 mn = texture(uNorm, tuv, uLodBias).xyz * 2.0 - 1.0;
     mn.xy *= uNormalScale;
     n = perturb(n, vW, vec2(tuv.x, -tuv.y), mn);
   }
@@ -243,7 +262,7 @@ void main() {
   col += light(n, v, normalize(uMoonDir), uMoon * sh, albedo, alpha);
   vec3 tl = uLampPos - vW; float d = length(tl);
   // Medium and High soften the very near field, so a trunk next to the lamp no longer burns out to white.
-  vec3 lampIrr = uLampCol * (uLampI / max(pow(d, 1.6) + uLampSoft, 0.01)) * falloff(d, 27.0);
+  vec3 lampIrr = uLampCol * (uLampI / max(pow(d, 1.6) + uLampSoft, 0.01)) * falloff(d, 27.0) * trunkShadow(4, uLampPos, vW);
   col += light(n, v, tl / max(d, 1e-3), lampIrr, albedo, alpha);
   // A small, quality-tiered set of nearby pickups contributes coloured local illumination.
   // The fixed compile-time loop keeps GLES 3.0 work predictable; inactive slots have zero intensity.
@@ -252,6 +271,8 @@ void main() {
       tl = uLocalPos[i].xyz - vW;
       d = length(tl);
       float localAtten = (uLocalPos[i].w / max(d * d * 0.22 + 0.8, 0.01)) * falloff(d, uLocalColor[i].w);
+      // Light stays low and is blocked by trunks: it no longer glows through a tree or lights the crowns far above.
+      localAtten *= trunkShadow(i, uLocalPos[i].xyz, vW) * (1.0 - smoothstep(3.5, 8.5, vW.y - uLocalPos[i].y));
       col += light(n, v, tl / max(d, 1e-3), uLocalColor[i].rgb * localAtten, albedo, alpha);
     }
   }
@@ -378,6 +399,7 @@ in vec2 vUv;
 uniform sampler2D tDiffuse;
 uniform float blur, glitch, frost, lens, wave, waveT, warp, flash, hue, time;
 uniform float uSrcSrgb;
+uniform float uSharpen;
 uniform vec4 hole;
 uniform float reach[RINGS];
 uniform vec2 resolution;
@@ -586,14 +608,15 @@ void main() {
   }
   if (uDofK > 0.001) c = dofGather(uv, c);
 #endif
-#ifdef Q_FULL
-  // A restrained linear-light detail recovery counters the softness of the bloom/AA chain.
-  // Keep the radius at one render pixel so bark, leaves and silhouettes gain definition without halos.
-  vec2 px = 1.0 / resolution;
-  vec3 around = (tap(uv + vec2(px.x, 0.0)) + tap(uv - vec2(px.x, 0.0))
-               + tap(uv + vec2(0.0, px.y)) + tap(uv - vec2(0.0, px.y))) * 0.25;
-  c = max(c + (c - around) * 0.16, vec3(0.0));
-#endif
+  if (uSharpen > 0.001) {
+    // Detail recovery at one render pixel: bark, edges and leaves gain definition. The boost is capped relative to the
+    // pixel, so bright lights get no halo, and it fades out while the menu blurs the picture.
+    vec2 px = 1.0 / resolution;
+    vec3 around = (tap(uv + vec2(px.x, 0.0)) + tap(uv - vec2(px.x, 0.0))
+                 + tap(uv + vec2(0.0, px.y)) + tap(uv - vec2(0.0, px.y))) * 0.25;
+    vec3 detail = clamp(c - around, -abs(c) * 0.4 - 0.03, abs(c) * 0.4 + 0.03);
+    c = max(c + detail * uSharpen * (1.0 - clamp(blur, 0.0, 1.0)), vec3(0.0));
+  }
   float vignette = 1.0 - smoothstep(0.28, 0.78, length(vUv - 0.5));
   c *= mix(0.46, 1.0, vignette);
   float cold = dot(c, vec3(0.3, 0.55, 0.15));

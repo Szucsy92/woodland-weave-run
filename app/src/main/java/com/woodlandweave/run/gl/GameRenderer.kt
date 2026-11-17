@@ -6,6 +6,7 @@ import android.opengl.GLSurfaceView
 import android.opengl.Matrix
 import com.woodlandweave.run.CameraPose
 import com.woodlandweave.run.GameEngine
+import com.woodlandweave.run.Orb
 import com.woodlandweave.run.sim.*
 import java.nio.FloatBuffer
 import java.util.Calendar
@@ -55,8 +56,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         const val ORB_ALPHA = .5f
         /** Draw resolution follows the frame rate between these densities (pixels per dp), capped by the surface. */
         const val ADAPTIVE_SCALE = true
-        const val MIN_DENSITY = 1.25f
-        const val START_DENSITY = 1.5f
+        // Sharp by default: start close to the device's own resolution and only give ground when 60 fps is lost.
+        const val MIN_DENSITY = 1.5f
+        const val START_DENSITY = 2.25f
         const val TREE_SWAY = .15f
     }
 
@@ -95,6 +97,12 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     // Reused upload buffers for four GLES 3.0 local-light slots.
     private val localLightPositions = FloatArray(16)
     private val localLightColors = FloatArray(16)
+    // Trunks that can block a light (30 vec4: six per light, slots 0..3 pickups and 4 the lamp).
+    private val occ = FloatArray(30 * 4)
+    private var treeN = 0
+    private var treeX = FloatArray(0); private var treeZ = FloatArray(0); private var treeR = FloatArray(0)
+    private val pickD = DoubleArray(6); private val pickI = IntArray(6)
+    private var fogFar = FOG_END.toFloat()
 
     private class Sprites(val capacity: Int, val texture: () -> Int, val additive: Boolean, val fog: Boolean) {
         val data: FloatBuffer = GlUtil.floatBuffer(capacity * 10)
@@ -258,6 +266,13 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         for (o in s.obstacles) { next += cache.getOrPut(o.id) { obstacleProp(o) }; alive += o.id }
         cache.keys.retainAll(alive)
         props = next
+        treeN = s.trees.size
+        if (treeX.size < treeN) { treeX = FloatArray(treeN + 64); treeZ = FloatArray(treeN + 64); treeR = FloatArray(treeN + 64) }
+        for ((i, t) in s.trees.withIndex()) {
+            val species = min(3, floor(hash(floor(t.x).toInt(), floor(t.z).toInt(), 200) * 4).toInt())
+            val girth = doubleArrayOf(.8, .9, 1.15, .68)[species] * t.scale
+            treeX[i] = t.x.toFloat(); treeZ[i] = t.z.toFloat(); treeR[i] = (.42 * girth + .08).toFloat()
+        }
     }
 
     private fun treeProp(tree: Tree): Prop {
@@ -337,6 +352,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         animT += dt
         val tune = e.settings.fx
         pp.tune = tune
+        pp.sharpen = feat.sharpen * tune.sharp
+        fogFar = FOG_END * feat.fogFarScale
         shadowActive = shadow != null && feat.shadows && tune.shadows > 0.01f
         if (post.depthFailed && qualityCap.ordinal > Quality.MEDIUM.ordinal) qualityCap = Quality.MEDIUM
         val wantQ = Quality.values()[minOf(e.settings.quality.ordinal, qualityCap.ordinal)]
@@ -404,6 +421,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val sp01 = ((camSpeed - 3.0) / 15.0).coerceIn(0.0, 1.0)
         pp.motion = (sp01 * sp01 * feat.motionBlurMax * pp.tune.motion).toFloat()
 
+        updateLocalLights(s, e, cam)
         post.bind()
         val clear = if (post.linear) fog else Palette.encodeSrgb(fog)
         GL.glClearColor(clear[0], clear[1], clear[2], 1f)
@@ -438,46 +456,17 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 GL.glUniform1f(loc(p, "uShadowTexel"), 1f / sm.res)
                 u1(p, "uShadowOn", 1f); u1(p, "uShadowK", min(1f, pp.tune.shadows))
             } else u1(p, "uShadowOn", 0f)
-            u3(p, "uFog", fog); u1(p, "uFogNear", fogNear); u1(p, "uFogFar", FOG_END.toFloat())
+            u3(p, "uFog", fog); u1(p, "uFogNear", fogNear); u1(p, "uFogFar", fogFar)
             u3(p, "uSky", sky); u3(p, "uGroundC", groundC); u1(p, "uHemi", hemi)
             val ml = sqrt(24f * 24f + 20f * 20f)
             u3(p, "uMoonDir", 0f, 24f / ml, -20f / ml)
             u3(p, "uMoon", moonCol[0] * moonI, moonCol[1] * moonI, moonCol[2] * moonI)
             u3(p, "uLampPos", e.lampX.toFloat(), e.lampY.toFloat(), e.lampZ.toFloat()); u3(p, "uLampCol", Palette.lamp); u1(p, "uLampI", e.lampIntensity.toFloat() * lampDay); u1(p, "uLampSoft", feat.lampSoft)
-            // Select only the nearest uncollected pickups. The tier controls both the number
-            // of active lights and their reach; distance and a gentle energy pulse avoid a flat glow.
-            java.util.Arrays.fill(localLightPositions, 0f)
-            java.util.Arrays.fill(localLightColors, 0f)
-            val lightCount = if (feat.rank >= 2) 4 else if (feat.rank >= 1) 2 else 1
-            val baseIntensity = if (feat.rank >= 2) 19f else if (feat.rank >= 1) 13f else 8f
-            val lightRadius = if (feat.rank >= 2) 15.5f else if (feat.rank >= 1) 14f else 12.5f
-            e.orbs.asSequence()
-                .filter { it.taken == null }
-                .map { orbState ->
-                    val dx = orbState.p.x - cam.ex
-                    val dz = orbState.p.z - cam.ez
-                    Triple(orbState, dx * dx + dz * dz, hypot(dx, dz))
-                }
-                .filter { it.third < 23.0 }
-                .sortedBy { it.second }
-                .take(lightCount)
-                .forEachIndexed { index, entry ->
-                    val orbState = entry.first
-                    val distanceFade = (1.0 - (entry.third / 23.0)).coerceIn(0.0, 1.0).toFloat()
-                    val pulse = 0.92f + 0.08f * sin(animT.toFloat() * (2.0f + index * 0.17f) + index * 1.31f)
-                    val offset = index * 4
-                    localLightPositions[offset] = orbState.p.x.toFloat()
-                    localLightPositions[offset + 1] = (groundHeight(orbState.p.x, orbState.p.z) + 1.15).toFloat()
-                    localLightPositions[offset + 2] = orbState.p.z.toFloat()
-                    localLightPositions[offset + 3] = baseIntensity * distanceFade * pulse
-                    val tint = orbColor(orbState.p.type)
-                    localLightColors[offset] = tint[0]
-                    localLightColors[offset + 1] = tint[1]
-                    localLightColors[offset + 2] = tint[2]
-                    localLightColors[offset + 3] = lightRadius
-                }
+            // Local lights (the nearest pickups) and the trunks that can block them were prepared once for this frame.
             GL.glUniform4fv(loc(p, "uLocalPos[0]"), 4, localLightPositions, 0)
             GL.glUniform4fv(loc(p, "uLocalColor[0]"), 4, localLightColors, 0)
+            GL.glUniform4fv(loc(p, "uOcc[0]"), 30, occ, 0)
+            u1(p, "uLodBias", feat.lodBias)
             u3(p, "uRedPos", (s.x + behindX * 5).toFloat(), (gy + 3.4).toFloat(), (s.z + behindZ * 5).toFloat())
             u3(p, "uRedCol", Palette.pursuer); u1(p, "uRedI", redI)
             u3(p, "uFloodDir", fdx, fdy, fdz)
@@ -604,6 +593,85 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     }
 
 
+    // ---- local lights and the trunks that block them ----
+
+    /** Writes up to six trunks closest to the segment a-b (within 11 m) into occluder slot [slot]. */
+    private fun pickOccluders(slot: Int, ax: Double, az: Double, bx: Double, bz: Double) {
+        java.util.Arrays.fill(pickD, 1e9); java.util.Arrays.fill(pickI, -1)
+        val dx = bx - ax; val dz = bz - az
+        val len2 = max(dx * dx + dz * dz, 1e-4)
+        for (i in 0 until treeN) {
+            val tx = treeX[i] - ax; val tz = treeZ[i] - az
+            val h = ((tx * dx + tz * dz) / len2).coerceIn(0.0, 1.0)
+            val ex = tx - dx * h; val ez = tz - dz * h
+            val d = sqrt(ex * ex + ez * ez)
+            if (d >= pickD[5] || d > 11.0) continue
+            var k = 5
+            while (k > 0 && pickD[k - 1] > d) { pickD[k] = pickD[k - 1]; pickI[k] = pickI[k - 1]; k-- }
+            pickD[k] = d; pickI[k] = i
+        }
+        val base = slot * 6 * 4
+        for (j in 0 until 6) {
+            val i = pickI[j]
+            occ[base + j * 4] = if (i >= 0) treeX[i] else 0f
+            occ[base + j * 4 + 1] = if (i >= 0) treeZ[i] else 0f
+            occ[base + j * 4 + 2] = if (i >= 0) treeR[i] else 0f
+            occ[base + j * 4 + 3] = 0f
+        }
+    }
+
+    /**
+     * The nearest pickups light their surroundings (a taken orb keeps its light while it flies in and fades), and the
+     * lamp and each of those lights get the list of trunks that can block them.
+     */
+    private fun updateLocalLights(s: Simulation, e: GameEngine, cam: CameraPose) {
+        java.util.Arrays.fill(localLightPositions, 0f)
+        java.util.Arrays.fill(localLightColors, 0f)
+        java.util.Arrays.fill(occ, 0f)
+        val lightCount = if (feat.rank >= 2) 4 else if (feat.rank >= 1) 2 else 1
+        val baseIntensity = if (feat.rank >= 2) 19f else if (feat.rank >= 1) 13f else 8f
+        val lightRadius = if (feat.rank >= 2) 15.5f else if (feat.rank >= 1) 14f else 12.5f
+        val t = s.elapsed
+        e.orbs.asSequence()
+            .map { orbState ->
+                val dx = orbState.p.x - cam.ex
+                val dz = orbState.p.z - cam.ez
+                Triple(orbState, dx * dx + dz * dz, hypot(dx, dz))
+            }
+            .filter { it.third < 23.0 }
+            .sortedBy { it.second }
+            .take(lightCount)
+            .forEachIndexed { index, entry ->
+                val orbState = entry.first
+                val taken = orbState.taken
+                val kk = if (taken != null) min(1.0, (t - taken) / .25) else 0.0
+                val flow = min(1.0, kk * 1.5)
+                val base = groundHeight(orbState.p.x, orbState.p.z) + 1.15
+                val px = if (taken != null) orbState.p.x + (cam.ex - orbState.p.x) * flow * .6 else orbState.p.x
+                val pz = if (taken != null) orbState.p.z + (cam.ez - orbState.p.z) * flow * .6 else orbState.p.z
+                val py = if (taken != null) base + (cam.ey - .35 - base) * flow else base
+                val distanceFade = (1.0 - (entry.third / 23.0)).coerceIn(0.0, 1.0).toFloat()
+                val pulse = 0.92f + 0.08f * sin(animT.toFloat() * (2.0f + index * 0.17f) + index * 1.31f)
+                val offset = index * 4
+                localLightPositions[offset] = px.toFloat()
+                localLightPositions[offset + 1] = py.toFloat()
+                localLightPositions[offset + 2] = pz.toFloat()
+                localLightPositions[offset + 3] = baseIntensity * distanceFade * pulse * (1f - kk.toFloat()) * orbIn(orbState, t).toFloat()
+                val tint = orbColor(orbState.p.type)
+                localLightColors[offset] = tint[0]; localLightColors[offset + 1] = tint[1]; localLightColors[offset + 2] = tint[2]
+                localLightColors[offset + 3] = lightRadius
+                pickOccluders(index, px, pz, cam.ex, cam.ez)
+            }
+        pickOccluders(4, e.lampX, e.lampZ, cam.ex, cam.ez)
+    }
+
+    /** 1 near the player, easing to 0 between [a] and [b] metres: far lights appear and leave gradually. */
+    private val orbSeen = HashMap<String, Double>()
+    /** 0 -> 1 over 1.4 s from the moment an orb is first seen, so a new orb grows in instead of popping. */
+    private fun orbIn(o: Orb, t: Double): Double = smoothRange(t - orbSeen.getOrPut(o.p.id) { t }, 0.0, 1.4)
+
+    private fun farFade(x: Double, z: Double, s: Simulation, a: Double, b: Double) = 1.0 - smoothRange(hypot(x - s.x, z - s.z), a, b)
+
     // ---- graphics tiers ----
     private fun setSway(p: Int, a: Float, b: Float, c: Float) = GL.glUniform3f(loc(p, "uSway"), a, b, c)
 
@@ -722,7 +790,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val taken = o.taken
             val base = groundHeight(o.p.x, o.p.z) + 1.15
             val k = if (taken != null) min(1.0, (t - taken) / .25) else 0.0
-            val size = if (taken != null) max(.001, .42 * (1 - k)) else .42 + sin(t * 2.1 + i) * .035
+            val vis = orbIn(o, t) * (1.0 - k)          // grows in when it appears, shrinks away when taken
+            val vf = vis.toFloat(); val rs = .35 + .65 * vis
+            val size = (if (taken != null) max(.001, .42 * (1 - k)) else .42 + sin(t * 2.1 + i) * .035) * (.4 + .6 * orbIn(o, t))
             val flow = min(1.0, k * 1.5)
             val px = if (taken != null) o.p.x + (cam.ex - o.p.x) * flow * .6 else o.p.x
             val pz = if (taken != null) o.p.z + (cam.ez - o.p.z) * flow * .6 else o.p.z
@@ -730,7 +800,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             // A translucent glass-like sphere: alpha blending, no depth write, front faces only.
             GL.glEnable(GL.GL_BLEND); GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA); GL.glDepthMask(false)
             GL.glEnable(GL.GL_CULL_FACE); GL.glCullFace(GL.GL_BACK)
-            material(litProg, col, col, 1.6f, alpha = ORB_ALPHA * (1f - k.toFloat() * .6f), rough = .2f)
+            material(litProg, col, col, 1.6f, alpha = ORB_ALPHA * (1f - k.toFloat() * .6f) * orbIn(o, t).toFloat(), rough = .2f)
             place(parent, px, py, pz, 0.0, t * .8, 0.0, size)
             uploadOne(orb, parent)
             GL.glDisable(GL.GL_CULL_FACE); GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
@@ -740,15 +810,15 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             place(parent, px, py, pz, 0.0, t * .22 + i, t * .11, 1.0)
             GL.glEnable(GL.GL_BLEND); GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE)
             GL.glDepthMask(false); GL.glDisable(GL.GL_CULL_FACE)
-            material(litProg, floatArrayOf(.08f, .72f, 1f), mode = 2, alpha = .58f)
-            prim(torusA, parent, 0.0, 0.0, 0.0, .52 + sin(t * 1.35 + i) * .16, t * .72 + i, .22, .125 * pulse, .125 * pulse, .125 * pulse)
-            material(litProg, floatArrayOf(.20f, .38f, 1f), mode = 2, alpha = .44f)
-            prim(torusB, parent, 0.0, 0.0, 0.0, 1.08, -t * .91 + i, .82 + sin(t * 1.1 + i) * .18, .18 * pulse, .18 * pulse, .18 * pulse)
-            material(litProg, floatArrayOf(.62f, .20f, 1f), mode = 2, alpha = .36f)
-            prim(torusC, parent, 0.0, 0.0, 0.0, 1.72, t * .58 + i, -.58, .27 * pulse, .27 * pulse, .27 * pulse)
+            material(litProg, floatArrayOf(.08f, .72f, 1f), mode = 2, alpha = .58f * vf)
+            prim(torusA, parent, 0.0, 0.0, 0.0, .52 + sin(t * 1.35 + i) * .16, t * .72 + i, .22, .125 * pulse * rs, .125 * pulse * rs, .125 * pulse * rs)
+            material(litProg, floatArrayOf(.20f, .38f, 1f), mode = 2, alpha = .44f * vf)
+            prim(torusB, parent, 0.0, 0.0, 0.0, 1.08, -t * .91 + i, .82 + sin(t * 1.1 + i) * .18, .18 * pulse * rs, .18 * pulse * rs, .18 * pulse * rs)
+            material(litProg, floatArrayOf(.62f, .20f, 1f), mode = 2, alpha = .36f * vf)
+            prim(torusC, parent, 0.0, 0.0, 0.0, 1.72, t * .58 + i, -.58, .27 * pulse * rs, .27 * pulse * rs, .27 * pulse * rs)
             // Fine filaments add a second, offset layer to the flowing plasma.
-            material(litProg, floatArrayOf(.12f, .88f, 1f), mode = 2, alpha = .30f)
-            prim(torusB, parent, 0.0, 0.0, 0.0, .34, t * 1.18 + i * 2, 1.35, .14 * pulse, .14 * pulse, .14 * pulse)
+            material(litProg, floatArrayOf(.12f, .88f, 1f), mode = 2, alpha = .30f * vf)
+            prim(torusB, parent, 0.0, 0.0, 0.0, .34, t * 1.18 + i * 2, 1.35, .14 * pulse * rs, .14 * pulse * rs, .14 * pulse * rs)
             GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
         }
         if (s.mode != GameMode.FREEROAM) return
@@ -1063,12 +1133,14 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val lx = light.x; val lz = light.z; val lg = groundHeight(lx, lz) + 4.2
             for (i in 0 until 5) {
                 val own = min(1.0, max(0.0, e.dieRef * 1.6 - i * .15))
-                val flick = if (own > 0 && own < 1) (if (sin(s.elapsed * (26 + i * 7)) > .2) 1.0 else .1) else 1.0
+                // The stutter-out keeps its rhythm, but each beat eases on and off instead of cutting.
+                val flick = if (own > 0 && own < 1) .1 + .9 * smoothRange(sin(s.elapsed * (26 + i * 7)), -.1, .45) else 1.0
                 val high = i > 2
                 val size = (if (high) 30.0 else if (i == 0) 24.0 else 20.0) * (1 + sin(t * .4 + i) * .08)
                 val px = if (high) lx + (if (i == 3) -3.5 else 3.5) + sin(t * .2 + i) * 2 else lx + (if (i == 0) -5.0 else if (i == 1) 5.0 else 0.0) + sin(t * .16 + i) * 1.5
                 val py = if (high) lg + 13.5 + sin(t * .24 + i) * 1.4 else lg
-                bGlow.add(px, py, lz, size, size, cols[i], (if (high) .14 else .66) * (1 - own) * flick * haloDay, py - groundHeight(px, lz))
+                val far = if (s.mode == GameMode.FREEROAM) farFade(lx, lz, s, 60.0, 100.0) else 1.0
+                bGlow.add(px, py, lz, size, size, cols[i], (if (high) .14 else .66) * (1 - own) * flick * haloDay * far, py - groundHeight(px, lz))
             }
         }
         // Spores.
@@ -1083,6 +1155,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val size = (.14 + hash(i, 4, 9) * .12) * (if (ember) 1.25 else 1.0) * 3.0
             bSpore.add(mx, groundHeight(mx, mz) + sp.h + sin(t * .5 + seed) * .25, mz, size, size, col, min(1.0, sporeOpacity(dist, tw) * (if (ember) 1.9 else 1.0)) * (1.0 - dayLevel * .5))
         }
+        if (orbSeen.size > 24) orbSeen.keys.retainAll(e.orbs.map { it.p.id }.toSet())
         // Orb auras.
         for ((i, o) in e.orbs.withIndex()) {
             val col = orbColor(o.p.type)
@@ -1095,7 +1168,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val px = if (taken != null) o.p.x + (e.camera.ex - o.p.x) * flow * .6 else o.p.x
             val pz = if (taken != null) o.p.z + (e.camera.ez - o.p.z) * flow * .6 else o.p.z
             val py = if (taken != null) base + (e.camera.ey - .35 - base) * flow else base + sin(t * 1.3 + i * 2) * .08
-            bGlowFog.add(px, py, pz, size, size, col, a * (1.0 - dayLevel * .35), py - groundHeight(px, pz))
+            bGlowFog.add(px, py, pz, size, size, col, a * (1.0 - dayLevel * .35) * orbIn(o, t), py - groundHeight(px, pz))
         }
         // Low drifting mist ahead (ordinary alpha blending, not additive).
         for (i in 0 until 4) {
@@ -1110,15 +1183,15 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 val pulse = (if (found) 1.4 else 1.0) * (.8 + sin(t * 1.6 + i) * .2)
                 val gyS = groundHeight(sec.x, sec.z)
                 when (sec.type) {
-                    SecretType.MONOLITH -> bGlowFog.add(sec.x, gyS + 2.4, sec.z, 5.0, 7.0, Palette.secret, min(1.0, .35 * pulse) * (1.0 - dayLevel * .35), 2.4)
+                    SecretType.MONOLITH -> bGlowFog.add(sec.x, gyS + 2.4, sec.z, 5.0, 7.0, Palette.secret, min(1.0, .35 * pulse) * (1.0 - dayLevel * .35) * farFade(sec.x, sec.z, s, 45.0, 75.0), 2.4)
                     SecretType.RING -> for (m in 0 until 11) {
                         val a = m / 11.0 * PI * 2 + t * .25
-                        bGlowFog.add(sec.x + cos(a) * 2.6, gyS + .3, sec.z + sin(a) * 2.6, .9, .9, Palette.green, min(1.0, .7 * pulse) * (1.0 - dayLevel * .35), .3)
+                        bGlowFog.add(sec.x + cos(a) * 2.6, gyS + .3, sec.z + sin(a) * 2.6, .9, .9, Palette.green, min(1.0, .7 * pulse) * (1.0 - dayLevel * .35) * farFade(sec.x, sec.z, s, 45.0, 75.0), .3)
                     }
-                    SecretType.LANTERN -> bGlowFog.add(sec.x + .06, gyS + 1.7, sec.z, 3.2, 3.2, Palette.lamp, min(1.0, .75 * pulse * (.85 + sin(t * 9 + i) * .15)) * (1.0 - dayLevel * .35), 1.7)
+                    SecretType.LANTERN -> bGlowFog.add(sec.x + .06, gyS + 1.7, sec.z, 3.2, 3.2, Palette.lamp, min(1.0, .75 * pulse * (.85 + sin(t * 9 + i) * .15)) * (1.0 - dayLevel * .35) * farFade(sec.x, sec.z, s, 45.0, 75.0), 1.7)
                 }
             }
-            for (g in e.gates) bGlow.add(g.x, groundHeight(g.x, g.z) + 3, g.z, 16.0, 16.0, Palette.ember, .32 * haloDay, 3.0)
+            for (g in e.gates) bGlow.add(g.x, groundHeight(g.x, g.z) + 3, g.z, 16.0, 16.0, Palette.ember, .32 * haloDay * farFade(g.x, g.z, s, 50.0, 90.0), 3.0)
             var hi = 0
             for (h in holesAround(s.x, s.z, s.universe)) {
                 if (hypot(h.x - s.x, h.z - s.z) >= HOLE_SEE) continue
@@ -1147,7 +1220,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             GL.glUniform3f(loc(spriteProg, "uCam"), e.camera.ex.toFloat(), e.camera.ey.toFloat(), e.camera.ez.toFloat())
             GL.glUniform3f(loc(spriteProg, "uFwd"), camFwdX, camFwdY, camFwdZ)
             GL.glUniform3f(loc(spriteProg, "uFog"), fog[0], fog[1], fog[2])
-            GL.glUniform1f(loc(spriteProg, "uFogNear"), fogNear); GL.glUniform1f(loc(spriteProg, "uFogFar"), FOG_END.toFloat())
+            GL.glUniform1f(loc(spriteProg, "uFogNear"), fogNear); GL.glUniform1f(loc(spriteProg, "uFogFar"), fogFar)
             GL.glUniform1f(loc(spriteProg, "uFogOn"), if (b.fog) 1f else 0f); GL.glUniform1f(loc(spriteProg, "uEncode"), encode)
             GL.glEnable(GL.GL_BLEND)
             if (b.additive) GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE) else GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)

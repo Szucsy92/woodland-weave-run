@@ -24,6 +24,7 @@ class PostParams {
     var motion = 0f
     var tune = FxTuning()
     var bloomThreshold = 0.3f
+    var sharpen = 0.3f
     /** Day/night adjustments, 1 = night. */
     var exposureScale = 1f; var bloomScale = 1f; var shaftScale = 1f
 }
@@ -373,6 +374,7 @@ class PostFx {
         }
         GL.glActiveTexture(GL.GL_TEXTURE0)
         GL.glUniform1f(loc("uSrcSrgb"), if (linear) 0f else 1f)
+        GL.glUniform1f(loc("uSharpen"), pp.sharpen)
         GL.glUniform1f(loc("blur"), e.blur.toFloat()); GL.glUniform1f(loc("glitch"), e.glitch.toFloat())
         GL.glUniform1f(loc("frost"), e.frost.toFloat()); GL.glUniform1f(loc("lens"), e.lens.toFloat())
         GL.glUniform1f(loc("wave"), e.wave.toFloat()); GL.glUniform1f(loc("waveT"), e.waveT.toFloat())

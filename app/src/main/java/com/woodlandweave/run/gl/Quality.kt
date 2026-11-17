@@ -24,6 +24,7 @@ data class FxTuning(
     val shafts: Float = 1f,
     val dof: Float = 1f,
     val motion: Float = 1f,
+    val sharp: Float = 1f,
 )
 
 /** Everything a tier switches on. All tunables live here. */
@@ -36,6 +37,13 @@ class Features(val quality: Quality) {
     val crownNearDetail = 3
     val rockDetail = 3
     val lifelikeTrees = r >= 1
+
+    /** Contrast-adaptive sharpening of the final picture; counters the softness of upscaling, MSAA and bloom. */
+    val sharpen = if (r >= 2) 0.40f else if (r >= 1) 0.36f else 0.30f
+    /** Negative texture LOD bias: bark and ground stay crisper at a distance. */
+    val lodBias = if (r >= 1) -0.45f else -0.30f
+    /** Medium and High see further before the fog closes in. */
+    val fogFarScale = if (r >= 1) 1.12f else 1f
 
     /** Softening of the lamp's near-field falloff (0 keeps the web look exactly). */
     val lampSoft = if (r >= 2) 2.0f else if (r >= 1) 1.5f else 0f
