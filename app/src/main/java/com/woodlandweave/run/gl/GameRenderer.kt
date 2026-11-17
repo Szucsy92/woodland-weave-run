@@ -188,18 +188,25 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         barkTex = GlUtil.assetTexture(context, "wet-bark.jpg", srgb = true); barkN = GlUtil.assetTexture(context, "bark-normal.jpg"); barkR = GlUtil.assetTexture(context, "bark-rough.jpg")
         floorTex = GlUtil.assetTexture(context, "wet-ground.jpg", srgb = true); floorN = GlUtil.assetTexture(context, "ground-normal.jpg"); floorR = GlUtil.assetTexture(context, "ground-rough.jpg")
         glowLow = GlUtil.glowTexture(floatArrayOf(0f, .2f, 1f), intArrayOf(255, 153, 0))
-        // Keep a broad, filled centre on Low too; a narrow hot core aliases into hollow-looking rings at distance.
-        sporeLow = GlUtil.glowTexture(floatArrayOf(0f, .42f, .82f, 1f), intArrayOf(255, 220, 72, 0))
+        // Spores are atmospheric dust, not point lights. Use a broad, low-contrast
+        // profile so minification cannot turn their centre into a dark-looking ring.
+        sporeLow = GlUtil.smoothGlowTexture { r ->
+            val edge = ((r - .18f) / .82f).coerceIn(0f, 1f)
+            val fade = 1f - edge * edge * (3f - 2f * edge)
+            .34f * fade
+        }
         // Medium and High: the same glows with smooth profiles (no visible kink where the gradient changes slope).
         glowSmooth = GlUtil.smoothGlowTexture { r ->
             val s = r * r * (3f - 2f * r)
             .62f * (1f - s).toDouble().pow(.9).toFloat() + .38f * kotlin.math.exp(-(r / .12f) * (r / .12f))
         }
         sporeSmooth = GlUtil.smoothGlowTexture { r ->
-            // Broad filled centre survives minification; only the outer edge dissolves to zero.
-            val edge = ((r - .82f) / .18f).coerceIn(0f, 1f)
-            val edgeFade = 1f - edge * edge * (3f - 2f * edge)
-            kotlin.math.exp(-(r / .62f) * (r / .62f)) * edgeFade
+            // A flat, translucent centre with a very wide feathered edge. Avoid a
+            // concentrated hot pixel: sub-pixel sprites then read as soft motes,
+            // rather than outlined circles with a seemingly black centre.
+            val edge = ((r - .18f) / .82f).coerceIn(0f, 1f)
+            val fade = 1f - edge * edge * (3f - 2f * edge)
+            .34f * fade
         }
         glowTex = glowLow; sporeTex = sporeLow
         holeGlowTex = GlUtil.glowTexture(floatArrayOf(0f, .35f, 1f), intArrayOf(255, 89, 0))
@@ -426,9 +433,16 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
 
         updateLocalLights(s, e, cam)
         post.bind()
+        // Re-establish the full-frame state before clearing. Shadow/depth-only passes
+        // and device/driver state carry-over must never leave a clipped or masked strip
+        // at the top of the next frame.
+        GL.glDisable(GL.GL_SCISSOR_TEST)
+        GL.glColorMask(true, true, true, true)
+        GL.glDepthMask(true)
+        GL.glEnable(GL.GL_DEPTH_TEST)
+        GL.glDisable(GL.GL_BLEND)
         val clear = if (post.linear) fog else Palette.encodeSrgb(fog)
         GL.glClearColor(clear[0], clear[1], clear[2], 1f)
-        GL.glEnable(GL.GL_DEPTH_TEST); GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
         GL.glClear(GL.GL_COLOR_BUFFER_BIT or GL.GL_DEPTH_BUFFER_BIT)
 
         val behindX = sin(s.heading); val behindZ = cos(s.heading)
@@ -1161,7 +1175,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             // Preserve a visible filled core at distance: sub-pixel radial sprites can sample only their fading rim.
             val distanceScale = 1.0 + min(dist, 90.0) * .018
             val size = (.14 + hash(i, 4, 9) * .12) * (if (ember) 1.25 else 1.0) * 3.0 * distanceScale
-            bSpore.add(mx, groundHeight(mx, mz) + sp.h + sin(t * .5 + seed) * .25, mz, size, size, col, min(1.0, sporeOpacity(dist, tw) * (if (ember) 1.9 else 1.0)) * (1.0 - dayLevel * .5))
+            val atmosphericAlpha = sporeOpacity(dist, tw) * (if (ember) 1.25 else 1.0) * .42
+            bSpore.add(mx, groundHeight(mx, mz) + sp.h + sin(t * .5 + seed) * .25, mz, size, size, col, min(.42, atmosphericAlpha) * (1.0 - dayLevel * .5))
         }
         if (orbSeen.size > 24) orbSeen.keys.retainAll(e.orbs.map { it.p.id }.toSet())
         // Orb auras.
