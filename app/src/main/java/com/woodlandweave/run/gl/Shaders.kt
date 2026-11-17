@@ -257,13 +257,23 @@ void main() {
   float alpha = pow(min(max(rough, 0.0525) + geometryRoughness, 1.0), 2.0);
   vec3 col = albedo / PI * (mix(uGroundC, uSky, n.y * 0.5 + 0.5) * uHemi);
   float sh = 1.0;
+  vec3 keyL = normalize(uMoonDir);
 #ifdef Q_SHADOW
-  // Canopy blobs overlap by design. Let them cast shadows onto the scene, but do not
-  // receive the shadow map themselves: overlapping crown surfaces otherwise produce
-  // self-shadow acne and broad, moving stripe patterns across the foliage.
-  if (uMode != 5) sh = shadowAt(vW, n);
+  // Canopy blobs overlap by design, so they sample the shadow map from a point well above their own surface (outside
+  // their own blob): they then only see shadows cast by other crowns and trunks, never self-shadow acne.
+  if (uMode == 5) sh = shadowAt(vW + keyL * 4.5, vec3(0.0));
+  else sh = shadowAt(vW, n);
 #endif
-  col += light(n, v, normalize(uMoonDir), uMoon * sh, albedo, alpha);
+  if (uMode == 5) {
+    // Foliage is translucent: wrapped diffuse on the lit side, and the light shining through leaves seen against it.
+    vec3 leaf = albedo + vec3(.10, .22, .07) * 1.4;
+    float knl = dot(n, keyL);
+    float wrapD = clamp((knl + 0.45) / 1.45, 0.0, 1.0);
+    float back = pow(clamp(dot(-v, keyL), 0.0, 1.0), 1.6) * clamp(0.65 - knl * 0.5, 0.0, 1.0);
+    col += leaf / PI * uMoon * sh * (wrapD * 0.9 + back * 1.6);
+  } else {
+    col += light(n, v, keyL, uMoon * sh, albedo, alpha);
+  }
   vec3 tl = uLampPos - vW; float d = length(tl);
   // Medium and High soften the very near field, so a trunk next to the lamp no longer burns out to white.
   vec3 lampIrr = uLampCol * (uLampI / max(pow(d, 1.6) + uLampSoft, 0.01)) * falloff(d, 27.0) * trunkShadow(4, uLampPos, vW);

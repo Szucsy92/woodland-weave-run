@@ -24,7 +24,10 @@ object Palette {
     val rock = lin(0x3a4048); val plant = lin(0x22301f)
     val ember = lin(0xff2a1a); val pursuer = lin(0xff1e10); val blood = lin(0x3a0605)
     val freezer = lin(0x2b6cff); val ghost = lin(0x2ee88a); val shock = lin(0xb04dff); val secret = lin(0x7fe8d8)
-    val dayFog = lin(0x8f9b98); val dayMoon = lin(0xdfe6e2); val ghostGlow = lin(0xeaf6ff)
+    // Day: dark, greyish base colours; the sun does the lighting.
+    val dayFog = lin(0x59625f); val daySky = lin(0x7d8784); val dayMoon = lin(0xdfe6e2); val ghostGlow = lin(0xeaf6ff)
+    // Key light colours: sunrise, midday sun, sunset.
+    val sunDawn = lin(0xffb98a); val sunDay = lin(0xfff1dc); val sunDusk = lin(0xff8a45)
 
     fun mix(a: FloatArray, b: FloatArray, t: Float) = FloatArray(3) { a[it] + (b[it] - a[it]) * t }
 

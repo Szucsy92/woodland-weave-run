@@ -91,6 +91,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var animT = 0.0
     private var aspectRatio = 16f / 9f
     private var lastCamX = 0.0; private var lastCamZ = 0.0
+    /** Unit vector towards the key light: moon at night, rising sun at dawn, sun by day, setting sun at dusk. Updated every frame. */
     private val moonDirV = run { val ml = sqrt(24f * 24f + 20f * 20f); floatArrayOf(0f, 24f / ml, -20f / ml) }
     private val effects = EffectsModel()
     private val effectState = EffectState()
@@ -378,23 +379,37 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             }
         }
         val k = dayLevel.toFloat()
-        // Filmic day / golden-hour / night balance. A bell-shaped twilight blend gives dawn
-        // and dusk a warm rim without introducing another light pass or extra GPU work.
+        // Twilight weight: 0 at full night / full day, 1 half way (dawn or dusk).
         val dusk = (1f - kotlin.math.abs(2f * k - 1f)).coerceIn(0f, 1f)
+        val tw = dusk * dusk * (3f - 2f * dusk)
+        val dawnSide = hours < 13.0   // before 13:00 the twilight is a sunrise, after it a sunset
         val warmSky = floatArrayOf(0.92f, 0.43f, 0.20f)
         val warmFog = floatArrayOf(0.34f, 0.19f, 0.13f)
-        lampDay = if (feat.rank >= 1) 1f - .62f * k else 1f
+        lampDay = if (feat.rank >= 1) 1f - .2f * k else 1f
         pp.exposureScale = .94f + .10f * k + .025f * dusk
-        pp.bloomScale = .82f - .12f * k + .035f * dusk
-        pp.shaftScale = .78f + .22f * dusk - .16f * k
+        pp.bloomScale = .86f - .06f * k + .035f * dusk
+        // The key light's beams stay visible at every hour.
+        pp.shaftScale = .95f + .2f * tw - .05f * k
         red = e.redMix.toFloat(); lights = 1f - e.dieRef.toFloat()
-        fog = Palette.mix(Palette.mix(Palette.fog, Palette.dayFog, k), warmFog, dusk * .22f)
-        sky = Palette.mix(Palette.mix(Palette.moon, Palette.dayMoon, k), warmSky, dusk * .30f)
+
+        // Key light direction: the moon (50 degrees, ahead of the runner) at night, a low sun (22 degrees) coming from the
+        // front-left at dawn and the front-right at dusk, and a high sun by day. It always shines into the forest.
+        val elev = Math.toRadians((50.2 + 7.8 * k) * (1.0 - tw) + 22.0 * tw)
+        val az = Math.toRadians((if (dawnSide) -38.0 else 38.0) * tw)
+        moonDirV[0] = (sin(az) * cos(elev)).toFloat()
+        moonDirV[1] = sin(elev).toFloat()
+        moonDirV[2] = (-cos(az) * cos(elev)).toFloat()
+        val twCol = if (dawnSide) Palette.sunDawn else Palette.sunDusk
+        moonCol = Palette.mix(Palette.mix(Palette.moon, Palette.sunDay, k), twCol, tw * .85f)
+        val moonI = .7f + k * 1.9f + tw * .55f
+
+        // The day's base colours are dark and greyish: the sun itself does the lighting.
+        fog = Palette.mix(Palette.mix(Palette.fog, Palette.dayFog, k), warmFog, tw * .22f)
+        sky = Palette.mix(Palette.mix(Palette.moon, Palette.daySky, k), warmSky, tw * .30f)
         groundC = Palette.mix(fog, Palette.pursuer, red * .55f)
-        moonCol = Palette.mix(Palette.mix(Palette.moon, Palette.dayMoon, k), warmSky, dusk * .16f)
-        hemi = .82f + k * 1.62f + dusk * .08f + red * 1.4f
-        fogNear = 7f - k * 3f
-        val moonI = .7f + k * 1.3f
+        hemi = .82f + k * .55f + tw * .08f + red * 1.4f
+        // Fog starts later by day, so the distant lights stay readable.
+        fogNear = 7f + k * 2f
 
         // Camera: lookAt, then the same local pitch / yaw / roll nudges three.js applied.
         Matrix.setLookAtM(view, 0, cam.ex.toFloat(), cam.ey.toFloat(), cam.ez.toFloat(), cam.tx.toFloat(), cam.ty.toFloat(), cam.tz.toFloat(), 0f, 1f, 0f)
@@ -419,7 +434,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         pp.near = .1f; pp.far = 220f; pp.aspect = aspectRatio
         pp.tanHalf = tan(Math.toRadians(FOV / 2.0)).toFloat()
         System.arraycopy(moonDirV, 0, pp.moonDir, 0, 3)
-        pp.moonCol[0] = moonCol[0] * moonI * .6f; pp.moonCol[1] = moonCol[1] * moonI * .6f; pp.moonCol[2] = moonCol[2] * moonI * .6f
+        val shaftK = .6f - .22f * k
+        pp.moonCol[0] = moonCol[0] * moonI * shaftK; pp.moonCol[1] = moonCol[1] * moonI * shaftK; pp.moonCol[2] = moonCol[2] * moonI * shaftK
         val camSpeed = if (dt > 0) hypot(cam.ex - lastCamX, cam.ez - lastCamZ) / dt else 0.0
         lastCamX = cam.ex; lastCamZ = cam.ez
         // Motion blur grows smoothly with the runner's speed (nothing when walking, a light radial smear at a sprint).
@@ -470,8 +486,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             } else u1(p, "uShadowOn", 0f)
             u3(p, "uFog", fog); u1(p, "uFogNear", fogNear); u1(p, "uFogFar", fogFar)
             u3(p, "uSky", sky); u3(p, "uGroundC", groundC); u1(p, "uHemi", hemi)
-            val ml = sqrt(24f * 24f + 20f * 20f)
-            u3(p, "uMoonDir", 0f, 24f / ml, -20f / ml)
+            u3(p, "uMoonDir", moonDirV[0], moonDirV[1], moonDirV[2])
             u3(p, "uMoon", moonCol[0] * moonI, moonCol[1] * moonI, moonCol[2] * moonI)
             u3(p, "uLampPos", e.lampX.toFloat(), e.lampY.toFloat(), e.lampZ.toFloat()); u3(p, "uLampCol", Palette.lamp); u1(p, "uLampI", e.lampIntensity.toFloat() * lampDay); u1(p, "uLampSoft", feat.lampSoft)
             // Local lights (the nearest pickups) and the trunks that can block them were prepared once for this frame.
@@ -1141,7 +1156,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         // bHole also carries the relics' glow queued earlier in this frame, so it is cleared after drawing.
         val t = s.elapsed
         val ember = surviveStage(s) == SurviveStage.RED
-        val haloDay = 1.0 - dayLevel * .85     // halos melt away as the day comes up and return with the night
+        val haloDay = 1.0 - dayLevel * .25     // the lights' halos stay visible by day
         // Distant forest lights: green, purple and lavender glows that stutter out one by one in survive mode.
         val cols = arrayOf(Palette.green, Palette.purple, Palette.lavender, Palette.purple, Palette.lavender)
         for (light in forestLightsFor(s.mode, s.x, s.z)) {
@@ -1173,7 +1188,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val nearFade = smoothRange(dist, 1.5, 5.0)
             val size = (.14 + hash(i, 4, 9) * .12) * (if (ember) 1.25 else 1.0) * 3.0 * distanceScale
             val atmosphericAlpha = sporeOpacity(dist, tw) * (if (ember) 1.25 else 1.0) * .42
-            bSpore.add(mx, groundHeight(mx, mz) + sp.h + sin(t * .5 + seed) * .25, mz, size, size, col, min(.42, atmosphericAlpha) * nearFade * (1.0 - dayLevel * .5))
+            bSpore.add(mx, groundHeight(mx, mz) + sp.h + sin(t * .5 + seed) * .25, mz, size, size, col, min(.42, atmosphericAlpha) * nearFade * (1.0 - dayLevel * .2))
         }
         if (orbSeen.size > 24) orbSeen.keys.retainAll(e.orbs.map { it.p.id }.toSet())
         // Orb auras.
@@ -1188,7 +1203,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val px = if (taken != null) o.p.x + (e.camera.ex - o.p.x) * flow * .6 else o.p.x
             val pz = if (taken != null) o.p.z + (e.camera.ez - o.p.z) * flow * .6 else o.p.z
             val py = if (taken != null) base + (e.camera.ey - .35 - base) * flow else base + sin(t * 1.3 + i * 2) * .08
-            bGlowFog.add(px, py, pz, size, size, col, a * (1.0 - dayLevel * .35) * orbIn(o, t), py - groundHeight(px, pz))
+            bGlowFog.add(px, py, pz, size, size, col, a * (1.0 - dayLevel * .12) * orbIn(o, t), py - groundHeight(px, pz))
         }
         // Low drifting mist ahead (ordinary alpha blending, not additive).
         for (i in 0 until 4) {
@@ -1203,12 +1218,12 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 val pulse = (if (found) 1.4 else 1.0) * (.8 + sin(t * 1.6 + i) * .2)
                 val gyS = groundHeight(sec.x, sec.z)
                 when (sec.type) {
-                    SecretType.MONOLITH -> bGlowFog.add(sec.x, gyS + 2.4, sec.z, 5.0, 7.0, Palette.secret, min(1.0, .35 * pulse) * (1.0 - dayLevel * .35) * farFade(sec.x, sec.z, s, 45.0, 75.0), 2.4)
+                    SecretType.MONOLITH -> bGlowFog.add(sec.x, gyS + 2.4, sec.z, 5.0, 7.0, Palette.secret, min(1.0, .35 * pulse) * (1.0 - dayLevel * .12) * farFade(sec.x, sec.z, s, 45.0, 75.0), 2.4)
                     SecretType.RING -> for (m in 0 until 11) {
                         val a = m / 11.0 * PI * 2 + t * .25
-                        bGlowFog.add(sec.x + cos(a) * 2.6, gyS + .3, sec.z + sin(a) * 2.6, .9, .9, Palette.green, min(1.0, .7 * pulse) * (1.0 - dayLevel * .35) * farFade(sec.x, sec.z, s, 45.0, 75.0), .3)
+                        bGlowFog.add(sec.x + cos(a) * 2.6, gyS + .3, sec.z + sin(a) * 2.6, .9, .9, Palette.green, min(1.0, .7 * pulse) * (1.0 - dayLevel * .12) * farFade(sec.x, sec.z, s, 45.0, 75.0), .3)
                     }
-                    SecretType.LANTERN -> bGlowFog.add(sec.x + .06, gyS + 1.7, sec.z, 3.2, 3.2, Palette.lamp, min(1.0, .75 * pulse * (.85 + sin(t * 9 + i) * .15)) * (1.0 - dayLevel * .35) * farFade(sec.x, sec.z, s, 45.0, 75.0), 1.7)
+                    SecretType.LANTERN -> bGlowFog.add(sec.x + .06, gyS + 1.7, sec.z, 3.2, 3.2, Palette.lamp, min(1.0, .75 * pulse * (.85 + sin(t * 9 + i) * .15)) * (1.0 - dayLevel * .12) * farFade(sec.x, sec.z, s, 45.0, 75.0), 1.7)
                 }
             }
             for (g in e.gates) bGlow.add(g.x, groundHeight(g.x, g.z) + 3, g.z, 16.0, 16.0, Palette.ember, .32 * haloDay * farFade(g.x, g.z, s, 50.0, 90.0), 3.0)
