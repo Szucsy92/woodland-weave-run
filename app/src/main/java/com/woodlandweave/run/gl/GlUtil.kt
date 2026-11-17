@@ -123,37 +123,6 @@ object GlUtil {
         return id
     }
 
-    /**
-     * Soft atmospheric dust: a broad Gaussian core with a subtly uneven silhouette.
-     * Unlike a ring profile, alpha is highest at the centre and falls continuously to zero.
-     */
-    fun dustTexture(): Int {
-        val size = 128
-        val pixels = IntArray(size * size)
-        val c = (size - 1) * 0.5f
-        val invC = 1f / c
-        for (y in 0 until size) for (x in 0 until size) {
-            val dx = (x - c) * invC
-            val dy = (y - c) * invC
-            val angle = kotlin.math.atan2(dy, dx)
-            val silhouette = 1f +
-                0.055f * kotlin.math.sin(angle * 3f + 0.7f) +
-                0.035f * kotlin.math.sin(angle * 5f - 1.1f) +
-                0.020f * kotlin.math.cos(angle * 2f + 0.4f)
-            val r = kotlin.math.hypot(dx, dy) / silhouette
-            val edge = ((r - 0.72f) / 0.28f).coerceIn(0f, 1f)
-            val edgeFade = 1f - edge * edge * (3f - 2f * edge)
-            val core = kotlin.math.exp(-2.15f * r * r)
-            val alpha = if (r >= 1f) 0f else (0.30f * core * edgeFade).coerceIn(0f, 1f)
-            pixels[y * size + x] = ((alpha * 255f + 0.5f).toInt() shl 24) or 0x00FFFFFF
-        }
-        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        bitmap.setPixels(pixels, 0, size, 0, 0, size, size)
-        val id = texture(bitmap, repeat = false, mipmaps = false)
-        bitmap.recycle()
-        return id
-    }
-
     fun whiteTexture(): Int {
         val bmp = Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888)
         bmp.eraseColor(0xFFFFFFFF.toInt())

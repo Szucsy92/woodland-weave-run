@@ -742,6 +742,10 @@ void main() {
     occ += hit * range * mix(1.18, 0.78, fi);
   }
   float ao = 1.0 - occ / float(SSAO_N);
+  // Surfaces seen at a grazing angle (flat canopy undersides, the ground far away) have a noisy depth-derived normal:
+  // the hemisphere then flips from row to row and prints horizontal stripes. Fade the occlusion out there.
+  float facing = abs(dot(n, normalize(-p)));
+  ao = mix(1.0, ao, smoothstep(0.1, 0.35, facing));
   o = vec4(vec3(pow(clamp(ao, 0.0, 1.0), 1.78)), 1.0);
 }
 """

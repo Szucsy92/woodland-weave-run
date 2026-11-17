@@ -259,10 +259,6 @@ class PostFx {
 
     fun bind() {
         GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, msaaFbo)
-        // A scene target can be rebound after a shadow/post pass or a dynamic-resolution
-        // rebuild. Pair its actual attachment size with a full, unclipped viewport.
-        GL.glDisable(GL.GL_SCISSOR_TEST)
-        GL.glColorMask(true, true, true, true)
         GL.glViewport(0, 0, w, h)
     }
 
@@ -329,10 +325,6 @@ class PostFx {
 
     fun present(e: EffectState, glass: GlassState?, pp: PostParams) {
         val f = effective
-        // Scissor applies to framebuffer blits too. Clear it before resolving MSAA,
-        // otherwise a stale rectangle can leave a strip from the previous frame.
-        GL.glDisable(GL.GL_SCISSOR_TEST)
-        GL.glColorMask(true, true, true, true)
         GL.glBindFramebuffer(GL.GL_READ_FRAMEBUFFER, msaaFbo)
         GL.glBindFramebuffer(GL.GL_DRAW_FRAMEBUFFER, resolveFbo)
         if (blitChecks > 0) { while (GL.glGetError() != GL.GL_NO_ERROR) { /* attribute errors to the blit only */ } }
@@ -346,14 +338,7 @@ class PostFx {
         val useAo = ssaoProg != 0 && aoTex[0] != 0 && depthTex != 0 && t.ao > 0.01f
         if (useAo) ssaoPass(pp)
 
-        // Present to the actual GLSurfaceView surface, never to the scaled scene target.
-        // Reset states that can silently clip or mask the top rows on an intermittent frame.
         GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
-        GL.glDisable(GL.GL_SCISSOR_TEST)
-        GL.glColorMask(true, true, true, true)
-        GL.glDepthMask(false)
-        GL.glDisable(GL.GL_DEPTH_TEST)
-        GL.glDisable(GL.GL_BLEND)
         GL.glViewport(0, 0, sw, sh)
 
         // Which glass panels are on screen right now (Compose publishes them in dp, top left origin).
@@ -426,13 +411,6 @@ class PostFx {
             GL.glUniform1f(loc("uMotion"), if (f.motionBlur) pp.motion else 0f)
         }
         GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
-
-        // Leave a deterministic state for the next scene frame.
-        GL.glDisable(GL.GL_BLEND)
-        GL.glDisable(GL.GL_SCISSOR_TEST)
-        GL.glColorMask(true, true, true, true)
-        GL.glDepthMask(true)
         GL.glEnable(GL.GL_DEPTH_TEST)
-        GL.glViewport(0, 0, sw, sh)
     }
 }
