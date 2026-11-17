@@ -484,20 +484,29 @@ vec3 softShoulder(vec3 x) {
 #ifdef Q_DEPTH
 float linZ(float d) { float z = d * 2.0 - 1.0; return 2.0 * uNF.x * uNF.y / ((uNF.y + uNF.x) - z * (uNF.y - uNF.x)); }
 vec3 worldAt(vec2 uv, float d) { vec4 p = uInvVP * vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0); return p.xyz / p.w; }
+// Circle of confusion: the far field blurs fully, the near field only gently (near canopy and bushes used to smear
+// into ghost copies and stripes).
+float cocOf(float z) {
+  float c = abs(z - uFocus) / max(z, 0.5) * uDofK;
+  if (z < uFocus) c *= 0.35;
+  return clamp(c, 0.0, 1.0);
+}
 vec3 dofGather(vec2 uv, vec3 c0) {
   float asp = resolution.x / resolution.y;
   float z = linZ(texture(uDepth, uv).r);
-  float coc = clamp(abs(z - uFocus) / max(z, 0.5) * uDofK, 0.0, 1.0);
-  coc = max(coc - 0.05, 0.0);
+  float coc = max(cocOf(z) - 0.05, 0.0);
   if (coc < 0.01) return c0;
-  float rad = coc * 0.013;
+  float rad = coc * 0.011;
+  // The tap spiral is rotated per pixel: fixed taps echo bright and dark edges as regular copies and horizontal stripes,
+  // a rotated spiral turns that into fine noise that the dither hides.
+  float rot = ign(gl_FragCoord.xy) * 6.2831853;
   vec3 acc = c0; float ws = 1.0;
-  for (int i = 0; i < 14; i++) {
-    float fi = (float(i) + 0.5) / 14.0;
-    float a = float(i) * 2.39996323;
+  for (int i = 0; i < 16; i++) {
+    float fi = (float(i) + 0.5) / 16.0;
+    float a = float(i) * 2.39996323 + rot;
     vec2 suv = uv + vec2(cos(a), sin(a)) * sqrt(fi) * rad * vec2(1.0 / asp, 1.0);
     float sz = linZ(texture(uDepth, suv).r);
-    float sc = clamp(abs(sz - uFocus) / max(sz, 0.5) * uDofK, 0.0, 1.0);
+    float sc = cocOf(sz);
     float w = clamp(sc / max(coc, 0.01), 0.0, 1.0);
     acc += tap(suv) * w; ws += w;
   }

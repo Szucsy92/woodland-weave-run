@@ -52,7 +52,17 @@ class ForestAudio(private val context: Context) {
     private val cues = java.util.concurrent.ConcurrentHashMap<Cue, ShortArray>()
     private var loop: LoopThread? = null
 
-    private fun canPlay() = enabled && foreground && !systemMuted && !released
+    @Volatile private var lastMuteCheckNs = 0L
+
+    /**
+     * The volume / ringer broadcasts are not reliable on every device, so the mute state is also polled (cheap, at most
+     * every 150 ms): volume at zero, a muted stream or a silent / vibrate ringer means no sound at all.
+     */
+    private fun canPlay(): Boolean {
+        val now = System.nanoTime()
+        if (now - lastMuteCheckNs > 150_000_000L) { lastMuteCheckNs = now; refreshMute() }
+        return enabled && foreground && !systemMuted && !released
+    }
 
     fun start() {
         refreshMute()
