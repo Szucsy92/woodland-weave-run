@@ -188,26 +188,15 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         barkTex = GlUtil.assetTexture(context, "wet-bark.jpg", srgb = true); barkN = GlUtil.assetTexture(context, "bark-normal.jpg"); barkR = GlUtil.assetTexture(context, "bark-rough.jpg")
         floorTex = GlUtil.assetTexture(context, "wet-ground.jpg", srgb = true); floorN = GlUtil.assetTexture(context, "ground-normal.jpg"); floorR = GlUtil.assetTexture(context, "ground-rough.jpg")
         glowLow = GlUtil.glowTexture(floatArrayOf(0f, .2f, 1f), intArrayOf(255, 153, 0))
-        // Spores are atmospheric dust, not point lights. Use a broad, low-contrast
-        // profile so minification cannot turn their centre into a dark-looking ring.
-        sporeLow = GlUtil.smoothGlowTexture { r ->
-            val edge = ((r - .18f) / .82f).coerceIn(0f, 1f)
-            val fade = 1f - edge * edge * (3f - 2f * edge)
-            .34f * fade
-        }
+        // Spores are atmospheric dust, not point lights: a broad, continuous Gaussian
+        // core and a subtly irregular feathered silhouette avoid a hard circular/ring look.
+        sporeLow = GlUtil.dustTexture()
         // Medium and High: the same glows with smooth profiles (no visible kink where the gradient changes slope).
         glowSmooth = GlUtil.smoothGlowTexture { r ->
             val s = r * r * (3f - 2f * r)
             .62f * (1f - s).toDouble().pow(.9).toFloat() + .38f * kotlin.math.exp(-(r / .12f) * (r / .12f))
         }
-        sporeSmooth = GlUtil.smoothGlowTexture { r ->
-            // A flat, translucent centre with a very wide feathered edge. Avoid a
-            // concentrated hot pixel: sub-pixel sprites then read as soft motes,
-            // rather than outlined circles with a seemingly black centre.
-            val edge = ((r - .18f) / .82f).coerceIn(0f, 1f)
-            val fade = 1f - edge * edge * (3f - 2f * edge)
-            .34f * fade
-        }
+        sporeSmooth = GlUtil.dustTexture()
         glowTex = glowLow; sporeTex = sporeLow
         holeGlowTex = GlUtil.glowTexture(floatArrayOf(0f, .35f, 1f), intArrayOf(255, 89, 0))
         ringTex = GlUtil.ringTexture(); whiteTex = GlUtil.whiteTexture()
@@ -1172,11 +1161,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val tw = .5 + .5 * sin(t * (.35 + hash(i, 2, 8) * .35) + seed * 3)
             val roll = hash(i, 3, 10)
             val col = if (ember) Palette.ember else if (roll < .08) Palette.purple else if (roll < .16) Palette.green else Palette.lemon
-            // Preserve a visible filled core at distance: sub-pixel radial sprites can sample only their fading rim.
-            val distanceScale = 1.0 + min(dist, 90.0) * .018
-            val size = (.14 + hash(i, 4, 9) * .12) * (if (ember) 1.25 else 1.0) * 3.0 * distanceScale
-            val atmosphericAlpha = sporeOpacity(dist, tw) * (if (ember) 1.25 else 1.0) * .42
-            bSpore.add(mx, groundHeight(mx, mz) + sp.h + sin(t * .5 + seed) * .25, mz, size, size, col, min(.42, atmosphericAlpha) * (1.0 - dayLevel * .5))
+            // Keep dust motes fine-grained; the texture supplies a filled, non-ring core.
+            val distanceScale = 1.0 + min(dist, 90.0) * .012
+            val size = (.13 + hash(i, 4, 9) * .10) * (if (ember) 1.12 else 1.0) * 3.0 * distanceScale
+            val atmosphericAlpha = sporeOpacity(dist, tw) * (if (ember) 1.12 else 1.0) * .34
+            bSpore.add(mx, groundHeight(mx, mz) + sp.h + sin(t * .5 + seed) * .25, mz, size, size, col, min(.34, atmosphericAlpha) * (1.0 - dayLevel * .5))
         }
         if (orbSeen.size > 24) orbSeen.keys.retainAll(e.orbs.map { it.p.id }.toSet())
         // Orb auras.
@@ -1247,6 +1236,10 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             GL.glUniform1f(loc(spriteProg, "uFogOn"), if (b.fog) 1f else 0f); GL.glUniform1f(loc(spriteProg, "uEncode"), encode)
             GL.glEnable(GL.GL_BLEND)
             if (b.additive) GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE) else GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
+            // Dust remains occluded by trunks and terrain, but LEQUAL avoids a one-ULP
+            // depth mismatch turning the centre of a billboard into a dark missing patch.
+            GL.glEnable(GL.GL_DEPTH_TEST)
+            if (b === bSpore) GL.glDepthFunc(GL.GL_LEQUAL)
             GL.glDepthMask(false)
             GL.glActiveTexture(GL.GL_TEXTURE0); GL.glBindTexture(GL.GL_TEXTURE_2D, b.texture())
             b.data.position(0).limit(b.count * 10)
@@ -1256,6 +1249,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             GL.glBindVertexArray(0)
             b.data.limit(b.data.capacity())
             GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
+            if (b === bSpore) GL.glDepthFunc(GL.GL_LESS)
         }
         if (b === bHole) b.clear()
     }
