@@ -717,7 +717,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         meshes[K_CROWN] = Mesh(Geo.crown(if (flat) CROWN_NEAR_SUBDIVISIONS else f.crownNearDetail, flat), MAX_PROPS * 16)
         meshes[K_ROCK] = Mesh(if (flat) Geo.jittered(2, .18f, .14f, 33, true) else Geo.jittered(f.rockDetail, .18f, .14f, 33, false), MAX_PROPS)
         meshes[K_PLANT] = Mesh(if (flat) Geo.jittered(2, .35f, .4f, 47, true) else Geo.jittered(f.rockDetail, .35f, .4f, 47, false), MAX_PROPS)
-        meshes[K_CROWN_FAR] = Mesh(Geo.crown(CROWN_FAR_SUBDIVISIONS, flat), MAX_PROPS * 16)
+        // Keep near and far crown topology identical within a quality tier. A topology/normal
+        // discontinuity at CROWN_LOD_DISTANCE can otherwise read as a sudden foliage band.
+        meshes[K_CROWN_FAR] = Mesh(Geo.crown(if (flat) CROWN_FAR_SUBDIVISIONS else f.crownNearDetail, flat), MAX_PROPS * 16)
         meshes[K_TRUNK] = Mesh(if (f.lifelikeTrees) Geo.trunkLifelike() else Geo.trunk(), MAX_PROPS)
         meshes[K_ROOT] = Mesh(if (f.lifelikeTrees) Geo.rootLifelike() else Geo.root(), MAX_PROPS * 5)
         meshes[K_BRANCH] = Mesh(if (f.lifelikeTrees) Geo.branchRound() else Geo.branch(), MAX_PROPS * 11)

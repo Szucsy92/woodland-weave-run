@@ -214,7 +214,8 @@ void main() {
     float mossN = sin(vW.x * .21 + sin(vW.z * .17) * 2.) * sin(vW.z * .19 - sin(vW.x * .13) * 1.7);
     float litN = sin(vW.x * 1.3 + vW.z * .7) * sin(vW.z * 1.1 - vW.x * .5);
     float moss = smoothstep(.25, .75, mossN);
-    float damp = smoothstep(.2, -.6, mossN);
+    // smoothstep requires edge0 < edge1; invert the result for the damp-area mask.
+    float damp = 1.0 - smoothstep(-.6, .2, mossN);
     albedo = mix(albedo, albedo * vec3(.72, 1.18, .74), moss * .6);
     albedo *= 1. - damp * .3;
     albedo = mix(albedo, albedo * vec3(1.25, 1.02, .78), smoothstep(.55, .95, litN) * .35);
@@ -257,7 +258,10 @@ void main() {
   vec3 col = albedo / PI * (mix(uGroundC, uSky, n.y * 0.5 + 0.5) * uHemi);
   float sh = 1.0;
 #ifdef Q_SHADOW
-  sh = shadowAt(vW, n);
+  // Canopy blobs overlap by design. Let them cast shadows onto the scene, but do not
+  // receive the shadow map themselves: overlapping crown surfaces otherwise produce
+  // self-shadow acne and broad, moving stripe patterns across the foliage.
+  if (uMode != 5) sh = shadowAt(vW, n);
 #endif
   col += light(n, v, normalize(uMoonDir), uMoon * sh, albedo, alpha);
   vec3 tl = uLampPos - vW; float d = length(tl);

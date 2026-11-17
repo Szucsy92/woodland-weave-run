@@ -39,9 +39,9 @@ class Features(val quality: Quality) {
     val lifelikeTrees = r >= 1
 
     /** Contrast-adaptive sharpening of the final picture; counters the softness of upscaling, MSAA and bloom. */
-    val sharpen = if (r >= 2) 0.20f else if (r >= 1) 0.18f else 0.16f
-    /** Neutral mip selection avoids over-sharpening distant bark and ground into moiré bands. */
-    val lodBias = 0.0f
+    val sharpen = if (r >= 2) 0.40f else if (r >= 1) 0.36f else 0.30f
+    /** Negative texture LOD bias: bark and ground stay crisper at a distance. */
+    val lodBias = if (r >= 1) -0.45f else -0.30f
     /** Medium and High see further before the fog closes in. */
     val fogFarScale = if (r >= 1) 1.12f else 1f
 
