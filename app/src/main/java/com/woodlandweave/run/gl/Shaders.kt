@@ -789,7 +789,12 @@ void main() {
   float sum = 0.0, ws = 0.0;
   for (int i = -2; i <= 2; i++) for (int j = -2; j <= 2; j++) {
     vec2 uv = vUv + vec2(float(i), float(j)) * uTexel;
-    float w = exp(-abs(texture(uDepth, uv).r - d0) * 4000.0);
+    // Compare depths relatively (1 - d is proportional to 1/z). The old fixed threshold on the non-linear depth blurred
+    // only along rows wherever the depth changes from row to row (canopy undersides, the ground at a grazing angle),
+    // so the row-to-row noise of the occlusion survived as horizontal stripes. Now such surfaces blur in every direction
+    // and only real depth edges stop the blur.
+    float di = texture(uDepth, uv).r;
+    float w = exp(-abs(log(max(1.0 - di, 1e-6) / max(1.0 - d0, 1e-6))) * 12.0);
     sum += texture(uAoIn, uv).r * w; ws += w;
   }
   o = vec4(vec3(sum / max(ws, 1e-4)), 1.0);
