@@ -264,6 +264,11 @@ void main() {
   if (uMode == 5) sh = shadowAt(vW + keyL * 4.5, vec3(0.0));
   else sh = shadowAt(vW, n);
 #endif
+  // Dappled, drifting light: patches of sun / moonlight wander over trunks, ground, bushes and leaves.
+  float dapA = sin(vW.x * 0.9 + uTime * 0.55 + sin(vW.z * 0.7 - uTime * 0.35) * 1.6);
+  float dapB = sin(vW.z * 0.8 - uTime * 0.45 + sin(vW.x * 0.6 + uTime * 0.3) * 1.4);
+  float dap = smoothstep(-0.55, 0.65, dapA * dapB);
+  sh *= mix(0.6, 1.3, dap) * (uMode == 5 ? 0.7 : 1.0) + (uMode == 5 ? 0.3 : 0.0);
   if (uMode == 5) {
     // Foliage is translucent: wrapped diffuse on the lit side, and the light shining through leaves seen against it.
     vec3 leaf = albedo + vec3(.10, .22, .07) * 1.4;
@@ -523,7 +528,9 @@ vec3 shafts(vec3 c, vec2 uv, float d) {
     if (i >= N) break;
     vec3 p = ro + rd * ((float(i) + j) * dt);
     float heightFog = exp(-max(p.y, 0.0) * 0.105);
-    float canopy = 0.88 + 0.12 * sin(p.x * 0.31 + p.z * 0.23) * sin(p.z * 0.27 - p.x * 0.17);
+    // Beams shimmer and drift: the canopy density moves with time.
+    float canopy = 0.8 + 0.2 * sin(p.x * 0.31 + p.z * 0.23 + time * 0.4) * sin(p.z * 0.27 - p.x * 0.17 - time * 0.33)
+                 + 0.12 * sin(p.x * 0.9 - time * 0.7) * sin(p.z * 0.8 + time * 0.5);
     float dens = uFogDens * heightFog * canopy;
     float vis = shadowMarch(p);
     // A small ambient term keeps the beam visible at soft shadow edges without flattening contrast.
@@ -531,7 +538,7 @@ vec3 shafts(vec3 c, vec2 uv, float d) {
     sc += inscatter * T;
     T *= exp(-dens * dt * 0.58);
   }
-  return c * T + sc * 1.08;
+  return c * T + sc * 1.08 * (0.92 + 0.08 * sin(time * 0.8));
 }
 #endif
 #endif

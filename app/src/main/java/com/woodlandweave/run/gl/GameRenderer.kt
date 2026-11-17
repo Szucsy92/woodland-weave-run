@@ -389,25 +389,38 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         pp.exposureScale = .94f + .10f * k + .025f * dusk
         pp.bloomScale = .86f - .06f * k + .035f * dusk
         // The key light's beams stay visible at every hour.
-        pp.shaftScale = .95f + .2f * tw - .05f * k
+        pp.shaftScale = 1.25f - .2f * k
         red = e.redMix.toFloat(); lights = 1f - e.dieRef.toFloat()
 
         // Key light direction: the moon (50 degrees, ahead of the runner) at night, a low sun (22 degrees) coming from the
         // front-left at dawn and the front-right at dusk, and a high sun by day. It always shines into the forest.
-        val elev = Math.toRadians((50.2 + 7.8 * k) * (1.0 - tw) + 22.0 * tw)
-        val az = Math.toRadians((if (dawnSide) -38.0 else 38.0) * tw)
+        // The light never sits still: it sways slowly, so beams and shadows drift through the forest.
+        val swayEl = 2.6 * sin(animT * .23) + 1.2 * sin(animT * .61 + 1.7)
+        val swayAz = 4.2 * sin(animT * .15 + 1.0) + 1.5 * sin(animT * .47)
+        val elev = Math.toRadians((50.2 + 7.8 * k) * (1.0 - tw) + 22.0 * tw + swayEl)
+        val az = Math.toRadians((if (dawnSide) -38.0 else 38.0) * tw + swayAz)
         moonDirV[0] = (sin(az) * cos(elev)).toFloat()
         moonDirV[1] = sin(elev).toFloat()
         moonDirV[2] = (-cos(az) * cos(elev)).toFloat()
         val twCol = if (dawnSide) Palette.sunDawn else Palette.sunDusk
         moonCol = Palette.mix(Palette.mix(Palette.moon, Palette.sunDay, k), twCol, tw * .85f)
-        val moonI = .7f + k * 1.9f + tw * .55f
+        // Colour play: the moonlight drifts towards the forest's green and violet, the sun towards gold and rose.
+        val drift = sin(animT * .27).toFloat()
+        val driftAmt = abs(drift) * (.14f * (1f - k) + .06f * k)
+        val driftCol = if (k < .5f) (if (drift > 0f) Palette.green else Palette.purple) else (if (drift > 0f) Palette.sunDawn else Palette.sunDusk)
+        moonCol = Palette.mix(moonCol, driftCol, driftAmt)
+        // A stronger moon (night), unchanged dawn/dusk (2.2) and a bright day sun, with a slow breathing of the light.
+        val breath = 1f + .09f * sin(animT * .7).toFloat() + .05f * sin(animT * 1.9 + 2.0).toFloat()
+        val moonI = (1.45f + k * 1.25f + tw * .125f) * breath
 
         // The day's base colours are dark and greyish: the sun itself does the lighting.
-        fog = Palette.mix(Palette.mix(Palette.fog, Palette.dayFog, k), warmFog, tw * .22f)
-        sky = Palette.mix(Palette.mix(Palette.moon, Palette.daySky, k), warmSky, tw * .30f)
+        // Past dawn the day brightens further (dl = 0 at dawn/dusk, so the twilight look is untouched).
+        val dl0 = ((k - .5f) * 2f).coerceIn(0f, 1f)
+        val dl = dl0 * dl0 * (3f - 2f * dl0)
+        fog = Palette.mix(Palette.mix(Palette.mix(Palette.fog, Palette.dayFog, k), warmFog, tw * .22f), Palette.dayFogLight, dl)
+        sky = Palette.mix(Palette.mix(Palette.mix(Palette.moon, Palette.daySky, k), warmSky, tw * .30f), Palette.daySkyLight, dl)
         groundC = Palette.mix(fog, Palette.pursuer, red * .55f)
-        hemi = .82f + k * .55f + tw * .08f + red * 1.4f
+        hemi = .82f + k * .55f + tw * .08f + dl * .35f + red * 1.4f
         // Fog starts later by day, so the distant lights stay readable.
         fogNear = 7f + k * 2f
 
