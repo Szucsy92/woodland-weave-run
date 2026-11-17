@@ -188,15 +188,18 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         barkTex = GlUtil.assetTexture(context, "wet-bark.jpg", srgb = true); barkN = GlUtil.assetTexture(context, "bark-normal.jpg"); barkR = GlUtil.assetTexture(context, "bark-rough.jpg")
         floorTex = GlUtil.assetTexture(context, "wet-ground.jpg", srgb = true); floorN = GlUtil.assetTexture(context, "ground-normal.jpg"); floorR = GlUtil.assetTexture(context, "ground-rough.jpg")
         glowLow = GlUtil.glowTexture(floatArrayOf(0f, .2f, 1f), intArrayOf(255, 153, 0))
-        sporeLow = GlUtil.glowTexture(floatArrayOf(0f, .16f, .4f, 1f), intArrayOf(255, 235, 66, 0))
+        // Keep a broad, filled centre on Low too; a narrow hot core aliases into hollow-looking rings at distance.
+        sporeLow = GlUtil.glowTexture(floatArrayOf(0f, .42f, .82f, 1f), intArrayOf(255, 220, 72, 0))
         // Medium and High: the same glows with smooth profiles (no visible kink where the gradient changes slope).
         glowSmooth = GlUtil.smoothGlowTexture { r ->
             val s = r * r * (3f - 2f * r)
             .62f * (1f - s).toDouble().pow(.9).toFloat() + .38f * kotlin.math.exp(-(r / .12f) * (r / .12f))
         }
         sporeSmooth = GlUtil.smoothGlowTexture { r ->
-            val t = ((r - .7f) / .3f).coerceIn(0f, 1f)
-            kotlin.math.exp(-(r / .38f) * (r / .38f)) * (1f - t * t * (3f - 2f * t))
+            // Broad filled centre survives minification; only the outer edge dissolves to zero.
+            val edge = ((r - .82f) / .18f).coerceIn(0f, 1f)
+            val edgeFade = 1f - edge * edge * (3f - 2f * edge)
+            kotlin.math.exp(-(r / .62f) * (r / .62f)) * edgeFade
         }
         glowTex = glowLow; sporeTex = sporeLow
         holeGlowTex = GlUtil.glowTexture(floatArrayOf(0f, .35f, 1f), intArrayOf(255, 89, 0))
@@ -704,7 +707,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         locs.clear()
         rebuildTierMeshes(feat)
         glowTex = if (feat.smoothMeshes) glowSmooth else glowLow
-        sporeTex = if (feat.smoothMeshes) sporeSmooth else sporeLow
+        // Spores always use the smooth, broad-core profile, even on Low; mesh quality is unrelated to sprite filtering.
+        sporeTex = sporeSmooth
         appliedQuality = q
         // A tier the device could not reach must not be retried every frame.
         if (feat.quality.ordinal < q.ordinal) qualityCap = feat.quality
@@ -1154,7 +1158,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val tw = .5 + .5 * sin(t * (.35 + hash(i, 2, 8) * .35) + seed * 3)
             val roll = hash(i, 3, 10)
             val col = if (ember) Palette.ember else if (roll < .08) Palette.purple else if (roll < .16) Palette.green else Palette.lemon
-            val size = (.14 + hash(i, 4, 9) * .12) * (if (ember) 1.25 else 1.0) * 3.0
+            // Preserve a visible filled core at distance: sub-pixel radial sprites can sample only their fading rim.
+            val distanceScale = 1.0 + min(dist, 90.0) * .018
+            val size = (.14 + hash(i, 4, 9) * .12) * (if (ember) 1.25 else 1.0) * 3.0 * distanceScale
             bSpore.add(mx, groundHeight(mx, mz) + sp.h + sin(t * .5 + seed) * .25, mz, size, size, col, min(1.0, sporeOpacity(dist, tw) * (if (ember) 1.9 else 1.0)) * (1.0 - dayLevel * .5))
         }
         if (orbSeen.size > 24) orbSeen.keys.retainAll(e.orbs.map { it.p.id }.toSet())
