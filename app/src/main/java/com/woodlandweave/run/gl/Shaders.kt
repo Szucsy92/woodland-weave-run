@@ -243,7 +243,7 @@ void main() {
     emissive += mix(tint, vec3(.95, .12, .06), uRed) * rim * near * .22 * smoothstep(.6, 2., vLY) * mix(uLights, .8, uRed);
   } else if (uMode == 5) {
     // Purple-green shards of light catching the leaf undersides.
-    float under = smoothstep(.15, -.75, n.y);
+    float under = 1.0 - smoothstep(-.75, .15, n.y);
     float shard = .55 + .45 * sin(vW.x * .8 + sin(vW.z * .6) * 2.2) * sin(vW.z * .7 - sin(vW.x * .5) * 1.8);
     vec3 glowTint = mix(vec3(.16, .5, .3), vec3(.42, .25, .62), .5 + .5 * sin(vW.x * .23 + vW.z * .31));
     emissive += mix(glowTint, vec3(.95, .12, .06), uRed) * under * shard * .3 * mix(uLights, .8, uRed);

@@ -164,9 +164,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         locs.clear()
         meshes = arrayOf(
             Mesh(Geo.trunk(), MAX_PROPS), Mesh(Geo.flatQuad(), MAX_PROPS * 2), Mesh(Geo.root(), MAX_PROPS * 5),
-            Mesh(Geo.branch(), MAX_PROPS * 11), Mesh(Geo.crown(CROWN_NEAR_SUBDIVISIONS, FLAT_FACETS), MAX_PROPS * 16),
+            Mesh(Geo.branch(), MAX_PROPS * 11), Mesh(Geo.crown(CROWN_NEAR_SUBDIVISIONS, false), MAX_PROPS * 16),
             Mesh(Geo.jittered(2, .18f, .14f, 33, FLAT_FACETS), MAX_PROPS), Mesh(Geo.jittered(2, .35f, .4f, 47, FLAT_FACETS), MAX_PROPS),
-            Mesh(Geo.crown(CROWN_FAR_SUBDIVISIONS, FLAT_FACETS), MAX_PROPS * 16),
+            Mesh(Geo.crown(CROWN_FAR_SUBDIVISIONS, false), MAX_PROPS * 16),
         )
         box = Mesh(Geo.box(1f, 1f, 1f), 4); orb = Mesh(Geo.icosphere(3), 4); holeBody = Mesh(Geo.icosphere(3), 4)
         cyl = Mesh(Geo.cylinder(.5f, .5f, 1f, 8, 1), 4); cone = Mesh(Geo.cylinder(0f, .5f, 1f, 5, 1), 4)
@@ -714,12 +714,12 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private fun rebuildTierMeshes(f: Features) {
         val flat = !f.smoothMeshes
         val old = arrayListOf(meshes[K_CROWN], meshes[K_ROCK], meshes[K_PLANT], meshes[K_CROWN_FAR], meshes[K_TRUNK], meshes[K_ROOT], meshes[K_BRANCH])
-        meshes[K_CROWN] = Mesh(Geo.crown(if (flat) CROWN_NEAR_SUBDIVISIONS else f.crownNearDetail, flat), MAX_PROPS * 16)
+        meshes[K_CROWN] = Mesh(Geo.crown(if (flat) CROWN_NEAR_SUBDIVISIONS else f.crownNearDetail, false), MAX_PROPS * 16)
         meshes[K_ROCK] = Mesh(if (flat) Geo.jittered(2, .18f, .14f, 33, true) else Geo.jittered(f.rockDetail, .18f, .14f, 33, false), MAX_PROPS)
         meshes[K_PLANT] = Mesh(if (flat) Geo.jittered(2, .35f, .4f, 47, true) else Geo.jittered(f.rockDetail, .35f, .4f, 47, false), MAX_PROPS)
         // Keep near and far crown topology identical within a quality tier. A topology/normal
         // discontinuity at CROWN_LOD_DISTANCE can otherwise read as a sudden foliage band.
-        meshes[K_CROWN_FAR] = Mesh(Geo.crown(if (flat) CROWN_FAR_SUBDIVISIONS else f.crownNearDetail, flat), MAX_PROPS * 16)
+        meshes[K_CROWN_FAR] = Mesh(Geo.crown(if (flat) CROWN_FAR_SUBDIVISIONS else f.crownNearDetail, false), MAX_PROPS * 16)
         meshes[K_TRUNK] = Mesh(if (f.lifelikeTrees) Geo.trunkLifelike() else Geo.trunk(), MAX_PROPS)
         meshes[K_ROOT] = Mesh(if (f.lifelikeTrees) Geo.rootLifelike() else Geo.root(), MAX_PROPS * 5)
         meshes[K_BRANCH] = Mesh(if (f.lifelikeTrees) Geo.branchRound() else Geo.branch(), MAX_PROPS * 11)
