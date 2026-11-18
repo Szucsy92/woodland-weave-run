@@ -388,8 +388,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         lampDay = if (feat.rank >= 1) 1f - .2f * k else 1f
         pp.exposureScale = .94f + .10f * k + .025f * dusk
         pp.bloomScale = .86f - .06f * k + .035f * dusk
-        // The key light's beams stay visible at every hour.
-        pp.shaftScale = 1.25f - .2f * k
+        // Keep the established day/night look, but give the low-angle dawn and dusk
+        // light enough atmospheric density to produce clearly defined, long shafts.
+        pp.shaftScale = 1.25f - .2f * k + .55f * tw
         red = e.redMix.toFloat(); lights = 1f - e.dieRef.toFloat()
 
         // Key light direction: the moon (50 degrees, ahead of the runner) at night, a low sun (22 degrees) coming from the
@@ -403,15 +404,12 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         moonDirV[1] = sin(elev).toFloat()
         moonDirV[2] = (-cos(az) * cos(elev)).toFloat()
         val twCol = if (dawnSide) Palette.sunDawn else Palette.sunDusk
-        moonCol = Palette.mix(Palette.mix(Palette.moon, Palette.sunDay, k), twCol, tw * .85f)
-        // Colour play: the moonlight drifts towards the forest's green and violet, the sun towards gold and rose.
-        val drift = sin(animT * .27).toFloat()
-        val driftAmt = abs(drift) * (.14f * (1f - k) + .06f * k)
-        val driftCol = if (k < .5f) (if (drift > 0f) Palette.green else Palette.purple) else (if (drift > 0f) Palette.sunDawn else Palette.sunDusk)
-        moonCol = Palette.mix(moonCol, driftCol, driftAmt)
-        // A stronger moon (night), unchanged dawn/dusk (2.2) and a bright day sun, with a slow breathing of the light.
+        moonCol = Palette.mix(Palette.mix(Palette.moonKey, Palette.sunDay, k), twCol, tw * .85f)
+        // Keep the key light chromatically stable: gold/white sunlight by day and
+        // cold blue-white moonlight at night. Avoid the old rose/purple colour drift.
+        // The low sun at dawn/dusk gets a modest intensity lift so it also lights the forest floor.
         val breath = 1f + .09f * sin(animT * .7).toFloat() + .05f * sin(animT * 1.9 + 2.0).toFloat()
-        val moonI = (1.45f + k * 1.25f + tw * .125f) * breath
+        val moonI = (1.45f + k * 1.25f + tw * .35f) * breath
 
         // The day's base colours are dark and greyish: the sun itself does the lighting.
         // Past dawn the day brightens further (dl = 0 at dawn/dusk, so the twilight look is untouched).
@@ -447,7 +445,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         pp.near = .1f; pp.far = 220f; pp.aspect = aspectRatio
         pp.tanHalf = tan(Math.toRadians(FOV / 2.0)).toFloat()
         System.arraycopy(moonDirV, 0, pp.moonDir, 0, 3)
-        val shaftK = .6f - .22f * k
+        // Twilight shafts need a little extra source energy to remain crisp against
+        // the brighter dawn/dusk sky; full day and full night retain their existing balance.
+        val shaftK = .6f - .22f * k + .22f * tw
         pp.moonCol[0] = moonCol[0] * moonI * shaftK; pp.moonCol[1] = moonCol[1] * moonI * shaftK; pp.moonCol[2] = moonCol[2] * moonI * shaftK
         val camSpeed = if (dt > 0) hypot(cam.ex - lastCamX, cam.ez - lastCamZ) / dt else 0.0
         lastCamX = cam.ex; lastCamZ = cam.ez
