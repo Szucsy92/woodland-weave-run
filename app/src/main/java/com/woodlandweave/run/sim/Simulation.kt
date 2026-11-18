@@ -35,7 +35,7 @@ enum class Phase { MENU, AWAKENING, RUNNING, FALLING, FALLEN }
 enum class Difficulty { EASY, NORMAL, HARD }
 enum class GameMode { CLASSIC, SURVIVE, FREEROAM }
 enum class PowerUpType { FREEZER, GHOST, SHOCKWAVE }
-enum class ForestMood { NIGHT, DAWN, DAY, DUSK, AUTO }
+enum class ForestMood { NIGHT, DAY, AUTO }
 enum class SecretType { MONOLITH, RING, LANTERN }
 enum class SurviveStage { LIT, DYING, DARK, RED }
 
@@ -633,7 +633,6 @@ fun tiltFromGravity(screenRight: Double): Double {
 fun daylightFor(mood: ForestMood, hours: Double): Double {
     if (mood == ForestMood.NIGHT) return 0.0
     if (mood == ForestMood.DAY) return 1.0
-    if (mood == ForestMood.DAWN || mood == ForestMood.DUSK) return 0.5
     val h = ((hours % 24) + 24) % 24
     fun ramp(a: Double, b: Double) = min(1.0, max(0.0, (h - a) / (b - a)))
     return smooth(ramp(5.0, 8.0)) * (1 - smooth(ramp(17.0, 20.0)))
