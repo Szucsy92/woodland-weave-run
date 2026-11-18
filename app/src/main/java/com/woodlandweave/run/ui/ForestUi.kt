@@ -499,7 +499,7 @@ private fun SettingsContent(ui: UiState, a: Actions, updates: UpdateController, 
                 SettingRow("Difficulty", topLine = false, hint = if (!inMenu) "Applies from the next run." else null) {
                     Seg(listOf(Difficulty.EASY to "Easy", Difficulty.NORMAL to "Normal", Difficulty.HARD to "Hard"), s.difficulty, a.setDifficulty)
                 }
-                SettingRow("Forest") { Seg(listOf(ForestMood.NIGHT to "Night", ForestMood.DAWN to "Dawn", ForestMood.DAY to "Day", ForestMood.DUSK to "Dusk", ForestMood.AUTO to "Auto"), s.mood, a.setMood) }
+                SettingRow("Forest") { Seg(listOf(ForestMood.NIGHT to "Night", ForestMood.DAY to "Day", ForestMood.AUTO to "Auto"), s.mood, a.setMood) }
                 GraphicsBlock(s, a, onFxDrag)
                 SettingRow("Controls") { Seg(listOf(false to "Tilt", true to "Touch"), s.touch, a.setTouch) }
                 SettingRow("Orientation") { Seg(listOf(false to "Landscape", true to "Any"), s.anyOrientation, a.setAnyOrientation) }
