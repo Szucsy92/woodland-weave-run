@@ -390,7 +390,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         pp.bloomScale = .86f - .06f * k + .035f * dusk
         // Keep the same strong, crisp volumetric shafts at all four times of day.
         // Dawn/dusk strength is now the baseline rather than a temporary twilight boost.
-        pp.shaftScale = 1.70f
+        pp.shaftScale = 1.75f
         red = e.redMix.toFloat(); lights = 1f - e.dieRef.toFloat()
 
         // Key light direction: the moon (50 degrees, ahead of the runner) at night, a low sun (22 degrees) coming from the
@@ -409,7 +409,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         // cold blue-white moonlight at night. No green, violet or rose colour drift.
         // Match the strong dawn/dusk direct-light level throughout the complete day cycle.
         val breath = 1f + .09f * sin(animT * .7).toFloat() + .05f * sin(animT * 1.9 + 2.0).toFloat()
-        val moonI = 2.425f * breath
+        val moonI = 2.8f * breath
 
         // The day's base colours are dark and greyish: the sun itself does the lighting.
         // Past dawn the day brightens further (dl = 0 at dawn/dusk, so the twilight look is untouched).
@@ -446,7 +446,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         pp.tanHalf = tan(Math.toRadians(FOV / 2.0)).toFloat()
         System.arraycopy(moonDirV, 0, pp.moonDir, 0, 3)
         // Keep shaft source energy at the same strong level at night, dawn, day and dusk.
-        val shaftK = .71f
+        val shaftK = .60f
         pp.moonCol[0] = moonCol[0] * moonI * shaftK; pp.moonCol[1] = moonCol[1] * moonI * shaftK; pp.moonCol[2] = moonCol[2] * moonI * shaftK
         val camSpeed = if (dt > 0) hypot(cam.ex - lastCamX, cam.ez - lastCamZ) / dt else 0.0
         lastCamX = cam.ex; lastCamZ = cam.ez
@@ -499,7 +499,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             u3(p, "uFog", fog); u1(p, "uFogNear", fogNear); u1(p, "uFogFar", fogFar)
             u3(p, "uSky", sky); u3(p, "uGroundC", groundC); u1(p, "uHemi", hemi)
             u3(p, "uMoonDir", moonDirV[0], moonDirV[1], moonDirV[2])
-            u3(p, "uMoon", moonCol[0] * moonI, moonCol[1] * moonI, moonCol[2] * moonI)
+            // Boost direct illumination independently from the volumetric shaft contribution.
+            u3(p, "uMoon", moonCol[0] * moonI * 1.35f, moonCol[1] * moonI * 1.35f, moonCol[2] * moonI * 1.35f)
             u3(p, "uLampPos", e.lampX.toFloat(), e.lampY.toFloat(), e.lampZ.toFloat()); u3(p, "uLampCol", Palette.lamp); u1(p, "uLampI", e.lampIntensity.toFloat() * lampDay); u1(p, "uLampSoft", feat.lampSoft)
             // Local lights (the nearest pickups) and the trunks that can block them were prepared once for this frame.
             GL.glUniform4fv(loc(p, "uLocalPos[0]"), 4, localLightPositions, 0)
