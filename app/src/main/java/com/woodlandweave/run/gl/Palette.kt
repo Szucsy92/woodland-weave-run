@@ -4,6 +4,12 @@ import kotlin.math.pow
 
 /** The forest palette from styles.css. Lighting runs in linear space, output is gamma 2.2. */
 object Palette {
+    // Requested lighting balance (shared by the renderer's direct and volumetric passes).
+    const val VOLUMETRIC_SHAFT_INTENSITY = 2.35f
+    const val DIRECT_ILLUMINATION = 1.65f
+    const val SHAFT_ENERGY = 0.82f
+    const val KEY_LIGHT_INTENSITY = 3.40f
+
     // Match Three.js ColorManagement's IEC 61966-2-1 sRGB transfer curve.
     // A simple pow(2.2) approximation shifts dark forest tones noticeably.
     private fun decodeSrgb(v: Float) = if (v <= 0.04045f) v / 12.92f else ((v + 0.055f) / 1.055f).pow(2.4f)
