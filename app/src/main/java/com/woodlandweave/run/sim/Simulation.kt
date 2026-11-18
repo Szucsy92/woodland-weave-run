@@ -21,7 +21,7 @@ import kotlin.math.sqrt
 // ---------------------------------------------------------------------------------------------
 
 const val CELL = 6.0
-const val RADIUS = 17   // cells generated around the runner (6 m each): 102 m, past the fog and the long shadows of the low light
+const val RADIUS = 13
 const val FOG_END = 38.0
 const val MAX_HEADING = 37.5 * PI / 180.0
 const val IMPACT_DURATION = 0.5
@@ -35,7 +35,7 @@ enum class Phase { MENU, AWAKENING, RUNNING, FALLING, FALLEN }
 enum class Difficulty { EASY, NORMAL, HARD }
 enum class GameMode { CLASSIC, SURVIVE, FREEROAM }
 enum class PowerUpType { FREEZER, GHOST, SHOCKWAVE }
-enum class ForestMood { MANUAL, AUTO }
+enum class ForestMood { NIGHT, DAY, AUTO }
 enum class SecretType { MONOLITH, RING, LANTERN }
 enum class SurviveStage { LIT, DYING, DARK, RED }
 
@@ -630,18 +630,10 @@ fun tiltFromGravity(screenRight: Double): Double {
     return max(-1.0, min(1.0, deg / 25))
 }
 
-/**
- * Position in the four-phase day cycle: 0 = night, .25 = dawn, .5 = day, .75 = dusk, 1 = night again.
- * The real clock is mapped onto it piecewise: night at 0:00, dawn at 6:30, day at 12:30, dusk at 18:30.
- */
-fun cyclePos(hours: Double): Double {
+fun daylightFor(mood: ForestMood, hours: Double): Double {
+    if (mood == ForestMood.NIGHT) return 0.0
+    if (mood == ForestMood.DAY) return 1.0
     val h = ((hours % 24) + 24) % 24
-    val hs = doubleArrayOf(0.0, 6.5, 12.5, 18.5, 24.0)
-    val ps = doubleArrayOf(0.0, .25, .5, .75, 1.0)
-    for (i in 0 until 4) if (h <= hs[i + 1]) return ps[i] + (h - hs[i]) / (hs[i + 1] - hs[i]) * (ps[i + 1] - ps[i])
-    return 0.0
+    fun ramp(a: Double, b: Double) = min(1.0, max(0.0, (h - a) / (b - a)))
+    return smooth(ramp(5.0, 8.0)) * (1 - smooth(ramp(17.0, 20.0)))
 }
-
-/** Auto follows the clock; otherwise the slider's position (0..1) is the time of day. */
-fun timeOfDayFor(mood: ForestMood, manual: Double, hours: Double): Double =
-    if (mood == ForestMood.AUTO) cyclePos(hours) else manual.coerceIn(0.0, 1.0)
