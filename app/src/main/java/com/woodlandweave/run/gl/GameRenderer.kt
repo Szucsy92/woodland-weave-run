@@ -381,23 +381,24 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val k = dayLevel.toFloat()
         // Twilight weight: 0 at full night / full day, 1 half way (dawn or dusk).
         val dusk = (1f - kotlin.math.abs(2f * k - 1f)).coerceIn(0f, 1f)
-        val tw = dusk * dusk * (3f - 2f * dusk)
-        val dawnSide = hours < 13.0   // before 13:00 the twilight is a sunrise, after it a sunset
+        val tw = ((dusk - .2f) / .6f).coerceIn(0f, 1f).let { it * it * (3f - 2f * it) }
+        val dawnSide = when (e.settings.mood) { ForestMood.DAWN -> true; ForestMood.DUSK -> false; else -> hours < 13.0 }   // Auto: before 13:00 sunrise, after it sunset
         val warmSky = floatArrayOf(0.92f, 0.43f, 0.20f)
         val warmFog = floatArrayOf(0.34f, 0.19f, 0.13f)
         lampDay = if (feat.rank >= 1) 1f - .2f * k else 1f
         pp.exposureScale = .94f + .10f * k + .025f * dusk
         pp.bloomScale = .86f - .06f * k + .035f * dusk
-        // The key light's beams stay visible at every hour.
-        pp.shaftScale = 1.25f - .2f * k
+        // Low key light shining ahead of the runner: the beams glow strongly in all four phases (night, dawn, day, dusk).
+        pp.shaftScale = 2.1f - .15f * k + .25f * tw
         red = e.redMix.toFloat(); lights = 1f - e.dieRef.toFloat()
 
         // Key light direction: the moon (50 degrees, ahead of the runner) at night, a low sun (22 degrees) coming from the
         // front-left at dawn and the front-right at dusk, and a high sun by day. It always shines into the forest.
-        // The light never sits still: it sways slowly, so beams and shadows drift through the forest.
-        val swayEl = 2.6 * sin(animT * .23) + 1.2 * sin(animT * .61 + 1.7)
-        val swayAz = 4.2 * sin(animT * .15 + 1.0) + 1.5 * sin(animT * .47)
-        val elev = Math.toRadians((50.2 + 7.8 * k) * (1.0 - tw) + 22.0 * tw + swayEl)
+                // The key light is fixed in the world: no sway, no drift, no pulsing. The beams and light pools stay where they are,
+        // so the runner moves through them (only the slow day-cycle changes the angle).
+        val swayEl = 0.0
+        val swayAz = 0.0
+        val elev = Math.toRadians((26.0 + 8.0 * k) * (1.0 - tw) + 11.0 * tw + swayEl)
         val az = Math.toRadians((if (dawnSide) -38.0 else 38.0) * tw + swayAz)
         moonDirV[0] = (sin(az) * cos(elev)).toFloat()
         moonDirV[1] = sin(elev).toFloat()
@@ -406,12 +407,12 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         moonCol = Palette.mix(Palette.mix(Palette.moon, Palette.sunDay, k), twCol, tw * .85f)
         // Colour play: the moonlight drifts towards the forest's green and violet, the sun towards gold and rose.
         val drift = sin(animT * .27).toFloat()
-        val driftAmt = abs(drift) * (.14f * (1f - k) + .06f * k)
+        val driftAmt = 0f   // fixed light colour per phase (was a slow colour drift)
         val driftCol = if (k < .5f) (if (drift > 0f) Palette.green else Palette.purple) else (if (drift > 0f) Palette.sunDawn else Palette.sunDusk)
         moonCol = Palette.mix(moonCol, driftCol, driftAmt)
-        // A stronger moon (night), unchanged dawn/dusk (2.2) and a bright day sun, with a slow breathing of the light.
-        val breath = 1f + .09f * sin(animT * .7).toFloat() + .05f * sin(animT * 1.9 + 2.0).toFloat()
-        val moonI = (1.45f + k * 1.25f + tw * .125f) * breath
+        // Stronger night moonlight and daylight key light; twilight stays more restrained. The slow breathing keeps the beams alive.
+        val breath = 1f   // steady light: no breathing
+        val moonI = (2.05f + k * 1.40f + tw * .15f) * breath
 
         // The day's base colours are dark and greyish: the sun itself does the lighting.
         // Past dawn the day brightens further (dl = 0 at dawn/dusk, so the twilight look is untouched).
@@ -447,7 +448,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         pp.near = .1f; pp.far = 220f; pp.aspect = aspectRatio
         pp.tanHalf = tan(Math.toRadians(FOV / 2.0)).toFloat()
         System.arraycopy(moonDirV, 0, pp.moonDir, 0, 3)
-        val shaftK = .6f - .22f * k
+        val shaftK = .95f - .10f * k
         pp.moonCol[0] = moonCol[0] * moonI * shaftK; pp.moonCol[1] = moonCol[1] * moonI * shaftK; pp.moonCol[2] = moonCol[2] * moonI * shaftK
         val camSpeed = if (dt > 0) hypot(cam.ex - lastCamX, cam.ez - lastCamZ) / dt else 0.0
         lastCamX = cam.ex; lastCamZ = cam.ez
@@ -790,7 +791,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         GL.glUniformMatrix4fv(loc(shadowProg, "uLightVP"), 1, false, sm.vp[0], 0)
         // Only whole-tree sway moves things, so the shadows follow the trees; rocks and bushes stay put.
         fun draw(kind: Int, sway: Float) {
-            GL.glUniform3f(loc(shadowProg, "uSway"), if (feat.wind) sway else 0f, 0f, 0f)
+            GL.glUniform3f(loc(shadowProg, "uSway"), 0f, 0f, 0f)   // shadows (and so the light beams) do not follow the wind: the light stays fixed
             meshes[kind].draw(bufs[kind], counts[kind])
         }
         draw(K_TRUNK, TREE_SWAY); draw(K_ROOT, TREE_SWAY); draw(K_BRANCH, TREE_SWAY)
