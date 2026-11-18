@@ -268,7 +268,10 @@ void main() {
   float dapA = sin(vW.x * 0.9 + uTime * 0.55 + sin(vW.z * 0.7 - uTime * 0.35) * 1.6);
   float dapB = sin(vW.z * 0.8 - uTime * 0.45 + sin(vW.x * 0.6 + uTime * 0.3) * 1.4);
   float dap = smoothstep(-0.55, 0.65, dapA * dapB);
-  sh *= mix(0.6, 1.3, dap) * (uMode == 5 ? 0.7 : 1.0) + (uMode == 5 ? 0.3 : 0.0);
+  // Ground receives a stronger, broader dapple so the incoming key light reads as soft pools
+  // between the trees. Keep foliage contrast unchanged to avoid washing out the canopy.
+  if (uMode == 3) sh *= mix(0.48, 1.62, dap);
+  else sh *= mix(0.6, 1.3, dap) * (uMode == 5 ? 0.7 : 1.0) + (uMode == 5 ? 0.3 : 0.0);
   if (uMode == 5) {
     // Foliage is translucent: wrapped diffuse on the lit side, and the light shining through leaves seen against it.
     vec3 leaf = albedo + vec3(.10, .22, .07) * 1.4;
@@ -277,7 +280,10 @@ void main() {
     float back = pow(clamp(dot(-v, keyL), 0.0, 1.0), 1.6) * clamp(0.65 - knl * 0.5, 0.0, 1.0);
     col += leaf / PI * uMoon * sh * (wrapD * 0.9 + back * 1.6);
   } else {
-    col += light(n, v, keyL, uMoon * sh, albedo, alpha);
+    // A modest ground-only irradiance lift makes sun/moon pools visible on the forest floor
+    // without raising exposure or bleaching trunks and leaves.
+    float keyBoost = (uMode == 3) ? 1.48 : 1.0;
+    col += light(n, v, keyL, uMoon * sh * keyBoost, albedo, alpha);
   }
   vec3 tl = uLampPos - vW; float d = length(tl);
   // Medium and High soften the very near field, so a trunk next to the lamp no longer burns out to white.
@@ -530,7 +536,7 @@ vec3 shafts(vec3 c, vec2 uv, float d) {
   float dt = len / float(N);
   float j = ign(gl_FragCoord.xy + vec2(time * 13.1, time * 7.3));
   float cosT = dot(rd, uMoonDir);
-  float g = 0.62;
+  float g = 0.70;
   float phase = (1.0 - g * g) / (12.566 * pow(max(1.0 + g * g - 2.0 * g * cosT, 0.12), 1.5));
   float T = 1.0; vec3 sc = vec3(0.0);
   for (int i = 0; i < 48; i++) {
@@ -547,7 +553,7 @@ vec3 shafts(vec3 c, vec2 uv, float d) {
     sc += inscatter * T;
     T *= exp(-dens * dt * 0.58);
   }
-  return c * T + sc * 1.08 * (0.92 + 0.08 * sin(time * 0.8));
+  return c * T + sc * 1.35 * (0.92 + 0.08 * sin(time * 0.8));
 }
 #endif
 #endif
