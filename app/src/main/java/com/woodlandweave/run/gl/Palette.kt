@@ -26,6 +26,20 @@ object Palette {
     val freezer = lin(0x2b6cff); val ghost = lin(0x2ee88a); val shock = lin(0xb04dff); val secret = lin(0x7fe8d8)
     // Day: dark, greyish base colours; the sun does the lighting.
     val dayFog = lin(0x59625f); val daySky = lin(0x7d8784); val dayFogLight = lin(0x7c8884); val daySkyLight = lin(0xa4afab); val dayMoon = lin(0xdfe6e2); val ghostGlow = lin(0xeaf6ff)
+    // Key-light geometry and energy. Elevation is measured above the horizon; twilight stays deliberately low
+    // so the canopy can reveal long, readable shafts instead of a flat overhead wash.
+    const val KEY_NIGHT_ELEVATION_DEG = 54.0
+    const val KEY_DAY_ELEVATION_DEG = 66.0
+    const val KEY_TWILIGHT_ELEVATION_DEG = 13.5
+    const val KEY_TWILIGHT_AZIMUTH_DEG = 44.0
+    const val KEY_ORBIT_AZIMUTH_DEG = 26.0
+    const val KEY_NIGHT_INTENSITY = 1.72f
+    const val KEY_DAY_INTENSITY = 3.05f
+    const val KEY_TWILIGHT_INTENSITY = 2.85f
+    const val SHAFT_NIGHT_SCALE = 1.48f
+    const val SHAFT_DAY_SCALE = 1.30f
+    const val SHAFT_TWILIGHT_BONUS = 0.34f
+
     // Key light colours: sunrise, midday sun, sunset.
     val sunDawn = lin(0xffb98a); val sunDay = lin(0xfff1dc); val sunDusk = lin(0xff8a45)
 
