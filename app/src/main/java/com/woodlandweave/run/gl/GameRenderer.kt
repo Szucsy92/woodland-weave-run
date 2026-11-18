@@ -388,17 +388,23 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         lampDay = if (feat.rank >= 1) 1f - .2f * k else 1f
         pp.exposureScale = .94f + .10f * k + .025f * dusk
         pp.bloomScale = .86f - .06f * k + .035f * dusk
-        // The key light's beams stay visible at every hour.
-        pp.shaftScale = 1.25f - .2f * k
+        // Keep the shafts present in all four phases, with extra energy at the low-angle horizon passes.
+        pp.shaftScale = Palette.SHAFT_NIGHT_SCALE +
+            (Palette.SHAFT_DAY_SCALE - Palette.SHAFT_NIGHT_SCALE) * k + Palette.SHAFT_TWILIGHT_BONUS * tw
         red = e.redMix.toFloat(); lights = 1f - e.dieRef.toFloat()
 
-        // Key light direction: the moon (50 degrees, ahead of the runner) at night, a low sun (22 degrees) coming from the
-        // front-left at dawn and the front-right at dusk, and a high sun by day. It always shines into the forest.
-        // The light never sits still: it sways slowly, so beams and shadows drift through the forest.
-        val swayEl = 2.6 * sin(animT * .23) + 1.2 * sin(animT * .61 + 1.7)
-        val swayAz = 4.2 * sin(animT * .15 + 1.0) + 1.5 * sin(animT * .47)
-        val elev = Math.toRadians((50.2 + 7.8 * k) * (1.0 - tw) + 22.0 * tw + swayEl)
-        val az = Math.toRadians((if (dawnSide) -38.0 else 38.0) * tw + swayAz)
+        // The key light follows a slow day/night orbit instead of snapping to one fixed azimuth.
+        // Night and day stay relatively high; dawn and dusk flatten close to the horizon so the canopy
+        // catches long shafts and the trunks cast longer, more legible shadows.
+        val swayEl = 2.2 * sin(animT * .23) + 1.0 * sin(animT * .61 + 1.7)
+        val swayAz = 3.6 * sin(animT * .15 + 1.0) + 1.3 * sin(animT * .47)
+        val orbitAz = sin((hours - 6.0) / 24.0 * PI * 2.0) * Palette.KEY_ORBIT_AZIMUTH_DEG
+        val twilightAz = (if (dawnSide) -Palette.KEY_TWILIGHT_AZIMUTH_DEG else Palette.KEY_TWILIGHT_AZIMUTH_DEG) * tw
+        val baseElevation = (Palette.KEY_NIGHT_ELEVATION_DEG +
+            (Palette.KEY_DAY_ELEVATION_DEG - Palette.KEY_NIGHT_ELEVATION_DEG) * k) * (1.0 - tw) +
+            Palette.KEY_TWILIGHT_ELEVATION_DEG * tw
+        val elev = Math.toRadians(baseElevation + swayEl)
+        val az = Math.toRadians(orbitAz + twilightAz + swayAz)
         moonDirV[0] = (sin(az) * cos(elev)).toFloat()
         moonDirV[1] = sin(elev).toFloat()
         moonDirV[2] = (-cos(az) * cos(elev)).toFloat()
@@ -409,9 +415,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val driftAmt = abs(drift) * (.14f * (1f - k) + .06f * k)
         val driftCol = if (k < .5f) (if (drift > 0f) Palette.green else Palette.purple) else (if (drift > 0f) Palette.sunDawn else Palette.sunDusk)
         moonCol = Palette.mix(moonCol, driftCol, driftAmt)
-        // A stronger moon (night), unchanged dawn/dusk (2.2) and a bright day sun, with a slow breathing of the light.
-        val breath = 1f + .09f * sin(animT * .7).toFloat() + .05f * sin(animT * 1.9 + 2.0).toFloat()
-        val moonI = (1.45f + k * 1.25f + tw * .125f) * breath
+        // Stronger directional energy in every phase; twilight gets a modest boost to make the low-angle shafts read.
+        val breath = 1f + .075f * sin(animT * .7).toFloat() + .04f * sin(animT * 1.9 + 2.0).toFloat()
+        val moonI = (Palette.KEY_NIGHT_INTENSITY +
+            (Palette.KEY_DAY_INTENSITY - Palette.KEY_NIGHT_INTENSITY) * k +
+            (Palette.KEY_TWILIGHT_INTENSITY - Palette.KEY_NIGHT_INTENSITY) * tw) * breath
 
         // The day's base colours are dark and greyish: the sun itself does the lighting.
         // Past dawn the day brightens further (dl = 0 at dawn/dusk, so the twilight look is untouched).
@@ -447,7 +455,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         pp.near = .1f; pp.far = 220f; pp.aspect = aspectRatio
         pp.tanHalf = tan(Math.toRadians(FOV / 2.0)).toFloat()
         System.arraycopy(moonDirV, 0, pp.moonDir, 0, 3)
-        val shaftK = .6f - .22f * k
+        val shaftK = .70f - .16f * k + .12f * tw
         pp.moonCol[0] = moonCol[0] * moonI * shaftK; pp.moonCol[1] = moonCol[1] * moonI * shaftK; pp.moonCol[2] = moonCol[2] * moonI * shaftK
         val camSpeed = if (dt > 0) hypot(cam.ex - lastCamX, cam.ez - lastCamZ) / dt else 0.0
         lastCamX = cam.ex; lastCamZ = cam.ez
