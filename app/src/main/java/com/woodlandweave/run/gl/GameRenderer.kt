@@ -389,7 +389,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         pp.exposureScale = .94f + .10f * k + .025f * dusk
         pp.bloomScale = .86f - .06f * k + .035f * dusk
         // The key light's beams stay visible at every hour.
-        pp.shaftScale = 1.25f - .2f * k
+        pp.shaftScale = 1.65f - .15f * k
         red = e.redMix.toFloat(); lights = 1f - e.dieRef.toFloat()
 
         // Key light direction: the moon (50 degrees, ahead of the runner) at night, a low sun (22 degrees) coming from the
@@ -409,9 +409,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val driftAmt = abs(drift) * (.14f * (1f - k) + .06f * k)
         val driftCol = if (k < .5f) (if (drift > 0f) Palette.green else Palette.purple) else (if (drift > 0f) Palette.sunDawn else Palette.sunDusk)
         moonCol = Palette.mix(moonCol, driftCol, driftAmt)
-        // A stronger moon (night), unchanged dawn/dusk (2.2) and a bright day sun, with a slow breathing of the light.
+        // Stronger night moonlight and daylight key light; twilight stays more restrained. The slow breathing keeps the beams alive.
         val breath = 1f + .09f * sin(animT * .7).toFloat() + .05f * sin(animT * 1.9 + 2.0).toFloat()
-        val moonI = (1.45f + k * 1.25f + tw * .125f) * breath
+        val moonI = (2.05f + k * 1.40f + tw * .15f) * breath
 
         // The day's base colours are dark and greyish: the sun itself does the lighting.
         // Past dawn the day brightens further (dl = 0 at dawn/dusk, so the twilight look is untouched).
@@ -447,7 +447,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         pp.near = .1f; pp.far = 220f; pp.aspect = aspectRatio
         pp.tanHalf = tan(Math.toRadians(FOV / 2.0)).toFloat()
         System.arraycopy(moonDirV, 0, pp.moonDir, 0, 3)
-        val shaftK = .6f - .22f * k
+        val shaftK = .78f - .16f * k
         pp.moonCol[0] = moonCol[0] * moonI * shaftK; pp.moonCol[1] = moonCol[1] * moonI * shaftK; pp.moonCol[2] = moonCol[2] * moonI * shaftK
         val camSpeed = if (dt > 0) hypot(cam.ex - lastCamX, cam.ez - lastCamZ) / dt else 0.0
         lastCamX = cam.ex; lastCamZ = cam.ez
