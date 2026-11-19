@@ -21,15 +21,6 @@ class PostParams {
     val moonCol = FloatArray(3)
     var shadowTex0 = 0
     val lightVp0 = FloatArray(16)
-    /** Extra beam lights (the same body, a little earlier / later on its arc): direction, colour, own shadow map. */
-    val auxDir = Array(2) { FloatArray(3) }
-    val auxCol = Array(2) { FloatArray(3) }
-    val auxVp = Array(2) { FloatArray(16) }
-    val auxTex = IntArray(2)
-    val auxOn = FloatArray(2)
-    /** Which ring sector (1..3) each extra light governs, and the horizontal unit vector (x, z) of sector 0's middle. */
-    val auxSec = floatArrayOf(-1f, -1f)
-    val ringM = FloatArray(2)
     var motion = 0f
     var tune = FxTuning()
     var bloomThreshold = 0.3f
@@ -370,7 +361,6 @@ class PostFx {
         GL.glUniform1i(loc("tDiffuse"), 0)
         // Same rule as in the lit shader: the shadow sampler must never sit on unit 0 beside a sampler2D.
         GL.glUniform1i(loc("uShadowC0"), 4)
-        GL.glUniform1i(loc("uShadowA0"), 5); GL.glUniform1i(loc("uShadowA1"), 6)
         val full = f.rank >= 1
         if (full && bloomTex.isNotEmpty()) { tex(3, bloomTex[0]); GL.glUniform1i(loc("uBloom"), 3) }
         val depthFx = f.needsDepth && depthTex != 0
@@ -381,18 +371,6 @@ class PostFx {
         if (depthFx && f.shadows && pp.shadowTex0 != 0) {
             tex(4, pp.shadowTex0); GL.glUniform1i(loc("uShadowC0"), 4)
             GL.glUniformMatrix4fv(loc("uLightVP0"), 1, false, pp.lightVp0, 0)
-            // The extra beam lights: units 5 and 6 (never unit 0), a sampler of its own each.
-            for (i in 0 until 2) {
-                GL.glUniform1i(loc("uShadowA$i"), 5 + i)
-                if (pp.auxOn[i] > .5f && pp.auxTex[i] != 0) {
-                    tex(5 + i, pp.auxTex[i])
-                    GL.glUniformMatrix4fv(loc("uLightVPA$i"), 1, false, pp.auxVp[i], 0)
-                    GL.glUniform3f(loc("uMoonDirA$i"), pp.auxDir[i][0], pp.auxDir[i][1], pp.auxDir[i][2])
-                    GL.glUniform3f(loc("uMoonColA$i"), pp.auxCol[i][0], pp.auxCol[i][1], pp.auxCol[i][2])
-                }
-            }
-            GL.glUniform2f(loc("uAuxSec"), pp.auxSec[0], pp.auxSec[1]); GL.glUniform2f(loc("uRingM"), pp.ringM[0], pp.ringM[1])
-            GL.glUniform2f(loc("uAuxOn"), if (pp.auxOn[0] > .5f && pp.auxTex[0] != 0) 1f else 0f, if (pp.auxOn[1] > .5f && pp.auxTex[1] != 0) 1f else 0f)
         }
         GL.glActiveTexture(GL.GL_TEXTURE0)
         GL.glUniform1f(loc("uSrcSrgb"), if (linear) 0f else 1f)
