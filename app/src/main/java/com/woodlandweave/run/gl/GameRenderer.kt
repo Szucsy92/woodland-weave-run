@@ -86,12 +86,17 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var qualityCap = Quality.HIGH
     private var shadowActive = false
     private var shadow: ShadowMap? = null
+    // Extra beam lights (see SkyLights): the key light's body a little earlier and later on its arc, each with its own shadow map.
+    private var shadowAux: ShadowMap? = null
+    private val auxDirV = Array(2) { FloatArray(3) }
+    private val auxCol = Array(2) { FloatArray(3) }
+    private val auxW = FloatArray(2)
     private var shadowProg = 0
     private val pp = PostParams()
     private var animT = 0.0
     private var aspectRatio = 16f / 9f
     private var lastCamX = 0.0; private var lastCamZ = 0.0
-    /** Unit vector towards the key light: moon at night, rising sun at dawn, sun by day, setting sun at dusk. Updated every frame. */
+    /** Unit vector towards the key light (the sun between sunrise and sunset, the moon otherwise). Updated every frame. */
     private val moonDirV = run { val ml = sqrt(24f * 24f + 20f * 20f); floatArrayOf(0f, 24f / ml, -20f / ml) }
     private val effects = EffectsModel()
     private val effectState = EffectState()
@@ -129,6 +134,15 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         GlUtil.floatBuffer(MAX_PROPS * (if (it == K_CROWN || it == K_CROWN_FAR) 16 else if (it == K_BRANCH) 11 else if (it == K_ROOT) 5 else 2) * 16)
     }
     private val counts = IntArray(KINDS)
+    // Instances drawn into the shadow map: the visible ones plus trees beyond the view whose long shadows reach into it.
+    private val shadowCounts = IntArray(KINDS)
+    // Shadow casters shrink to nothing between these distances from the runner (the forest is generated only 78 m around):
+    // thinning trees, not popping trees. Beyond SHADOW_FADE_END they are not drawn into the shadow map at all.
+    private val SHADOW_FADE_START = 26f
+    private val SHADOW_FADE_END = 52f
+    private val AUX_SHADOW_RES = 1024
+    private val AUX_STEP = .14   // how far (as a fraction of the arc) the extra lights sit before / after the key light: about 25 degrees
+    private val AUX_GAIN = .6f   // each extra light's strength relative to the key light
     private val one: FloatBuffer = GlUtil.floatBuffer(16)
 
     // ---- matrices ----
@@ -144,7 +158,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var encode = 1f
     private var camFwdX = 0f; private var camFwdY = 0f; private var camFwdZ = -1f
     private var dayLevel = -1.0
-    private var dayGoal = 0.0; private var dayFrom = 0.0; private var dayT = 1.0
+    private var cyc = -1.0   // eased position in the day cycle (0 night, .25 dawn, .5 day, .75 dusk)
     private var lampDay = 1f
     private var wormBase = FloatArray(0); private var remBase = FloatArray(0); private var remSeed = -1
 
@@ -160,7 +174,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val startDefs = feat.litDefines()
         litProg = GlUtil.program(Shaders.LIT_VS, Shaders.litFs(startDefs))
         groundProg = GlUtil.program(Shaders.GROUND_VS, Shaders.litFs(startDefs))
-        shadow = null; shadowProg = 0
+        shadow = null; shadowAux = null; shadowProg = 0
         spriteProg = GlUtil.program(Shaders.SPRITE_VS, Shaders.SPRITE_FS)
         locs.clear()
         meshes = arrayOf(
@@ -367,51 +381,71 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
 
         // Day cycle: fog, moon light and hemisphere drift towards day colours, and towards blood near the pursuer.
         val hours = Calendar.getInstance().let { it.get(Calendar.HOUR_OF_DAY) + it.get(Calendar.MINUTE) / 60.0 }
-        val target = daylightFor(e.settings.mood, hours)
-        if (dayLevel < 0) { dayLevel = target; dayGoal = target; dayFrom = target; dayT = 1.0 }
+        val target = timeOfDayFor(e.settings.mood, e.settings.timeOfDay.toDouble(), hours)
+        if (cyc < 0) cyc = target
         else {
-            // Switching the mood is a full, eased crossfade (2.6 s); the Auto mode's slow drift just follows the clock.
-            if (abs(target - dayGoal) > .06) { dayFrom = dayLevel; dayGoal = target; dayT = 0.0 }
-            else if (dayT >= 1.0) { dayLevel += (target - dayLevel) * min(1.0, dt * 1.5); dayGoal = target }
-            if (dayT < 1.0) {
-                dayT = min(1.0, dayT + dt / 2.6)
-                dayLevel = dayFrom + (dayGoal - dayFrom) * (dayT * dayT * dayT * (dayT * (dayT * 6 - 15) + 10))
-            }
+            // Ease towards the target the short way round the cycle: a slider drag or a mode switch glides, Auto just follows the clock.
+            var d = target - cyc; d -= Math.rint(d)
+            cyc = (((cyc + d * min(1.0, dt * 4.0)) % 1.0) + 1.0) % 1.0
         }
+        dayLevel = .5 - .5 * cos(2.0 * PI * cyc)   // 0 at night, .5 at dawn and dusk, 1 at day
         val k = dayLevel.toFloat()
         // Twilight weight: 0 at full night / full day, 1 half way (dawn or dusk).
         val dusk = (1f - kotlin.math.abs(2f * k - 1f)).coerceIn(0f, 1f)
-        val tw = dusk * dusk * (3f - 2f * dusk)
-        val dawnSide = hours < 13.0   // before 13:00 the twilight is a sunrise, after it a sunset
+        val tw = ((dusk - .2f) / .6f).coerceIn(0f, 1f).let { it * it * (3f - 2f * it) }
         val warmSky = floatArrayOf(0.92f, 0.43f, 0.20f)
         val warmFog = floatArrayOf(0.34f, 0.19f, 0.13f)
         lampDay = if (feat.rank >= 1) 1f - .2f * k else 1f
         pp.exposureScale = .94f + .10f * k + .025f * dusk
         pp.bloomScale = .86f - .06f * k + .035f * dusk
-        // The key light's beams stay visible at every hour.
-        pp.shaftScale = 1.25f - .2f * k
+        // Low key light shining ahead of the runner: the beams glow strongly in all four phases (night, dawn, day, dusk).
+        pp.shaftScale = 2.1f - .15f * k + .25f * tw
         red = e.redMix.toFloat(); lights = 1f - e.dieRef.toFloat()
 
-        // Key light direction: the moon (50 degrees, ahead of the runner) at night, a low sun (22 degrees) coming from the
-        // front-left at dawn and the front-right at dusk, and a high sun by day. It always shines into the forest.
-        // The light never sits still: it sways slowly, so beams and shadows drift through the forest.
-        val swayEl = 2.6 * sin(animT * .23) + 1.2 * sin(animT * .61 + 1.7)
-        val swayAz = 4.2 * sin(animT * .15 + 1.0) + 1.5 * sin(animT * .47)
-        val elev = Math.toRadians((50.2 + 7.8 * k) * (1.0 - tw) + 22.0 * tw + swayEl)
-        val az = Math.toRadians((if (dawnSide) -38.0 else 38.0) * tw + swayAz)
-        moonDirV[0] = (sin(az) * cos(elev)).toFloat()
-        moonDirV[1] = sin(elev).toFloat()
-        moonDirV[2] = (-cos(az) * cos(elev)).toFloat()
-        val twCol = if (dawnSide) Palette.sunDawn else Palette.sunDusk
-        moonCol = Palette.mix(Palette.mix(Palette.moon, Palette.sunDay, k), twCol, tw * .85f)
-        // Colour play: the moonlight drifts towards the forest's green and violet, the sun towards gold and rose.
-        val drift = sin(animT * .27).toFloat()
-        val driftAmt = abs(drift) * (.14f * (1f - k) + .06f * k)
-        val driftCol = if (k < .5f) (if (drift > 0f) Palette.green else Palette.purple) else (if (drift > 0f) Palette.sunDawn else Palette.sunDusk)
-        moonCol = Palette.mix(moonCol, driftCol, driftAmt)
-        // A stronger moon (night), unchanged dawn/dusk (2.2) and a bright day sun, with a slow breathing of the light.
-        val breath = 1f + .09f * sin(animT * .7).toFloat() + .05f * sin(animT * 1.9 + 2.0).toFloat()
-        val moonI = (1.45f + k * 1.25f + tw * .125f) * breath
+        // TWO lights, each with its own arc and its own on/off window (see SkyLight.kt):
+        //  - the SUN shines from sunrise (cycle .25) to sunset (.75) and is OFF at night,
+        //  - the MOON shines from moonrise (just before the sun has set) to moonset (just after the sun has risen) and is OFF by day.
+        // Each one rises in the EAST (right), climbs to its own highest point straight ahead (NORTH) and sets in the WEST (left),
+        // low -> high -> low, always in front of the runner. Nothing slides between the two: one switches off as the other switches on,
+        // so no single light has to swing from one side to the other. Heights and intensities are set per light in SkyLights.
+        // Only one directional light feeds the shadow map and the beams, the one that is stronger right now; the overlap is so short
+        // and both are faded to almost nothing at the horizon, so the hand-over is not visible.
+        // No sway, drift or pulsing: the angle depends on the time of day only, so beams and light pools stay put.
+        val sunTh = SkyLights.SUN.progress(cyc); val moonTh = SkyLights.MOON.progress(cyc)
+        val sunE = if (sunTh >= 0) SkyLights.SUN.intensity(sunTh) * SkyLights.SUN.weight(sunTh) else 0f
+        val moonE = if (moonTh >= 0) SkyLights.MOON.intensity(moonTh) * SkyLights.MOON.weight(moonTh) else 0f
+        val sunKey = (sunTh >= 0 && sunE >= moonE) || moonTh < 0
+        val keyTh = if (sunKey) sunTh else moonTh
+        val keyLight = if (sunKey) SkyLights.SUN else SkyLights.MOON
+        if (keyTh >= 0) keyLight.direction(keyTh, moonDirV)
+        moonCol = if (sunKey) {
+            // Warm gold / rose near the horizon, white-warm at the highest point.
+            val horizon = 1.0 - sin(PI * keyTh)
+            val warm = horizon.let { x -> val c = ((x - .5) / .5).coerceIn(0.0, 1.0); c * c * (3 - 2 * c) }.toFloat() * .85f
+            Palette.mix(Palette.sunDay, if (keyTh < .5) Palette.sunDawn else Palette.sunDusk, warm)
+        } else Palette.moon
+        val moonI = maxOf(sunE, moonE)   // 0 only if both lights are off (never happens: the windows overlap)
+
+        // The extra lights: the SAME body a little earlier (-AUX_STEP) and a little later (+AUX_STEP) on its own arc, so they are
+        // the continuation of the arc (east -> north -> west) and their beams run on from the key light's, never across it.
+        // Each fades in as it rises and out as it sets, so wherever the runner turns within what he can see there are beams.
+        val auxBody = keyLight
+        for (i in 0 until 2) {
+            val th = keyTh + (if (i == 0) -AUX_STEP else AUX_STEP)
+            val w = if (keyTh >= 0) auxBody.weight(th) else 0f
+            auxW[i] = w
+            if (w > .02f) {
+                auxBody.direction(th, auxDirV[i])
+                val col = if (sunKey) {
+                    val horizon = 1.0 - sin(PI * th)
+                    val warm = horizon.let { x -> val c = ((x - .5) / .5).coerceIn(0.0, 1.0); c * c * (3 - 2 * c) }.toFloat() * .85f
+                    Palette.mix(Palette.sunDay, if (th < .5) Palette.sunDawn else Palette.sunDusk, warm)
+                } else Palette.moon
+                val ai = auxBody.intensity(th) * w * AUX_GAIN
+                pp.auxDir[i][0] = auxDirV[i][0]; pp.auxDir[i][1] = auxDirV[i][1]; pp.auxDir[i][2] = auxDirV[i][2]
+                auxCol[i][0] = col[0] * ai; auxCol[i][1] = col[1] * ai; auxCol[i][2] = col[2] * ai
+            }
+        }
 
         // The day's base colours are dark and greyish: the sun itself does the lighting.
         // Past dawn the day brightens further (dl = 0 at dawn/dusk, so the twilight look is untouched).
@@ -447,8 +481,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         pp.near = .1f; pp.far = 220f; pp.aspect = aspectRatio
         pp.tanHalf = tan(Math.toRadians(FOV / 2.0)).toFloat()
         System.arraycopy(moonDirV, 0, pp.moonDir, 0, 3)
-        val shaftK = .6f - .22f * k
+        val shaftK = .95f - .10f * k
         pp.moonCol[0] = moonCol[0] * moonI * shaftK; pp.moonCol[1] = moonCol[1] * moonI * shaftK; pp.moonCol[2] = moonCol[2] * moonI * shaftK
+        for (i in 0 until 2) for (j in 0 until 3) pp.auxCol[i][j] = auxCol[i][j] * shaftK
         val camSpeed = if (dt > 0) hypot(cam.ex - lastCamX, cam.ez - lastCamZ) / dt else 0.0
         lastCamX = cam.ex; lastCamZ = cam.ez
         // Motion blur grows smoothly with the runner's speed (nothing when walking, a light radial smear at a sprint).
@@ -529,12 +564,20 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         fillInstances(s, cam)
         val smap = shadow
         if (smap != null && shadowActive) {
-            shadowPass(smap, cam)
+            shadowPass(smap, 0, moonDirV, cam)
+            val ax = shadowAux
+            for (i in 0 until 2) {
+                if (ax != null && auxW[i] > .02f) {
+                    shadowPass(ax, i, auxDirV[i], cam)
+                    System.arraycopy(ax.vp[i], 0, pp.auxVp[i], 0, 16)
+                    pp.auxTex[i] = ax.tex[i]; pp.auxOn[i] = 1f
+                } else { pp.auxOn[i] = 0f; pp.auxTex[i] = 0 }
+            }
             post.bind()
             GL.glEnable(GL.GL_DEPTH_TEST)
             System.arraycopy(smap.vp[0], 0, pp.lightVp0, 0, 16)
             pp.shadowTex0 = smap.tex[0]
-        } else pp.shadowTex0 = 0
+        } else { pp.shadowTex0 = 0; pp.auxOn[0] = 0f; pp.auxOn[1] = 0f }
         scene(litProg)
         val g = e.ghostK.toFloat()
         bindMaps(barkTex, barkN, barkR)
@@ -729,11 +772,18 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 sp = GlUtil.programOrNull(Shaders.SHADOW_VS, Shaders.SHADOW_FS)
                 if (!sm.ok || sp == 0) { sm.release(); sm = null; if (sp != 0) GL.glDeleteProgram(sp); ok = false }
             }
+            // The extra beam lights get a smaller shadow map each (the beams do not need the resolution); without them the
+            // forest simply has the one key light.
+            var ax: ShadowMap? = null
+            if (ok && f.shadows && f.shafts) {
+                ax = ShadowMap(AUX_SHADOW_RES, 2).also { it.create() }
+                if (!ax.ok) { ax.release(); ax = null }
+            }
             if (ok) {
                 GL.glDeleteProgram(litProg); GL.glDeleteProgram(groundProg)
                 if (shadowProg != 0) GL.glDeleteProgram(shadowProg)
-                shadow?.release()
-                litProg = lp; groundProg = gp; shadowProg = sp; shadow = sm; feat = f
+                shadow?.release(); shadowAux?.release()
+                litProg = lp; groundProg = gp; shadowProg = sp; shadow = sm; shadowAux = ax; feat = f
                 break
             }
             if (lp != 0) GL.glDeleteProgram(lp)
@@ -778,20 +828,22 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     }
 
     /** Moon shadow around the runner. */
-    private fun shadowPass(sm: ShadowMap, cam: CameraPose) {
+    private fun shadowPass(sm: ShadowMap, c: Int, dir: FloatArray, cam: CameraPose) {
         val fwx = cam.tx - cam.ex; val fwz = cam.tz - cam.ez
         val fl = hypot(fwx, fwz).coerceAtLeast(1e-6)
         val nx = (fwx / fl).toFloat(); val nz = (fwz / fl).toFloat()
         GL.glUseProgram(shadowProg)
         GL.glUniform1f(loc(shadowProg, "uTime"), animT.toFloat())
+        GL.glUniform2f(loc(shadowProg, "uCamXZ"), cam.ex.toFloat(), cam.ez.toFloat())
+        GL.glUniform2f(loc(shadowProg, "uFade"), SHADOW_FADE_START, SHADOW_FADE_END)
         val ext = feat.shadowExtent
-        sm.update(0, cam.ex.toFloat() + nx * ext * .55f, 1f, cam.ez.toFloat() + nz * ext * .55f, moonDirV, ext)
-        sm.begin(0)
-        GL.glUniformMatrix4fv(loc(shadowProg, "uLightVP"), 1, false, sm.vp[0], 0)
+        sm.update(c, cam.ex.toFloat() + nx * ext * .55f, 1f, cam.ez.toFloat() + nz * ext * .55f, dir, ext)
+        sm.begin(c)
+        GL.glUniformMatrix4fv(loc(shadowProg, "uLightVP"), 1, false, sm.vp[c], 0)
         // Only whole-tree sway moves things, so the shadows follow the trees; rocks and bushes stay put.
         fun draw(kind: Int, sway: Float) {
-            GL.glUniform3f(loc(shadowProg, "uSway"), if (feat.wind) sway else 0f, 0f, 0f)
-            meshes[kind].draw(bufs[kind], counts[kind])
+            GL.glUniform3f(loc(shadowProg, "uSway"), 0f, 0f, 0f)   // shadows (and so the light beams) do not follow the wind: the light stays fixed
+            meshes[kind].draw(bufs[kind], shadowCounts[kind])
         }
         draw(K_TRUNK, TREE_SWAY); draw(K_ROOT, TREE_SWAY); draw(K_BRANCH, TREE_SWAY)
         draw(K_CROWN, TREE_SWAY); draw(K_CROWN_FAR, TREE_SWAY)
@@ -1154,6 +1206,27 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 emit(if (far && p.kinds[i] == K_CROWN) K_CROWN_FAR else p.kinds[i], tmp2, 0)
             }
         }
+        // Shadow casters beyond the view. The light shines from ahead, so a tree 60 m away still throws its shadow (and a
+        // dark gap in the beams) over the ground near the runner. Culling such trees with the visible set made that shadow
+        // pop into the beams the moment the tree came into view. They are added here for the shadow map only.
+        val vis = counts.copyOf()
+        val lx = moonDirV[0].toDouble(); val lz = moonDirV[2].toDouble()
+        val ll = hypot(lx, lz).coerceAtLeast(1e-6)
+        val extraReach = SHADOW_FADE_END + 4.0   // beyond this the casters have faded away completely
+        for (p in props) {
+            val dx = p.x - cam.ex; val dz = p.z - cam.ez
+            val dist = hypot(dx, dz)
+            if (dist <= reach && (dx * fwx + dz * fwz) / fl >= -12) continue   // already in the visible set
+            if (dist > extraReach || s.cleared.contains(p.id)) continue
+            if ((dx * lx + dz * lz) / (ll * dist.coerceAtLeast(1e-6)) < .2) continue   // only trees on the light's side matter
+            for (i in p.kinds.indices) {
+                val kd = p.kinds[i]
+                if (kd == K_SHADOW || kd == K_PLANT || kd == K_ROCK) continue
+                emit(if (kd == K_CROWN && dist > CROWN_LOD_DISTANCE) K_CROWN_FAR else kd, p.m, i * 16)
+            }
+        }
+        System.arraycopy(counts, 0, shadowCounts, 0, KINDS)
+        System.arraycopy(vis, 0, counts, 0, KINDS)
     }
 
     private fun smoothRange(x: Double, a: Double, b: Double): Double {
