@@ -53,7 +53,7 @@ class Features(val quality: Quality) {
     val bloomLevels = if (r >= 2) 5 else 4
     /** Base threshold in linear light; the renderer raises it on bright (day) scenes so the sky never blooms. */
     val bloomThreshold = 0.48f
-    val bloomStrength = if (r >= 2) 0.24f else 0.28f
+    val bloomStrength = if (r >= 2) 0.20f else 0.23f
     val tonemap = r >= 2
     val exposure = 0.92f
     val grain = if (r >= 2) 0.006f else 0f
@@ -70,10 +70,10 @@ class Features(val quality: Quality) {
     val ssaoRadius = 0.50f
     val ssaoStrength = 0.78f
     val shafts = r >= 2
-    // A few extra, jittered samples improve beam continuity without a full-resolution raymarch.
-    val shaftSteps = 16
-    val shaftMax = 38f
-    val fogDensity = 0.017f
+    // Samples every 1.2 m, anchored in the world: thin beams between the trunks stay put while the runner moves.
+    val shaftSteps = 28
+    val shaftMax = 34f
+    val fogDensity = 0.015f
     val dof = r >= 2
     val dofStrength = 0.62f
     val focus = 18f
