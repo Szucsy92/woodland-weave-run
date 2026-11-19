@@ -265,13 +265,10 @@ void main() {
   else sh = shadowAt(vW, n);
 #endif
   // Dappled, drifting light: patches of sun / moonlight wander over trunks, ground, bushes and leaves.
-  float dapA = sin(vW.x * 0.9 + sin(vW.z * 0.7) * 1.6);   // static dapple: the light pools stay fixed in the world
-  float dapB = sin(vW.z * 0.8 + sin(vW.x * 0.6) * 1.4);
+  float dapA = sin(vW.x * 0.9 + uTime * 0.55 + sin(vW.z * 0.7 - uTime * 0.35) * 1.6);
+  float dapB = sin(vW.z * 0.8 - uTime * 0.45 + sin(vW.x * 0.6 + uTime * 0.3) * 1.4);
   float dap = smoothstep(-0.55, 0.65, dapA * dapB);
-  // Ground receives a stronger, broader dapple so the incoming key light reads as soft pools
-  // between the trees. Keep foliage contrast unchanged to avoid washing out the canopy.
-  if (uMode == 3) sh *= mix(0.48, 1.62, dap);
-  else sh *= mix(0.6, 1.3, dap) * (uMode == 5 ? 0.7 : 1.0) + (uMode == 5 ? 0.3 : 0.0);
+  sh *= mix(0.6, 1.3, dap) * (uMode == 5 ? 0.7 : 1.0) + (uMode == 5 ? 0.3 : 0.0);
   if (uMode == 5) {
     // Foliage is translucent: wrapped diffuse on the lit side, and the light shining through leaves seen against it.
     vec3 leaf = albedo + vec3(.10, .22, .07) * 1.4;
@@ -280,10 +277,7 @@ void main() {
     float back = pow(clamp(dot(-v, keyL), 0.0, 1.0), 1.6) * clamp(0.65 - knl * 0.5, 0.0, 1.0);
     col += leaf / PI * uMoon * sh * (wrapD * 0.9 + back * 1.6);
   } else {
-    // A modest ground-only irradiance lift makes sun/moon pools visible on the forest floor
-    // without raising exposure or bleaching trunks and leaves.
-    float keyBoost = (uMode == 3) ? 1.48 : 1.0;
-    col += light(n, v, keyL, uMoon * sh * keyBoost, albedo, alpha);
+    col += light(n, v, keyL, uMoon * sh, albedo, alpha);
   }
   vec3 tl = uLampPos - vW; float d = length(tl);
   // Medium and High soften the very near field, so a trunk next to the lamp no longer burns out to white.
@@ -522,12 +516,8 @@ vec3 dofGather(vec2 uv, vec3 c0) {
 float shadowMarch(vec3 wp) {
   vec4 l = uLightVP0 * vec4(wp, 1.0);
   vec3 s = l.xyz / l.w * 0.5 + 0.5;
-  // Fade the shadow pattern out towards its mean near the map's border, so the edge of the map never shows as a
-  // moving line of light; beyond the border the beams are a steady average.
-  vec2 e2 = min(s.xy, 1.0 - s.xy);
-  float edge = smoothstep(0.0, 0.18, min(e2.x, e2.y));
-  float v = (s.z < 1.0) ? texture(uShadowC0, vec3(clamp(s.xy, 0.0, 1.0), s.z)) : 1.0;
-  return mix(0.62, v, edge);
+  if (s.x > 0.0 && s.x < 1.0 && s.y > 0.0 && s.y < 1.0 && s.z < 1.0) return texture(uShadowC0, vec3(s.xy, s.z));
+  return 1.0;
 }
 // Light shafts: march the view ray through height fog, asking the shadow map where the moon reaches.
 vec3 shafts(vec3 c, vec2 uv, float d) {
@@ -537,34 +527,27 @@ vec3 shafts(vec3 c, vec2 uv, float d) {
   rd /= max(len, 1e-3);
   len = min(len, uShaftMax);
   int N = int(uShaftSteps);
-  // The samples sit on planes that are fixed in the WORLD (equal spacing, anchored to the world, not to the camera), so as
-  // the runner moves the sample points do not slide through the beams. Sliding samples are what made thin beams flicker,
-  // swim and jump: with the old spacing (a function of the scene depth behind each pixel) every step moved every beam.
-  float dtFix = uShaftMax / float(N);
-  float ph = fract(-dot(ro, rd) / dtFix);
-  float j = ign(gl_FragCoord.xy);   // static per-pixel offset over a whole step: the world anchor stays, the banding (dashed lines) goes
+  float dt = len / float(N);
+  float j = ign(gl_FragCoord.xy + vec2(time * 13.1, time * 7.3));
   float cosT = dot(rd, uMoonDir);
-  float g = 0.55;   // wider lobe: the beams still glow when the light is 20-30 degrees off the view axis
+  float g = 0.62;
   float phase = (1.0 - g * g) / (12.566 * pow(max(1.0 + g * g - 2.0 * g * cosT, 0.12), 1.5));
   float T = 1.0; vec3 sc = vec3(0.0);
   for (int i = 0; i < 48; i++) {
     if (i >= N) break;
-    float t = (float(i) + fract(ph + j)) * dtFix;
-    if (t >= len) break;
-    float seg = min(dtFix, len - t);
-    vec3 p = ro + rd * t;
+    vec3 p = ro + rd * ((float(i) + j) * dt);
     float heightFog = exp(-max(p.y, 0.0) * 0.105);
-    // The beams are static in the world: the canopy density does not move with time.
-    float canopy = 0.8 + 0.2 * sin(p.x * 0.31 + p.z * 0.23) * sin(p.z * 0.27 - p.x * 0.17)
-                 + 0.12 * sin(p.x * 0.9) * sin(p.z * 0.8);
+    // Beams shimmer and drift: the canopy density moves with time.
+    float canopy = 0.8 + 0.2 * sin(p.x * 0.31 + p.z * 0.23 + time * 0.4) * sin(p.z * 0.27 - p.x * 0.17 - time * 0.33)
+                 + 0.12 * sin(p.x * 0.9 - time * 0.7) * sin(p.z * 0.8 + time * 0.5);
     float dens = uFogDens * heightFog * canopy;
     float vis = shadowMarch(p);
     // A small ambient term keeps the beam visible at soft shadow edges without flattening contrast.
-    vec3 inscatter = uMoonCol * (phase * vis + 0.035) * dens * seg;
+    vec3 inscatter = uMoonCol * (phase * vis + 0.035) * dens * dt;
     sc += inscatter * T;
-    T *= exp(-dens * seg * 0.58);
+    T *= exp(-dens * dt * 0.58);
   }
-  return c * T + sc * 1.6;
+  return c * T + sc * 1.08 * (0.92 + 0.08 * sin(time * 0.8));
 }
 #endif
 #endif
