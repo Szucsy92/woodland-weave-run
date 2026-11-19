@@ -25,7 +25,9 @@ data class Settings(
     val anyOrientation: Boolean = false,
     val difficulty: Difficulty = Difficulty.EASY,
     val mode: GameMode = GameMode.CLASSIC,
-    val mood: ForestMood = ForestMood.NIGHT,
+    val mood: ForestMood = ForestMood.MANUAL,
+    /** Time of day for the manual mode: 0 night, .25 dawn, .5 day, .75 dusk, 1 night. */
+    val timeOfDay: Float = 0f,
     val quality: Quality = Quality.LOW,
     val fx: FxTuning = FxTuning(),
     val best: Int = 0,
@@ -45,6 +47,7 @@ class SettingsRepo(private val context: Context) {
         val difficulty = stringPreferencesKey("difficulty")
         val mode = stringPreferencesKey("mode")
         val mood = stringPreferencesKey("mood")
+        val tod = floatPreferencesKey("time_of_day")
         val quality = stringPreferencesKey("quality")
         val best = intPreferencesKey("best")
         val last = intPreferencesKey("last")
@@ -65,7 +68,9 @@ class SettingsRepo(private val context: Context) {
             anyOrientation = p[K.orient] ?: false,
             difficulty = p.enumOf(K.difficulty, Difficulty.EASY),
             mode = p.enumOf(K.mode, GameMode.CLASSIC),
-            mood = p.enumOf(K.mood, ForestMood.NIGHT),
+            // Older installs stored NIGHT / DAY / AUTO: NIGHT and DAY become a fixed time of day.
+            mood = if (p[K.mood] == "AUTO") ForestMood.AUTO else ForestMood.MANUAL,
+            timeOfDay = p[K.tod] ?: (if (p[K.mood] == "DAY") .5f else 0f),
             quality = p.enumOf(K.quality, Quality.LOW),
             fx = FxTuning(
                 bloom = p[fxKey("bloom")] ?: 1f, tone = p[fxKey("tone")] ?: 1f, shadows = p[fxKey("shadows")] ?: 1f,
@@ -84,6 +89,8 @@ class SettingsRepo(private val context: Context) {
     suspend fun setDifficulty(v: Difficulty) = context.store.edit { it[K.difficulty] = v.name }
     suspend fun setMode(v: GameMode) = context.store.edit { it[K.mode] = v.name }
     suspend fun setMood(v: ForestMood) = context.store.edit { it[K.mood] = v.name }
+    /** Dragging the slider takes over from Auto. */
+    suspend fun setTimeOfDay(v: Float) = context.store.edit { it[K.tod] = v.coerceIn(0f, 1f); it[K.mood] = ForestMood.MANUAL.name }
     suspend fun setQuality(v: Quality) = context.store.edit { it[K.quality] = v.name }
     suspend fun setFx(name: String, v: Float) = context.store.edit { it[fxKey(name)] = v }
     suspend fun setSecrets(v: Set<String>) = context.store.edit { it[K.secrets] = v }
