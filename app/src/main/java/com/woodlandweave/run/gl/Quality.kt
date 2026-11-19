@@ -70,9 +70,9 @@ class Features(val quality: Quality) {
     val ssaoRadius = 0.50f
     val ssaoStrength = 0.78f
     val shafts = r >= 2
-    // A few extra, jittered samples improve beam continuity without a full-resolution raymarch.
-    val shaftSteps = 16
-    val shaftMax = 38f
+    // Samples every 1.2 m, anchored in the world: thin beams between the trunks stay put while the runner moves.
+    val shaftSteps = 28
+    val shaftMax = 28f   // beams are seen up to 28 m ahead: the trees that shade them are always inside the generated world
     val fogDensity = 0.017f
     val dof = r >= 2
     val dofStrength = 0.62f
