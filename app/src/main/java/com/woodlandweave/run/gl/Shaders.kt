@@ -551,7 +551,7 @@ vec3 shafts(vec3 c, vec2 uv, float d) {
   float g = 0.55;   // wider lobe: the beams still glow when the light is 20-30 degrees off the view axis
   float phase = (1.0 - g * g) / (12.566 * pow(max(1.0 + g * g - 2.0 * g * cosT, 0.12), 1.5));
   // The light is low and often off to the side: keep a floor under the forward lobe so the beams still glow when it is not dead ahead.
-  phase = phase * 0.72 + 0.10;
+  phase = phase * 0.78 + 0.13;
   float T = 1.0; vec3 sc = vec3(0.0);
   for (int i = 0; i < 48; i++) {
     if (i >= N) break;
@@ -566,11 +566,13 @@ vec3 shafts(vec3 c, vec2 uv, float d) {
     float dens = uFogDens * heightFog * canopy;
     float vis = shadowMarch(p);
     // A small ambient term keeps the beam visible at soft shadow edges without flattening contrast.
-    vec3 inscatter = uMoonCol * (phase * vis + 0.035) * dens * seg;
+    vec3 inscatter = uMoonCol * (phase * vis + 0.045) * dens * seg;
     sc += inscatter * T;
     T *= exp(-dens * seg * 0.58);
   }
-  return c * T + sc * 1.18;
+  // Lift the integrated scattering rather than hardening the shadow mask: beams read clearly,
+  // while their edges and distance still dissolve naturally into the forest fog.
+  return c * T + sc * 1.48;
 }
 #endif
 #endif
