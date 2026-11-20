@@ -131,10 +131,13 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private val counts = IntArray(KINDS)
     // Instances drawn into the shadow map: the visible ones plus trees beyond the view whose long shadows reach into it.
     private val shadowCounts = IntArray(KINDS)
-    // Shadow casters shrink to nothing between these distances from the runner (the forest is generated only 78 m around):
-    // thinning trees, not popping trees. Beyond SHADOW_FADE_END they are not drawn into the shadow map at all.
-    private val SHADOW_FADE_START = 26f
-    private val SHADOW_FADE_END = 52f
+    // Shadow casters shrink to nothing between these distances from the runner, only at the very edge of the generated forest
+    // (it reaches RADIUS * CELL = 78 m): thinning trees at the rim, not popping trees. Beyond SHADOW_FADE_END they are not
+    // drawn into the shadow map at all. This must stay FAR out: the light comes from ahead and a crown throws its shadow up to
+    // ~45 m, so a fade that starts closer makes the shadows (and the beams) grow back as the runner approaches, and the pool of
+    // light seems to run away from him. Inside SHADOW_FADE_START every caster is full size, so a pool never fades on approach.
+    private val SHADOW_FADE_START = 62f
+    private val SHADOW_FADE_END = 80f
     private val one: FloatBuffer = GlUtil.floatBuffer(16)
 
     // ---- matrices ----
