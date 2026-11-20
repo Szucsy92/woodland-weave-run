@@ -3,6 +3,7 @@ package com.woodlandweave.run.gl
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.max
 
 /**
  * One celestial light (sun or moon) with its own arc and its own on/off window in the day cycle
@@ -66,21 +67,45 @@ object SkyLights {
     val SUN = SkyLight(startCyc = .25, lenCyc = .5, minElDeg = 4.0, maxElDeg = 23.0, intensityLow = 1.75f, intensityHigh = 2.75f)
     val MOON = SkyLight(startCyc = .75 - OVERLAP, lenCyc = .5 + 2 * OVERLAP, minElDeg = 4.0, maxElDeg = 23.0, intensityLow = 1.35f, intensityHigh = 1.55f)
 
-    // The key light that feeds the shadow map, the light shafts and the ground light pools has ONE fixed direction at every
-    // time of day (due NORTH, straight ahead, 23 degrees up: the old highest point). Only its colour and strength follow the
-    // clock, so the beams between the trunks and the pools of light on the ground never move, change shape or fade away
-    // and the runner can always run through them, day or night.
-    const val KEY_AZIMUTH_DEG = 0.0
-    const val KEY_ELEVATION_DEG = 23.0
-    /** Key light strength: never zero, so the beams and pools stay visible all through dawn and dusk. */
-    const val KEY_INTENSITY_DAY = 2.4f
-    const val KEY_INTENSITY_NIGHT = 1.5f
+    /**
+     * Samples both celestial arcs and writes the shared direction into [outDirection].
+     * [outMix] receives sun colour share (index 0) and directional-light intensity (index 1).
+     * The renderer uses this one direction for scene lighting, the shadow map, shafts and ground projections.
+     */
+    fun sample(cycle: Double, outDirection: FloatArray, sunDirection: FloatArray, moonDirection: FloatArray, outMix: FloatArray) {
+        val sunT = SUN.progress(cycle)
+        val moonT = MOON.progress(cycle)
+        val sunW = SUN.weight(sunT)
+        val moonW = MOON.weight(moonT)
+        val sunEnergy = if (sunW > 0f) SUN.intensity(sunT) * sunW else 0f
+        val moonEnergy = if (moonW > 0f) MOON.intensity(moonT) * moonW else 0f
 
-    /** Unit direction towards the fixed key light (x east, y up, z south; the runner starts out heading -z). */
-    fun keyDirection(out: FloatArray) {
-        val el = Math.toRadians(KEY_ELEVATION_DEG); val az = Math.toRadians(KEY_AZIMUTH_DEG)
-        out[0] = (sin(az) * cos(el)).toFloat()
-        out[1] = sin(el).toFloat()
-        out[2] = (-cos(az) * cos(el)).toFloat()
+        if (sunEnergy > 0f) SUN.direction(sunT, sunDirection)
+        if (moonEnergy > 0f) MOON.direction(moonT, moonDirection)
+        val totalEnergy = sunEnergy + moonEnergy
+        if (totalEnergy > 1e-5f) {
+            if (sunEnergy > 1e-5f && moonEnergy > 1e-5f) {
+                // At sunrise/sunset the sun is setting on one horizon while the moon rises on the
+                // other. Blend their azimuths across the northern horizon and their elevations,
+                // keeping the light within the configured 4..23 degree arc instead of snapping
+                // the ground shadows 180 degrees or lifting the light unnaturally to the zenith.
+                val moonShare = moonEnergy / totalEnergy
+                val az = SUN.azimuthDeg(sunT) + (MOON.azimuthDeg(moonT) - SUN.azimuthDeg(sunT)) * moonShare
+                val el = SUN.elevationDeg(sunT) + (MOON.elevationDeg(moonT) - SUN.elevationDeg(sunT)) * moonShare
+                val azRad = Math.toRadians(az)
+                val elRad = Math.toRadians(el)
+                val horizontal = kotlin.math.cos(elRad)
+                outDirection[0] = (kotlin.math.sin(azRad) * horizontal).toFloat()
+                outDirection[1] = kotlin.math.sin(elRad).toFloat()
+                outDirection[2] = (-kotlin.math.cos(azRad) * horizontal).toFloat()
+            } else if (sunEnergy > 0f) {
+                System.arraycopy(sunDirection, 0, outDirection, 0, 3)
+            } else {
+                System.arraycopy(moonDirection, 0, outDirection, 0, 3)
+            }
+        }
+        outMix[0] = if (totalEnergy > 1e-5f) sunEnergy / totalEnergy else 0f
+        // Use the stronger contribution, rather than adding both lights, to avoid an exposure spike at overlap.
+        outMix[1] = max(sunEnergy, moonEnergy)
     }
 }

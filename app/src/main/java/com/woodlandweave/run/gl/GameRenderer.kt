@@ -94,8 +94,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var animT = 0.0
     private var aspectRatio = 16f / 9f
     private var lastCamX = 0.0; private var lastCamZ = 0.0
-    /** Unit vector towards the key light: fixed at every time of day (only its colour and strength change). */
-    private val moonDirV = FloatArray(3).also { SkyLights.keyDirection(it) }
+    /** Shared direction for the currently dominant celestial light; drives surface light, shafts and shadows. */
+    private val moonDirV = FloatArray(3).also { SkyLights.SUN.direction(.5, it) }
+    private val sunDirV = FloatArray(3)
+    private val moonArcDirV = FloatArray(3)
+    private val celestialMix = FloatArray(2) // sun colour share, directional-light intensity
     private val effects = EffectsModel()
     private val effectState = EffectState()
     // Reused upload buffers for four GLES 3.0 local-light slots.
@@ -418,18 +421,14 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         pp.shaftScale = 1.52f - .12f * k + .18f * tw
         red = e.redMix.toFloat(); lights = 1f - e.dieRef.toFloat()
 
-        // ONE key light with a FIXED direction (see SkyLights.keyDirection): it feeds the shadow map, the light shafts and the
-        // light pools on the ground. Nothing about its angle depends on the time of day, so the beams and the pools stay exactly
-        // where they are and the runner can always run through them. Only its colour and strength follow the clock: sun-white
-        // (warm gold / orange at dawn and dusk) by day, moon-blue at night, crossfaded around sunrise and sunset. The strength
-        // never drops to zero in between, so the beams and pools do not vanish at any hour.
-        SkyLights.keyDirection(moonDirV)
-        fun smooth01(a: Double, b: Double, x: Double): Double { val c = ((x - a) / (b - a)).coerceIn(0.0, 1.0); return c * c * (3 - 2 * c) }
-        val sunW = (smooth01(.19, .25, cyc) * (1.0 - smooth01(.75, .81, cyc))).toFloat()   // 0 night, 1 full sun
+        // The sun and moon travel on their own east-to-west arcs. A single directional shadow map is
+        // shared by the scene lighting, volumetric shafts and ground projections, so all three always
+        // follow the same currently dominant celestial light (including its changing elevation).
+        SkyLights.sample(cyc, moonDirV, sunDirV, moonArcDirV, celestialMix)
+        val sunShare = celestialMix[0]
+        val moonI = celestialMix[1]
         val sunTint = Palette.mix(Palette.sunDay, if (cyc < .5) Palette.sunDawn else Palette.sunDusk, tw * .85f)
-        moonCol = Palette.mix(Palette.moon, sunTint, sunW)
-        val moonI = SkyLights.KEY_INTENSITY_NIGHT + (SkyLights.KEY_INTENSITY_DAY - SkyLights.KEY_INTENSITY_NIGHT) * sunW
-
+        moonCol = Palette.mix(Palette.moon, sunTint, sunShare)
         // The day's base colours are dark and greyish: the sun itself does the lighting.
         // Past dawn the day brightens further (dl = 0 at dawn/dusk, so the twilight look is untouched).
         val dl0 = ((k - .5f) * 2f).coerceIn(0f, 1f)
@@ -465,7 +464,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         pp.near = .1f; pp.far = 220f; pp.aspect = aspectRatio
         pp.tanHalf = tan(Math.toRadians(FOV / 2.0)).toFloat()
         System.arraycopy(moonDirV, 0, pp.moonDir, 0, 3)
-        val shaftK = .95f - .10f * k
+        val shaftK = 1.02f - .08f * k
         pp.moonCol[0] = moonCol[0] * moonI * shaftK; pp.moonCol[1] = moonCol[1] * moonI * shaftK; pp.moonCol[2] = moonCol[2] * moonI * shaftK
         val camSpeed = if (dt > 0) hypot(cam.ex - lastCamX, cam.ez - lastCamZ) / dt else 0.0
         lastCamX = cam.ex; lastCamZ = cam.ez
@@ -808,11 +807,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         GL.glUniformMatrix4fv(loc(shadowProg, "uLightVP"), 1, false, sm.vp[0], 0)
         // Only whole-tree sway moves things, so the shadows follow the trees; rocks and bushes stay put.
         fun draw(kind: Int, sway: Float) {
-            GL.glUniform3f(loc(shadowProg, "uSway"), 0f, 0f, 0f)   // shadows (and so the light beams) do not follow the wind: the light stays fixed
+            GL.glUniform3f(loc(shadowProg, "uSway"), 0f, 0f, 0f)   // caster geometry stays stable; the light direction itself follows the sun/moon arc
             meshes[kind].draw(bufs[kind], shadowCounts[kind])
         }
         // Crowns are NOT drawn into the shadow map: how much light the foliage lets through is the world-fixed sun-gap field
-        // (SUN_GAP_FN in Shaders.kt), the same for ground, trunks, bushes and the beams. The map only holds the solid parts.
+        // (SUN_GAP_FN in Shaders.kt), shared by ground, trunks, bushes and beams. Its projection changes with moonDirV.
         draw(K_TRUNK, TREE_SWAY); draw(K_ROOT, TREE_SWAY); draw(K_BRANCH, TREE_SWAY)
         draw(K_ROCK, 0f); draw(K_PLANT, 0f)
         sm.end()
