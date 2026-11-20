@@ -34,7 +34,10 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         const val CROWN_NEAR_SUBDIVISIONS = 2     // same canopy detail as the web build, close to the runner
         const val CROWN_FAR_SUBDIVISIONS = 2      // match the Capacitor canopy mesh at every distance; avoid a visible LOD silhouette seam
         const val CROWN_LOD_DISTANCE = 22.0
-        const val MAX_PROPS = (RADIUS * 2 + 1) * (RADIUS * 2 + 1)
+        // The shadow casters come from a wider lattice than the playable forest (see rebuildProps), so the light on the
+        // ground depends on the real forest and not on the part of it that happens to be loaded around the runner.
+        const val SHADOW_RADIUS = 22
+        const val MAX_PROPS = (SHADOW_RADIUS * 2 + 1) * (SHADOW_RADIUS * 2 + 1)
         const val GROUND_STEP = 200f / 160f
         const val K_TRUNK = 0; const val K_SHADOW = 1; const val K_ROOT = 2; const val K_BRANCH = 3
         const val K_CROWN = 4; const val K_ROCK = 5; const val K_PLANT = 6; const val K_CROWN_FAR = 7
@@ -131,10 +134,13 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private val counts = IntArray(KINDS)
     // Instances drawn into the shadow map: the visible ones plus trees beyond the view whose long shadows reach into it.
     private val shadowCounts = IntArray(KINDS)
-    // Shadow casters shrink to nothing between these distances from the runner (the forest is generated only 78 m around):
-    // thinning trees, not popping trees. Beyond SHADOW_FADE_END they are not drawn into the shadow map at all.
-    private val SHADOW_FADE_START = 26f
-    private val SHADOW_FADE_END = 52f
+    // Shadow casters shrink to nothing between these distances from the runner, only at the very rim of the shadow lattice
+    // (SHADOW_RADIUS * CELL = 132 m, about 120 m is inside it in every direction): thinning trees at the rim, not popping trees.
+    // Beyond SHADOW_FADE_END they are not drawn into the shadow map at all. The rim must lie beyond what the runner can see
+    // (fog, about 45 m) PLUS the longest shadow (a crown 22 m up at 23 degrees throws it about 50 m), so that every visible
+    // patch of ground has all the trees that can shade it. Then a pool of light is a fact of the forest, not of the loaded part.
+    private val SHADOW_FADE_START = 100f
+    private val SHADOW_FADE_END = 118f
     private val one: FloatBuffer = GlUtil.floatBuffer(16)
 
     // ---- matrices ----
@@ -158,6 +164,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private class Prop(val id: String, val x: Double, val z: Double, val kinds: IntArray, val m: FloatArray)
     private val cache = HashMap<String, Prop>()
     private var props: List<Prop> = emptyList()
+    /** Trees outside the playable window: they exist only to cast shadows (the same trees the forest has there). */
+    private var shadowRing: List<Prop> = emptyList()
     private var builtVersion = -1
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
@@ -269,8 +277,25 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val alive = HashSet<String>()
         for (t in s.trees) { next += cache.getOrPut(t.id) { treeProp(t) }; alive += t.id }
         for (o in s.obstacles) { next += cache.getOrPut(o.id) { obstacleProp(o) }; alive += o.id }
+        // The shadow ring: the very same deterministic trees the forest has beyond the playable window, around the window's own
+        // lattice centre. In Freeroam the engine clears trees around secrets, gates and black holes; the ring gets the same
+        // clearing, so no shadow is cast by a tree that is not there.
+        val ring = ArrayList<Prop>()
+        val cx = engine.worldCx; val cz = engine.worldCz
+        val free = s.mode == GameMode.FREEROAM
+        val holes = if (free) holesAround(s.x, s.z, s.universe) else emptyList()
+        fun open(x: Double, z: Double) = !free ||
+            (engine.secrets.all { hypot(x - it.x, z - it.z) > SECRET_CLEARING } &&
+                engine.gates.all { hypot(x - it.x, z - it.z) > GATE_CLEARING } &&
+                holes.all { hypot(x - it.x, z - it.z) > HOLE_CLEARING })
+        for (t in treesAround(cx, cz, levelOf(s.difficulty).treeGap, s.universe, SHADOW_RADIUS)) {
+            if (abs(floor(t.x / CELL).toInt() - cx) <= RADIUS && abs(floor(t.z / CELL).toInt() - cz) <= RADIUS) continue   // inside the window: already a real tree (or removed on purpose)
+            if (!open(t.x, t.z)) continue
+            ring += cache.getOrPut(t.id) { treeProp(t) }; alive += t.id
+        }
         cache.keys.retainAll(alive)
         props = next
+        shadowRing = ring
         treeN = s.trees.size
         if (treeX.size < treeN) { treeX = FloatArray(treeN + 64); treeZ = FloatArray(treeN + 64); treeR = FloatArray(treeN + 64) }
         for ((i, t) in s.trees.withIndex()) {
@@ -393,7 +418,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         // Bloom is reserved for genuinely bright sources; foliage and fog should retain texture.
         pp.bloomScale = .78f - .08f * k + .025f * dusk
         // Volumetric shafts remain visible, but never overpower the forest itself.
-        pp.shaftScale = 1.52f - .12f * k + .18f * tw
+        pp.shaftScale = 1.22f - .18f * k + .16f * tw
         red = e.redMix.toFloat(); lights = 1f - e.dieRef.toFloat()
 
         // TWO lights, each with its own arc and its own on/off window (see SkyLight.kt):
@@ -404,7 +429,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         // so no single light has to swing from one side to the other. Heights and intensities are set per light in SkyLights.
         // Only one directional light feeds the shadow map and the beams, the one that is stronger right now; the overlap is so short
         // and both are faded to almost nothing at the horizon, so the hand-over is not visible.
-        // No sway, drift or pulsing: the angle depends on the time of day only, so beams and light pools stay put.
+        // No sway, drift or pulsing: the angle depends on the time of day only (the Napszak slider / the clock), so while running
+        // the beams and light pools stay exactly where they are (the canopy openings, SUN_GAP_FN, are fixed in the world).
         val sunTh = SkyLights.SUN.progress(cyc); val moonTh = SkyLights.MOON.progress(cyc)
         val sunE = if (sunTh >= 0) SkyLights.SUN.intensity(sunTh) * SkyLights.SUN.weight(sunTh) else 0f
         val moonE = if (moonTh >= 0) SkyLights.MOON.intensity(moonTh) * SkyLights.MOON.weight(moonTh) else 0f
@@ -424,13 +450,23 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         // Past dawn the day brightens further (dl = 0 at dawn/dusk, so the twilight look is untouched).
         val dl0 = ((k - .5f) * 2f).coerceIn(0f, 1f)
         val dl = dl0 * dl0 * (3f - 2f * dl0)
-        fog = Palette.mix(Palette.mix(Palette.mix(Palette.fog, Palette.dayFog, k), warmFog, tw * .18f), Palette.dayFogLight, dl)
-        sky = Palette.mix(Palette.mix(Palette.mix(Palette.moon, Palette.daySky, k), warmSky, tw * .24f), Palette.daySkyLight, dl)
+        fog = Palette.mix(Palette.mix(Palette.mix(Palette.fog, Palette.dayFog, k), warmFog, tw * .22f), Palette.dayFogLight, dl)
+        sky = Palette.mix(Palette.mix(Palette.mix(Palette.moon, Palette.daySky, k), warmSky, tw * .30f), Palette.daySkyLight, dl)
+        // Richer atmospheric hues, while reducing the ambient veil that used to flatten contrast.
+        fun saturate(c: FloatArray, amount: Float): FloatArray {
+            val l = .2126f * c[0] + .7152f * c[1] + .0722f * c[2]
+            return FloatArray(3) { l + (c[it] - l) * amount }
+        }
+        fog = saturate(fog, 1.20f)
+        sky = saturate(sky, 1.22f)
+        // Deepen the atmospheric veil: richer hues, lower luminance, less milky daylight.
+        fog = floatArrayOf(fog[0] * .84f, fog[1] * .82f, fog[2] * .83f)
+        sky = floatArrayOf(sky[0] * .90f, sky[1] * .88f, sky[2] * .91f)
         groundC = Palette.mix(fog, Palette.pursuer, red * .55f)
         // Ambient fill prevents crushed shadows without flattening the directional sunlight.
-        hemi = .78f + k * .34f + tw * .07f + dl * .16f + red * 1.4f
+        hemi = .48f + k * .19f + tw * .045f + dl * .08f + red * 1.4f
         // Fog starts later by day, so the distant lights stay readable.
-        fogNear = 7f + k * 2f
+        fogNear = 8f + k * 3.5f
 
         // Camera: lookAt, then the same local pitch / yaw / roll nudges three.js applied.
         Matrix.setLookAtM(view, 0, cam.ex.toFloat(), cam.ey.toFloat(), cam.ez.toFloat(), cam.tx.toFloat(), cam.ty.toFloat(), cam.tz.toFloat(), 0f, 1f, 0f)
@@ -785,17 +821,15 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         for (m in oldRound) m.release()
     }
 
-    /** Moon shadow around the runner. */
+    /** Key-light shadow (solid parts only) centred on the runner. */
     private fun shadowPass(sm: ShadowMap, cam: CameraPose) {
-        val fwx = cam.tx - cam.ex; val fwz = cam.tz - cam.ez
-        val fl = hypot(fwx, fwz).coerceAtLeast(1e-6)
-        val nx = (fwx / fl).toFloat(); val nz = (fwz / fl).toFloat()
         GL.glUseProgram(shadowProg)
         GL.glUniform1f(loc(shadowProg, "uTime"), animT.toFloat())
         GL.glUniform2f(loc(shadowProg, "uCamXZ"), cam.ex.toFloat(), cam.ez.toFloat())
         GL.glUniform2f(loc(shadowProg, "uFade"), SHADOW_FADE_START, SHADOW_FADE_END)
         val ext = feat.shadowExtent
-        sm.update(0, cam.ex.toFloat() + nx * ext * .55f, 1f, cam.ez.toFloat() + nz * ext * .55f, moonDirV, ext)
+        // Centred on the runner, never ahead along the heading: the map's coverage does not change when he turns.
+        sm.update(0, cam.ex.toFloat(), 1f, cam.ez.toFloat(), moonDirV, ext)
         sm.begin(0)
         GL.glUniformMatrix4fv(loc(shadowProg, "uLightVP"), 1, false, sm.vp[0], 0)
         // Only whole-tree sway moves things, so the shadows follow the trees; rocks and bushes stay put.
@@ -803,8 +837,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             GL.glUniform3f(loc(shadowProg, "uSway"), 0f, 0f, 0f)   // shadows (and so the light beams) do not follow the wind: the light stays fixed
             meshes[kind].draw(bufs[kind], shadowCounts[kind])
         }
+        // Crowns are NOT drawn into the shadow map: how much light the foliage lets through is the world-fixed sun-gap field
+        // (SUN_GAP_FN in Shaders.kt), the same for ground, trunks, bushes and the beams. The map only holds the solid parts.
         draw(K_TRUNK, TREE_SWAY); draw(K_ROOT, TREE_SWAY); draw(K_BRANCH, TREE_SWAY)
-        draw(K_CROWN, TREE_SWAY); draw(K_CROWN_FAR, TREE_SWAY)
         draw(K_ROCK, 0f); draw(K_PLANT, 0f)
         sm.end()
     }
@@ -1171,16 +1206,21 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val lx = moonDirV[0].toDouble(); val lz = moonDirV[2].toDouble()
         val ll = hypot(lx, lz).coerceAtLeast(1e-6)
         val extraReach = SHADOW_FADE_END + 4.0   // beyond this the casters have faded away completely
-        for (p in props) {
-            val dx = p.x - cam.ex; val dz = p.z - cam.ez
-            val dist = hypot(dx, dz)
-            if (dist <= reach && (dx * fwx + dz * fwz) / fl >= -12) continue   // already in the visible set
-            if (dist > extraReach || s.cleared.contains(p.id)) continue
-            if ((dx * lx + dz * lz) / (ll * dist.coerceAtLeast(1e-6)) < .2) continue   // only trees on the light's side matter
-            for (i in p.kinds.indices) {
-                val kd = p.kinds[i]
-                if (kd == K_SHADOW || kd == K_PLANT || kd == K_ROCK) continue
-                emit(if (kd == K_CROWN && dist > CROWN_LOD_DISTANCE) K_CROWN_FAR else kd, p.m, i * 16)
+        val sideMax = feat.shadowExtent + 8.0   // beyond this sideways (crown radius included) a tree cannot touch the shadow map
+        for (pass in 0..1) {
+            // Pass 0: the playable window (minus what is already in the visible set). Pass 1: the shadow ring, never drawn otherwise.
+            for (p in (if (pass == 0) props else shadowRing)) {
+                val dx = p.x - cam.ex; val dz = p.z - cam.ez
+                val dist = hypot(dx, dz)
+                if (pass == 0 && dist <= reach && (dx * fwx + dz * fwz) / fl >= -12) continue   // already in the visible set
+                if (dist > extraReach || (pass == 0 && s.cleared.contains(p.id))) continue
+                if ((dx * lx + dz * lz) / (ll * dist.coerceAtLeast(1e-6)) < .2) continue   // only trees on the light's side matter
+                if (abs(-dx * lz + dz * lx) / ll > sideMax) continue
+                for (i in p.kinds.indices) {
+                    val kd = p.kinds[i]
+                    if (kd == K_SHADOW || kd == K_PLANT || kd == K_ROCK || kd == K_CROWN) continue   // crowns: see the sun-gap field
+                    emit(kd, p.m, i * 16)
+                }
             }
         }
         System.arraycopy(counts, 0, shadowCounts, 0, KINDS)
