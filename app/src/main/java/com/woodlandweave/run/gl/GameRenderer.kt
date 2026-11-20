@@ -91,8 +91,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var animT = 0.0
     private var aspectRatio = 16f / 9f
     private var lastCamX = 0.0; private var lastCamZ = 0.0
-    /** Unit vector towards the key light: fixed at every time of day (only its colour and strength change). */
-    private val moonDirV = FloatArray(3).also { SkyLights.keyDirection(it) }
+    /** Unit vector towards the key light (the sun between sunrise and sunset, the moon otherwise). Updated every frame. */
+    private val moonDirV = run { val ml = sqrt(24f * 24f + 20f * 20f); floatArrayOf(0f, 24f / ml, -20f / ml) }
     private val effects = EffectsModel()
     private val effectState = EffectState()
     // Reused upload buffers for four GLES 3.0 local-light slots.
@@ -131,13 +131,10 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private val counts = IntArray(KINDS)
     // Instances drawn into the shadow map: the visible ones plus trees beyond the view whose long shadows reach into it.
     private val shadowCounts = IntArray(KINDS)
-    // Shadow casters shrink to nothing between these distances from the runner, only at the very edge of the generated forest
-    // (it reaches RADIUS * CELL = 78 m): thinning trees at the rim, not popping trees. Beyond SHADOW_FADE_END they are not
-    // drawn into the shadow map at all. This must stay FAR out: the light comes from ahead and a crown throws its shadow up to
-    // ~45 m, so a fade that starts closer makes the shadows (and the beams) grow back as the runner approaches, and the pool of
-    // light seems to run away from him. Inside SHADOW_FADE_START every caster is full size, so a pool never fades on approach.
-    private val SHADOW_FADE_START = 62f
-    private val SHADOW_FADE_END = 80f
+    // Shadow casters shrink to nothing between these distances from the runner (the forest is generated only 78 m around):
+    // thinning trees, not popping trees. Beyond SHADOW_FADE_END they are not drawn into the shadow map at all.
+    private val SHADOW_FADE_START = 26f
+    private val SHADOW_FADE_END = 52f
     private val one: FloatBuffer = GlUtil.floatBuffer(16)
 
     // ---- matrices ----
@@ -399,17 +396,29 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         pp.shaftScale = 1.52f - .12f * k + .18f * tw
         red = e.redMix.toFloat(); lights = 1f - e.dieRef.toFloat()
 
-        // ONE key light with a FIXED direction (see SkyLights.keyDirection): it feeds the shadow map, the light shafts and the
-        // light pools on the ground. Nothing about its angle depends on the time of day, so the beams and the pools stay exactly
-        // where they are and the runner can always run through them. Only its colour and strength follow the clock: sun-white
-        // (warm gold / orange at dawn and dusk) by day, moon-blue at night, crossfaded around sunrise and sunset. The strength
-        // never drops to zero in between, so the beams and pools do not vanish at any hour.
-        SkyLights.keyDirection(moonDirV)
-        fun smooth01(a: Double, b: Double, x: Double): Double { val c = ((x - a) / (b - a)).coerceIn(0.0, 1.0); return c * c * (3 - 2 * c) }
-        val sunW = (smooth01(.19, .25, cyc) * (1.0 - smooth01(.75, .81, cyc))).toFloat()   // 0 night, 1 full sun
-        val sunTint = Palette.mix(Palette.sunDay, if (cyc < .5) Palette.sunDawn else Palette.sunDusk, tw * .85f)
-        moonCol = Palette.mix(Palette.moon, sunTint, sunW)
-        val moonI = SkyLights.KEY_INTENSITY_NIGHT + (SkyLights.KEY_INTENSITY_DAY - SkyLights.KEY_INTENSITY_NIGHT) * sunW
+        // TWO lights, each with its own arc and its own on/off window (see SkyLight.kt):
+        //  - the SUN shines from sunrise (cycle .25) to sunset (.75) and is OFF at night,
+        //  - the MOON shines from moonrise (just before the sun has set) to moonset (just after the sun has risen) and is OFF by day.
+        // Each one rises in the EAST (right), climbs to its own highest point straight ahead (NORTH) and sets in the WEST (left),
+        // low -> high -> low, always in front of the runner. Nothing slides between the two: one switches off as the other switches on,
+        // so no single light has to swing from one side to the other. Heights and intensities are set per light in SkyLights.
+        // Only one directional light feeds the shadow map and the beams, the one that is stronger right now; the overlap is so short
+        // and both are faded to almost nothing at the horizon, so the hand-over is not visible.
+        // No sway, drift or pulsing: the angle depends on the time of day only, so beams and light pools stay put.
+        val sunTh = SkyLights.SUN.progress(cyc); val moonTh = SkyLights.MOON.progress(cyc)
+        val sunE = if (sunTh >= 0) SkyLights.SUN.intensity(sunTh) * SkyLights.SUN.weight(sunTh) else 0f
+        val moonE = if (moonTh >= 0) SkyLights.MOON.intensity(moonTh) * SkyLights.MOON.weight(moonTh) else 0f
+        val sunKey = (sunTh >= 0 && sunE >= moonE) || moonTh < 0
+        val keyTh = if (sunKey) sunTh else moonTh
+        val keyLight = if (sunKey) SkyLights.SUN else SkyLights.MOON
+        if (keyTh >= 0) keyLight.direction(keyTh, moonDirV)
+        moonCol = if (sunKey) {
+            // Warm gold / rose near the horizon, white-warm at the highest point.
+            val horizon = 1.0 - sin(PI * keyTh)
+            val warm = horizon.let { x -> val c = ((x - .5) / .5).coerceIn(0.0, 1.0); c * c * (3 - 2 * c) }.toFloat() * .85f
+            Palette.mix(Palette.sunDay, if (keyTh < .5) Palette.sunDawn else Palette.sunDusk, warm)
+        } else Palette.moon
+        val moonI = maxOf(sunE, moonE)   // 0 only if both lights are off (never happens: the windows overlap)
 
         // The day's base colours are dark and greyish: the sun itself does the lighting.
         // Past dawn the day brightens further (dl = 0 at dawn/dusk, so the twilight look is untouched).
