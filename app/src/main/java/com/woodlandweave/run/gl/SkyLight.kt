@@ -55,6 +55,9 @@ class SkyLight(
 }
 
 /**
+ * NOTE: the renderer no longer moves its lighting along these arcs; the key light has one fixed direction (see KEY_* below).
+ * SUN and MOON remain only as reference data for the old two-arc model.
+ *
  * The two lights of the forest. The sun shines from sunrise (.25) to sunset (.75); the moon comes up as the sun goes down
  * (and goes down as the sun comes up) with a short overlap, while both are still faded to almost nothing at the horizon.
  * Edit the numbers here to move the lowest / highest points.
@@ -65,4 +68,22 @@ object SkyLights {
     // Both lights: 4 degrees at rise / set, 23 degrees at the highest point, exactly in the middle of the arc (due NORTH, straight ahead).
     val SUN = SkyLight(startCyc = .25, lenCyc = .5, minElDeg = 4.0, maxElDeg = 23.0, intensityLow = 1.75f, intensityHigh = 2.75f)
     val MOON = SkyLight(startCyc = .75 - OVERLAP, lenCyc = .5 + 2 * OVERLAP, minElDeg = 4.0, maxElDeg = 23.0, intensityLow = 1.35f, intensityHigh = 1.55f)
+
+    // The key light that feeds the shadow map, the light shafts and the ground light pools has ONE fixed direction at every
+    // time of day (due NORTH, straight ahead, 23 degrees up: the old highest point). Only its colour and strength follow the
+    // clock, so the beams between the trunks and the pools of light on the ground never move, change shape or fade away
+    // and the runner can always run through them, day or night.
+    const val KEY_AZIMUTH_DEG = 0.0
+    const val KEY_ELEVATION_DEG = 23.0
+    /** Key light strength: never zero, so the beams and pools stay visible all through dawn and dusk. */
+    const val KEY_INTENSITY_DAY = 2.4f
+    const val KEY_INTENSITY_NIGHT = 1.5f
+
+    /** Unit direction towards the fixed key light (x east, y up, z south; the runner starts out heading -z). */
+    fun keyDirection(out: FloatArray) {
+        val el = Math.toRadians(KEY_ELEVATION_DEG); val az = Math.toRadians(KEY_AZIMUTH_DEG)
+        out[0] = (sin(az) * cos(el)).toFloat()
+        out[1] = sin(el).toFloat()
+        out[2] = (-cos(az) * cos(el)).toFloat()
+    }
 }
