@@ -25,9 +25,7 @@ object Palette {
     val ember = lin(0xff2a1a); val pursuer = lin(0xff1e10); val blood = lin(0x3a0605)
     val freezer = lin(0x2b6cff); val ghost = lin(0x2ee88a); val shock = lin(0xb04dff); val secret = lin(0x7fe8d8)
     // Day: dark, greyish base colours; the sun does the lighting.
-    // Forest atmosphere: muted sage in the distance, cooler blue-green in the open sky.
-    // These are deliberately not highly saturated; the scene materials provide the foliage colour.
-    val dayFog = lin(0x68776d); val daySky = lin(0x91a69e); val dayFogLight = lin(0x87988c); val daySkyLight = lin(0xb5c6bd); val dayMoon = lin(0xdfe6e2); val ghostGlow = lin(0xeaf6ff)
+    val dayFog = lin(0x59625f); val daySky = lin(0x7d8784); val dayFogLight = lin(0x7c8884); val daySkyLight = lin(0xa4afab); val dayMoon = lin(0xdfe6e2); val ghostGlow = lin(0xeaf6ff)
     // Key light colours: sunrise, midday sun, sunset.
     val sunDawn = lin(0xffb98a); val sunDay = lin(0xfff1dc); val sunDusk = lin(0xff8a45)
 
