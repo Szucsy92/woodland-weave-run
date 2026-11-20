@@ -330,12 +330,24 @@ layout(location=5) in vec4 iC;
 layout(location=6) in vec4 iD;
 uniform mat4 uLightVP;
 uniform vec2 uCamXZ, uFade;
+uniform float uGap;   // 1 while the crowns are drawn, 0 for trunks, roots and branches
 $WIND_FN
+// Openings in the canopy, a fixed property of the WORLD: a function of world position only, never of the camera, the heading,
+// the time of day or what happens to be loaded. Where it is high the foliage is thin and lets the light through (leaves are
+// translucent), so slanting beams reach the ground in the same places every time, and every pool of light has the same
+// cause: the sun finds a way in between the crowns, and then it finds it from every direction you look.
+float canopyOpen(vec2 p) {
+  float a = sin(p.x * 0.105 + sin(p.y * 0.071) * 1.7);
+  float b = sin(p.y * 0.093 + sin(p.x * 0.083) * 1.5);
+  return a * b;
+}
 void main() {
   mat4 m = mat4(iA, iB, iC, iD);
   // Casters far from the runner shrink smoothly to nothing (about their own origin), so the finite edge of the generated
   // forest never makes a shadow, and with it a light beam, pop in or out; the light streams in over the edge instead.
   float f = 1.0 - smoothstep(uFade.x, uFade.y, distance(m[3].xz, uCamXZ));
+  // Crowns inside an opening cast only a small shadow (they keep their full size everywhere else and in the picture itself).
+  f *= mix(1.0, 1.0 - 0.88 * smoothstep(0.18, 0.5, canopyOpen(m[3].xz)), uGap);
   gl_Position = uLightVP * placeVertex(m, aPos * f);
 }
 """

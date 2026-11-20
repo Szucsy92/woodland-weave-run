@@ -809,6 +809,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         // Only whole-tree sway moves things, so the shadows follow the trees; rocks and bushes stay put.
         fun draw(kind: Int, sway: Float) {
             GL.glUniform3f(loc(shadowProg, "uSway"), 0f, 0f, 0f)   // shadows (and so the light beams) do not follow the wind: the light stays fixed
+            GL.glUniform1f(loc(shadowProg, "uGap"), if (kind == K_CROWN || kind == K_CROWN_FAR) 1f else 0f)   // canopy openings only thin the crowns
             meshes[kind].draw(bufs[kind], shadowCounts[kind])
         }
         draw(K_TRUNK, TREE_SWAY); draw(K_ROOT, TREE_SWAY); draw(K_BRANCH, TREE_SWAY)
