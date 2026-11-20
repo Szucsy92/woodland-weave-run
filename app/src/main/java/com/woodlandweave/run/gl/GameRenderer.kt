@@ -809,11 +809,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         // Only whole-tree sway moves things, so the shadows follow the trees; rocks and bushes stay put.
         fun draw(kind: Int, sway: Float) {
             GL.glUniform3f(loc(shadowProg, "uSway"), 0f, 0f, 0f)   // shadows (and so the light beams) do not follow the wind: the light stays fixed
-            GL.glUniform1f(loc(shadowProg, "uGap"), if (kind == K_CROWN || kind == K_CROWN_FAR) 1f else 0f)   // canopy openings only thin the crowns
             meshes[kind].draw(bufs[kind], shadowCounts[kind])
         }
+        // Crowns are NOT drawn into the shadow map: how much light the foliage lets through is the world-fixed sun-gap field
+        // (SUN_GAP_FN in Shaders.kt), the same for ground, trunks, bushes and the beams. The map only holds the solid parts.
         draw(K_TRUNK, TREE_SWAY); draw(K_ROOT, TREE_SWAY); draw(K_BRANCH, TREE_SWAY)
-        draw(K_CROWN, TREE_SWAY); draw(K_CROWN_FAR, TREE_SWAY)
         draw(K_ROCK, 0f); draw(K_PLANT, 0f)
         sm.end()
     }
@@ -1192,8 +1192,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 if (abs(-dx * lz + dz * lx) / ll > sideMax) continue
                 for (i in p.kinds.indices) {
                     val kd = p.kinds[i]
-                    if (kd == K_SHADOW || kd == K_PLANT || kd == K_ROCK) continue
-                    emit(if (kd == K_CROWN && dist > CROWN_LOD_DISTANCE) K_CROWN_FAR else kd, p.m, i * 16)
+                    if (kd == K_SHADOW || kd == K_PLANT || kd == K_ROCK || kd == K_CROWN) continue   // crowns: see the sun-gap field
+                    emit(kd, p.m, i * 16)
                 }
             }
         }
