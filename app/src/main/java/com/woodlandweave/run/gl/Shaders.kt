@@ -11,6 +11,30 @@ float gh(float x, float z) {
 """
 
 
+    /**
+     * The canopy as a light filter, a fixed property of the WORLD: a function of world position and the light direction only,
+     * never of the camera, the heading, what is loaded or what the shadow map holds. Light and shadow are handled apart:
+     * the shadow map holds only the solid parts (trunks, roots, branches); how much the foliage lets through is this field.
+     * A ray from point p towards the light crosses the canopy layer at a place q; if there is an opening in the foliage at
+     * q the sun reaches p, otherwise (almost) not. So a beam is a slanting column below an opening, a pool of light on the
+     * ground is where such a column ends, and both are in the same place from every side, out to any distance, exactly as
+     * if the forest had been generated that way. Points above the canopy are never shaded by it.
+     */
+    private const val SUN_GAP_FN = """
+float canopyOpen(vec2 p) {
+  float a = sin(p.x * 0.21 + sin(p.y * 0.13) * 1.7);
+  float b = sin(p.y * 0.19 + sin(p.x * 0.15) * 1.5);
+  return a * b;
+}
+float sunGap(vec3 p, vec3 L, float lowest) {
+  float t = max(15.0 - p.y, 0.0) / max(L.y, 0.12);
+  vec2 q = p.xz + L.xz * t;
+  float opening = smoothstep(0.0, 0.35, canopyOpen(q));
+  float passes = mix(lowest, 1.0, opening);
+  return mix(passes, 1.0, smoothstep(15.0, 23.0, p.y));
+}
+"""
+
     /** Wind (High tier): the whole tree leans with a gust. A smooth field in world space, so branches and crowns stay attached. */
     private const val WIND_FN = """
 uniform float uTime;
@@ -87,6 +111,7 @@ uniform int uMode;
 uniform vec2 uUvScale;
 uniform sampler2D uTex, uNorm, uRoughTex;
 uniform float uTime;
+$SUN_GAP_FN
 #ifdef Q_SHADOW
 uniform float uShadowOn, uShadowK;
 uniform mat4 uLightVP0;
@@ -263,6 +288,12 @@ void main() {
   // their own blob): they then only see shadows cast by other crowns and trunks, never self-shadow acne.
   if (uMode == 5) sh = shadowAt(vW + keyL * 4.5, vec3(0.0));
   else sh = shadowAt(vW, n);
+  // The foliage as a filter (see SUN_GAP_FN): world-fixed openings let the sun reach ground, trunks, bushes and the runner.
+  // The crowns themselves are the canopy top and stay in the sun.
+  // Ground: pools of light with a solid base level (the key light is never gone). Trunks, bushes and rocks only dim a little
+  // under the foliage, so what you run past stays lit. The crowns themselves are the canopy top and stay in the sun.
+  if (uMode == 3) sh *= mix(1.0, sunGap(vW, keyL, 0.30), uShadowK * step(0.5, uShadowOn));
+  else if (uMode != 5) sh *= mix(1.0, sunGap(vW, keyL, 0.30), 0.35 * uShadowK * step(0.5, uShadowOn));
 #endif
   // Dappled, drifting light: patches of sun / moonlight wander over trunks, ground, bushes and leaves.
   float dapA = sin(vW.x * 0.9 + sin(vW.z * 0.7) * 1.6);   // static dapple: the light pools stay fixed in the world
@@ -523,6 +554,7 @@ vec3 dofGather(vec2 uv, vec3 c0) {
   return acc / ws;
 }
 #ifdef Q_SHAFTS
+$SUN_GAP_FN
 float shadowMarch(vec3 wp) {
   vec4 l = uLightVP0 * vec4(wp, 1.0);
   vec3 s = l.xyz / l.w * 0.5 + 0.5;
@@ -531,7 +563,13 @@ float shadowMarch(vec3 wp) {
   vec2 e2 = min(s.xy, 1.0 - s.xy);
   float edge = smoothstep(0.0, 0.18, min(e2.x, e2.y));
   float v = (s.z < 1.0) ? texture(uShadowC0, vec3(clamp(s.xy, 0.0, 1.0), s.z)) : 1.0;
-  return mix(0.62, v, edge);
+  // The solid parts shade through the map; the foliage lets the light in only through its world-fixed openings.
+  float baseVis = mix(0.62, v, edge);
+  // Keep the original shaft energy: the world-fixed canopy only modulates contrast around neutral,
+  // instead of multiplying the whole beam by a dark foliage mask.
+  float gap = sunGap(wp, normalize(uMoonDir), 0.08);
+  float foliage = 1.0 + 0.35 * (gap - 0.405);
+  return baseVis * foliage;
 }
 // Light shafts: march the view ray through height fog, asking the shadow map where the moon reaches.
 vec3 shafts(vec3 c, vec2 uv, float d) {
