@@ -70,6 +70,7 @@ import com.woodlandweave.run.update.UpdateInfo
 import com.woodlandweave.run.update.UpdateState
 import com.woodlandweave.run.update.describeUpdateEvent
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.hypot
@@ -93,6 +94,7 @@ class Actions(
     val setDifficulty: (Difficulty) -> Unit,
     val setMode: (GameMode) -> Unit,
     val setMood: (ForestMood) -> Unit,
+    val setTimeOfDay: (Float) -> Unit,
     val setQuality: (Quality) -> Unit,
     val setFx: (String, Float) -> Unit,
     val finish: () -> Unit,
@@ -499,7 +501,7 @@ private fun SettingsContent(ui: UiState, a: Actions, updates: UpdateController, 
                 SettingRow("Difficulty", topLine = false, hint = if (!inMenu) "Applies from the next run." else null) {
                     Seg(listOf(Difficulty.EASY to "Easy", Difficulty.NORMAL to "Normal", Difficulty.HARD to "Hard"), s.difficulty, a.setDifficulty)
                 }
-                SettingRow("Forest") { Seg(listOf(ForestMood.NIGHT to "Night", ForestMood.DAY to "Day", ForestMood.AUTO to "Auto"), s.mood, a.setMood) }
+                TimeOfDayRow(s, a)
                 GraphicsBlock(s, a, onFxDrag)
                 SettingRow("Controls") { Seg(listOf(false to "Tilt", true to "Touch"), s.touch, a.setTouch) }
                 SettingRow("Orientation") { Seg(listOf(false to "Landscape", true to "Any"), s.anyOrientation, a.setAnyOrientation) }
@@ -586,6 +588,44 @@ private fun FxSlider(label: String, value: Float, onDrag: (FxDrag?) -> Unit, onC
             colors = SliderDefaults.colors(thumbColor = TextC, activeTrackColor = TextC, inactiveTrackColor = Edge),
         )
         Text("${(v * 100).toInt()}%", color = Muted, fontSize = 10.sp, modifier = Modifier.width(36.dp), textAlign = TextAlign.End)
+    }
+}
+
+/** Time of day: a slider through night, dawn, day and dusk, with Auto (follow the clock) as a button beside it. */
+@Composable
+private fun TimeOfDayRow(s: Settings, a: Actions) {
+    val auto = s.mood == ForestMood.AUTO
+    var drag by remember { mutableStateOf<Float?>(null) }
+    var clockPos by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(auto) {
+        while (auto) {
+            val now = java.util.Calendar.getInstance()
+            clockPos = cyclePos(now.get(java.util.Calendar.HOUR_OF_DAY) + now.get(java.util.Calendar.MINUTE) / 60.0).toFloat()
+            kotlinx.coroutines.delay(1000L)
+        }
+    }
+    val v = drag ?: if (auto) clockPos else s.timeOfDay
+    Column(Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Edge))
+        Spacer(Modifier.height(7.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Forest", color = TextC, fontSize = 13.sp)
+            Pill("Auto", auto) { a.setMood(ForestMood.AUTO) }
+        }
+        Slider(
+            value = v,
+            onValueChange = {
+                drag = it
+                // Apply every pointer movement immediately so the rendered forest previews the exact position.
+                a.setTimeOfDay(it)
+            },
+            onValueChangeFinished = { drag = null },
+            valueRange = 0f..1f, modifier = Modifier.fillMaxWidth(),
+            colors = SliderDefaults.colors(thumbColor = Color(0xFFFFC477), activeTrackColor = Color(0xFFFFA64D), inactiveTrackColor = Edge),
+        )
+        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            for (label in listOf("Night", "Dawn", "Day", "Dusk", "Night")) Text(label, color = Muted, fontSize = 10.sp)
+        }
     }
 }
 
