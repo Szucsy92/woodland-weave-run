@@ -6,7 +6,7 @@ import kotlin.math.floor
 import kotlin.math.sqrt
 
 /**
- * Directional (moon) shadow cascades: depth-only targets fitted around the runner in light space, snapped to
+ * Directional celestial-light shadow cascades: depth-only targets fitted around the runner in light space, snapped to
  * whole texels so the shadows never crawl. The textures use hardware comparison, so every tap is a bilinear PCF.
  */
 class ShadowMap(val res: Int, val cascades: Int) {
@@ -42,12 +42,12 @@ class ShadowMap(val res: Int, val cascades: Int) {
     }
 
     /**
-     * Fits cascade [c] around [cx],[cy],[cz] with half-extent [extent] metres, looking along -[moon] (the unit
-     * vector pointing at the moon).
+     * Fits cascade [c] around [cx],[cy],[cz] with half-extent [extent] metres, looking along -[lightDir]
+     * (the unit vector pointing at the active celestial light).
      */
-    fun update(c: Int, cx: Float, cy: Float, cz: Float, moon: FloatArray, extent: Float) {
+    fun update(c: Int, cx: Float, cy: Float, cz: Float, lightDir: FloatArray, extent: Float) {
         // Light basis for texel snapping.
-        val fx = -moon[0]; val fy = -moon[1]; val fz = -moon[2]
+        val fx = -lightDir[0]; val fy = -lightDir[1]; val fz = -lightDir[2]
         var rx = fy * 0f - fz * 1f; var ry = fz * 0f - fx * 0f; var rz = fx * 1f - fy * 0f   // cross(f, up)
         val rl = sqrt(rx * rx + ry * ry + rz * rz).coerceAtLeast(1e-6f); rx /= rl; ry /= rl; rz /= rl
         val ux = ry * fz - rz * fy; val uy = rz * fx - rx * fz; val uz = rx * fy - ry * fx
@@ -58,7 +58,7 @@ class ShadowMap(val res: Int, val cascades: Int) {
         val db = floor(b / texel + 0.5f) * texel - b
         val sx = cx + rx * da + ux * db; val sy = cy + ry * da + uy * db; val sz = cz + rz * da + uz * db
         val dist = 110f
-        Matrix.setLookAtM(view, 0, sx + moon[0] * dist, sy + moon[1] * dist, sz + moon[2] * dist, sx, sy, sz, 0f, 1f, 0f)
+        Matrix.setLookAtM(view, 0, sx + lightDir[0] * dist, sy + lightDir[1] * dist, sz + lightDir[2] * dist, sx, sy, sz, 0f, 1f, 0f)
         Matrix.orthoM(proj, 0, -extent, extent, -extent, extent, 1f, 260f)
         Matrix.multiplyMM(vp[c], 0, proj, 0, view, 0)
     }
