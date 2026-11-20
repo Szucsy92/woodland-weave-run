@@ -74,8 +74,6 @@ class GameEngine(
 
     // World bookkeeping read by the renderer.
     @Volatile var worldVersion = 0
-    /** Lattice centre (cell indices) the current trees were generated around; written before worldVersion is bumped. */
-    @Volatile var worldCx = 0; @Volatile var worldCz = 0
     var secrets: List<Secret> = emptyList(); private set
     var gates: List<Gate> = emptyList(); private set
     val orbs = ArrayList<Orb>()
@@ -226,7 +224,6 @@ class GameEngine(
         } else { secrets = emptyList(); gates = emptyList() }
         s.trees = trees
         s.obstacles = obstacles
-        worldCx = cx; worldCz = cz
         worldVersion++
     }
 
