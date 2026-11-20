@@ -11,6 +11,11 @@ float gh(float x, float z) {
 """
 
 
+    // Share of the foliage that casts a shadow (about 30 %: smoothstep window on the canopy field, see canopyKeep in SHADOW_VS).
+    // Lower CANOPY_HI / CANOPY_LO = fewer shadowing crowns = more open sky, beams and sun; higher = a denser, darker canopy.
+    private const val CANOPY_LO = "0.10"
+    private const val CANOPY_HI = "0.40"
+
     /** Wind (High tier): the whole tree leans with a gust. A smooth field in world space, so branches and crowns stay attached. */
     private const val WIND_FN = """
 uniform float uTime;
@@ -330,12 +335,24 @@ layout(location=5) in vec4 iC;
 layout(location=6) in vec4 iD;
 uniform mat4 uLightVP;
 uniform vec2 uCamXZ, uFade;
+uniform float uOpen;   // 1 while crowns are drawn, 0 for trunks, roots, branches, rocks and bushes
 $WIND_FN
+// How much of the foliage shades the ground at a place: a fixed field of the WORLD (no camera, no heading, nothing loaded
+// or unloaded enters it). Where it is 0 the canopy is open: the crowns there let the light stream in, so the sun, its
+// beams and the bright patches on the ground, the bark and the bushes are the same as ever, and they stay where they are.
+// Where it is 1 the crowns shade as real foliage does. Trunks, roots and branches always cast their real shadow.
+float canopyKeep(vec2 p) {
+  float a = sin(p.x * 0.21 + sin(p.y * 0.13) * 1.7);
+  float b = sin(p.y * 0.19 + sin(p.x * 0.15) * 1.5);
+  float n = a * b + 0.12 * sin(p.x * 0.9) * sin(p.y * 0.8);
+  return smoothstep($CANOPY_LO, $CANOPY_HI, n);
+}
 void main() {
   mat4 m = mat4(iA, iB, iC, iD);
-  // Casters far from the runner shrink smoothly to nothing (about their own origin), so the finite edge of the generated
-  // forest never makes a shadow, and with it a light beam, pop in or out; the light streams in over the edge instead.
+  // Casters at the very rim of the shadow ring shrink away (about their own origin), so the finite edge of the generated
+  // forest never makes a shadow, and with it a light beam, pop in or out. The rim lies beyond fog plus the longest shadow.
   float f = 1.0 - smoothstep(uFade.x, uFade.y, distance(m[3].xz, uCamXZ));
+  f *= mix(1.0, canopyKeep(m[3].xz), uOpen);
   gl_Position = uLightVP * placeVertex(m, aPos * f);
 }
 """
