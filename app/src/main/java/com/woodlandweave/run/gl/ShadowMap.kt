@@ -57,9 +57,10 @@ class ShadowMap(val res: Int, val cascades: Int) {
         val da = floor(a / texel + 0.5f) * texel - a
         val db = floor(b / texel + 0.5f) * texel - b
         val sx = cx + rx * da + ux * db; val sy = cy + ry * da + uy * db; val sz = cz + rz * da + uz * db
-        val dist = 110f
+        // Far enough back that every caster of the shadow ring (up to ~100 m towards the light) lies in front of the light's near plane.
+        val dist = 130f
         Matrix.setLookAtM(view, 0, sx + moon[0] * dist, sy + moon[1] * dist, sz + moon[2] * dist, sx, sy, sz, 0f, 1f, 0f)
-        Matrix.orthoM(proj, 0, -extent, extent, -extent, extent, 1f, 260f)
+        Matrix.orthoM(proj, 0, -extent, extent, -extent, extent, 1f, 300f)
         Matrix.multiplyMM(vp[c], 0, proj, 0, view, 0)
     }
 
