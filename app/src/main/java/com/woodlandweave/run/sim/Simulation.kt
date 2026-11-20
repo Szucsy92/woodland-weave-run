@@ -305,11 +305,11 @@ fun exitWarp(s: Simulation) {
 
 // ---- world generation -------------------------------------------------------------------------
 
-fun treesAround(cx: Int, cz: Int, keep: Double = 0.57, universe: Int = 0, radius: Int = RADIUS): List<Tree> {
+fun treesAround(cx: Int, cz: Int, keep: Double = 0.57, universe: Int = 0): List<Tree> {
     val trees = ArrayList<Tree>()
     val salt = universeSalt(universe); val size = universeScale(universe)
     val density = universeDensity(universe)
-    for (i in -radius..radius) for (j in -radius..radius) {
+    for (i in -RADIUS..RADIUS) for (j in -RADIUS..RADIUS) {
         val gx = cx + i; val gz = cz + j
         val hx = gx + salt; val hz = gz - salt
         if (hash(hx, hz) > keep * density) continue

@@ -12,7 +12,6 @@ float gh(float x, float z) {
 
 
     /** Wind (High tier): the whole tree leans with a gust. A smooth field in world space, so branches and crowns stay attached. */
-
     private const val WIND_FN = """
 uniform float uTime;
 uniform vec3 uSway;   // x: sway of a tree top (metres); y, z unused
@@ -269,9 +268,9 @@ void main() {
   float dapA = sin(vW.x * 0.9 + sin(vW.z * 0.7) * 1.6);   // static dapple: the light pools stay fixed in the world
   float dapB = sin(vW.z * 0.8 + sin(vW.x * 0.6) * 1.4);
   float dap = smoothstep(-0.55, 0.65, dapA * dapB);
-  // A restrained world-space variation remains as soft foliage texture; the actual high-contrast pools
-  // come from the shared canopy shadow map, not from a second unrelated dapple pattern.
-  if (uMode == 3) sh *= mix(0.90, 1.12, dap);
+  // Ground receives a stronger, broader dapple so the incoming key light reads as soft pools
+  // between the trees. Keep foliage contrast unchanged to avoid washing out the canopy.
+  if (uMode == 3) sh *= mix(0.68, 1.30, dap);
   else sh *= mix(0.6, 1.3, dap) * (uMode == 5 ? 0.7 : 1.0) + (uMode == 5 ? 0.3 : 0.0);
   if (uMode == 5) {
     // Foliage is translucent: wrapped diffuse on the lit side, and the light shining through leaves seen against it.
@@ -283,7 +282,7 @@ void main() {
   } else {
     // A modest ground-only irradiance lift makes sun/moon pools visible on the forest floor
     // without raising exposure or bleaching trunks and leaves.
-    float keyBoost = (uMode == 3) ? 1.22 : 1.0;
+    float keyBoost = (uMode == 3) ? 1.12 : 1.0;
     col += light(n, v, keyL, uMoon * sh * keyBoost, albedo, alpha);
   }
   vec3 tl = uLampPos - vW; float d = length(tl);
@@ -331,39 +330,19 @@ layout(location=5) in vec4 iC;
 layout(location=6) in vec4 iD;
 uniform mat4 uLightVP;
 uniform vec2 uCamXZ, uFade;
-out vec3 vWorld;
 $WIND_FN
 void main() {
   mat4 m = mat4(iA, iB, iC, iD);
   // Casters far from the runner shrink smoothly to nothing (about their own origin), so the finite edge of the generated
   // forest never makes a shadow, and with it a light beam, pop in or out; the light streams in over the edge instead.
   float f = 1.0 - smoothstep(uFade.x, uFade.y, distance(m[3].xz, uCamXZ));
-  vec4 w = placeVertex(m, aPos * f);
-  vWorld = w.xyz;
-  gl_Position = uLightVP * w;
+  gl_Position = uLightVP * placeVertex(m, aPos * f);
 }
 """
 
     val SHADOW_FS = """#version 300 es
-precision highp float;
-precision highp int;
-in vec3 vWorld;
-uniform float uCanopy;
-uint canopyHash(ivec2 p) {
-  uint h = uint(p.x) * 374761393u + uint(p.y) * 668265263u + 2654435769u;
-  h = (h ^ (h >> 13u)) * 1274126177u;
-  return h ^ (h >> 16u);
-}
-void main() {
-  // Crown meshes are real tree geometry, but foliage is porous. A stable world-space dither opens small gaps
-  // in the crown depth, letting the same sun/moon rays reach both the volumetric pass and the ground.
-  // 3 cells per metre gives sub-metre leaf clusters; PCF softens their projected edges into natural pools.
-  if (uCanopy > 0.5) {
-    ivec2 cell = ivec2(floor(vWorld.xz * 3.0));
-    float leaf = float(canopyHash(cell) & 0x00FFFFFFu) / 16777215.0;
-    if (leaf < 0.36) discard;
-  }
-}
+precision mediump float;
+void main() {}
 """
 
     val SPRITE_VS = """#version 300 es
@@ -552,12 +531,9 @@ float shadowMarch(vec3 wp) {
   vec2 e2 = min(s.xy, 1.0 - s.xy);
   float edge = smoothstep(0.0, 0.18, min(e2.x, e2.y));
   float v = (s.z < 1.0) ? texture(uShadowC0, vec3(clamp(s.xy, 0.0, 1.0), s.z)) : 1.0;
-  // The solid parts shade through the map; the foliage lets the light in only through its world-fixed openings.
-  // This is the very same depth map used by the ground shader: dithered crown geometry creates real openings,
-  // so each bright shaft terminates in the matching pool of light on the forest floor.
   return mix(0.62, v, edge);
 }
-// Light shafts: march the view ray through height fog, asking the shared shadow map where the active key light reaches.
+// Light shafts: march the view ray through height fog, asking the shadow map where the moon reaches.
 vec3 shafts(vec3 c, vec2 uv, float d) {
   vec3 ro = uCamPos;
   vec3 rd = worldAt(uv, d) - ro;
@@ -575,7 +551,7 @@ vec3 shafts(vec3 c, vec2 uv, float d) {
   float g = 0.55;   // wider lobe: the beams still glow when the light is 20-30 degrees off the view axis
   float phase = (1.0 - g * g) / (12.566 * pow(max(1.0 + g * g - 2.0 * g * cosT, 0.12), 1.5));
   // The light is low and often off to the side: keep a floor under the forward lobe so the beams still glow when it is not dead ahead.
-  phase = phase * 0.90 + 0.07;
+  phase = phase * 0.78 + 0.13;
   float T = 1.0; vec3 sc = vec3(0.0);
   for (int i = 0; i < 48; i++) {
     if (i >= N) break;
@@ -590,13 +566,13 @@ vec3 shafts(vec3 c, vec2 uv, float d) {
     float dens = uFogDens * heightFog * canopy;
     float vis = shadowMarch(p);
     // A small ambient term keeps the beam visible at soft shadow edges without flattening contrast.
-    vec3 inscatter = uMoonCol * (phase * vis + 0.018) * dens * seg;
+    vec3 inscatter = uMoonCol * (phase * vis + 0.045) * dens * seg;
     sc += inscatter * T;
     T *= exp(-dens * seg * 0.58);
   }
   // Lift the integrated scattering rather than hardening the shadow mask: beams read clearly,
   // while their edges and distance still dissolve naturally into the forest fog.
-  return c * T + sc * 1.65;
+  return c * T + sc * 1.48;
 }
 #endif
 #endif

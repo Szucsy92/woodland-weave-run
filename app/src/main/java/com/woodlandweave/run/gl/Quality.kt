@@ -5,7 +5,7 @@ package com.woodlandweave.run.gl
  *
  *  MEDIUM  bloom, smooth round shapes (canopy, rocks, bushes, rings and posts are no longer faceted polygons),
  *          and a more lifelike trunk and roots. Nothing else changes.
- *  HIGH    + everything MEDIUM has, plus filmic tone mapping, directional shadows, SSAO, volumetric light shafts,
+ *  HIGH    + everything MEDIUM has, plus filmic tone mapping, moon shadows, SSAO, volumetric light shafts,
  *          wet sheen and puddles, a light tree sway, film grain, depth of field and a speed-proportional motion blur.
  */
 enum class Quality(val label: String) {
@@ -64,9 +64,7 @@ class Features(val quality: Quality) {
     val wind = r >= 2
     val shadows = r >= 2
     val shadowRes = 2048
-    // Half-width of the shadow map in metres, centred ON the runner (not ahead of him): it covers everything the fog lets
-    // you see in every direction, so turning never moves the edge of the map and the light never changes with the heading.
-    val shadowExtent = 46f
+    val shadowExtent = 28f
     val ssao = r >= 2
     val ssaoSamples = 8
     val ssaoRadius = 0.50f
