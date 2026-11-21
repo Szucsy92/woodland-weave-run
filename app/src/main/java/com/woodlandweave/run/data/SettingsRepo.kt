@@ -10,7 +10,6 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.woodlandweave.run.sim.Difficulty
-import com.woodlandweave.run.gl.FX_NEUTRAL
 import com.woodlandweave.run.gl.FxTuning
 import com.woodlandweave.run.gl.Quality
 import com.woodlandweave.run.sim.ForestMood
@@ -74,8 +73,8 @@ class SettingsRepo(private val context: Context) {
             timeOfDay = p[K.tod] ?: (if (p[K.mood] == "DAY") .5f else 0f),
             quality = p.enumOf(K.quality, Quality.LOW),
             fx = FxTuning(
-                bloom = p[fxKey("bloom")] ?: FX_NEUTRAL, tone = p[fxKey("tone")] ?: FX_NEUTRAL, shadows = p[fxKey("shadows")] ?: FX_NEUTRAL,
-                ao = 0f, sharp = 0f, shafts = p[fxKey("shafts")] ?: FX_NEUTRAL, dof = p[fxKey("dof")] ?: FX_NEUTRAL, motion = p[fxKey("motion")] ?: FX_NEUTRAL,
+                bloom = p[fxKey("bloom")] ?: 1f, tone = p[fxKey("tone")] ?: 1f, shadows = p[fxKey("shadows")] ?: 1f,
+                ao = p[fxKey("ao")] ?: 1f, sharp = p[fxKey("sharp")] ?: 1f, shafts = p[fxKey("shafts")] ?: 1f, dof = p[fxKey("dof")] ?: 1f, motion = p[fxKey("motion")] ?: 1f,
             ),
             best = p[K.best] ?: 0,
             last = p[K.last] ?: 0,

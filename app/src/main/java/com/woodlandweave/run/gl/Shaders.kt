@@ -11,42 +11,6 @@ float gh(float x, float z) {
 """
 
 
-    /**
-     * The canopy as a light filter, a fixed property of the WORLD: a function of world position and the light direction only,
-     * never of the camera, the heading, what is loaded or what the shadow map holds. Light and shadow are handled apart:
-     * the shadow map holds only the solid parts (trunks, roots, branches); how much the foliage lets through is this field.
-     * A ray from point p towards the light crosses the canopy layer at a place q; if there is an opening in the foliage at
-     * q the sun reaches p, otherwise (almost) not. So a beam is a slanting column below an opening, a pool of light on the
-     * ground is where such a column ends, and both are in the same place from every side, out to any distance, exactly as
-     * if the forest had been generated that way. Points above the canopy are never shaded by it.
-     */
-    private const val SUN_GAP_FN = """
-float canopyOpen(vec2 p) {
-  float a = sin(p.x * 0.21 + sin(p.y * 0.13) * 1.7);
-  float b = sin(p.y * 0.19 + sin(p.x * 0.15) * 1.5);
-  return a * b;
-}
-// Where the ray from p towards the light crosses the canopy layer: the field value there (1 = middle of an opening).
-float sunField(vec3 p, vec3 L) {
-  float t = max(15.0 - p.y, 0.0) / max(L.y, 0.12);
-  return canopyOpen(p.xz + L.xz * t);
-}
-// Light pool profile of one opening: a bright core that fades smoothly outwards to nothing at the rim (no flat plateau).
-// x = core (strong middle), y = halo (wide soft skirt).
-vec2 sunPool(float field) {
-  float halo = smoothstep(-0.05, 0.62, field);
-  float core = smoothstep(0.38, 0.96, field);
-  return vec2(core * core * (3.0 - 2.0 * core), halo * halo);
-}
-float sunGap(vec3 p, vec3 L, float lowest) {
-  float t = max(15.0 - p.y, 0.0) / max(L.y, 0.12);
-  vec2 q = p.xz + L.xz * t;
-  float opening = smoothstep(0.0, 0.65, canopyOpen(q));
-  float passes = mix(lowest, 1.0, opening);
-  return mix(passes, 1.0, smoothstep(15.0, 23.0, p.y));
-}
-"""
-
     /** Wind (High tier): the whole tree leans with a gust. A smooth field in world space, so branches and crowns stay attached. */
     private const val WIND_FN = """
 uniform float uTime;
@@ -123,7 +87,6 @@ uniform int uMode;
 uniform vec2 uUvScale;
 uniform sampler2D uTex, uNorm, uRoughTex;
 uniform float uTime;
-$SUN_GAP_FN
 #ifdef Q_SHADOW
 uniform float uShadowOn, uShadowK;
 uniform mat4 uLightVP0;
@@ -295,24 +258,11 @@ void main() {
   vec3 col = albedo / PI * (mix(uGroundC, uSky, n.y * 0.5 + 0.5) * uHemi);
   float sh = 1.0;
   vec3 keyL = normalize(uMoonDir);
-  float poolCore = 0.0, poolHalo = 0.0, shSolid = 1.0;
 #ifdef Q_SHADOW
   // Canopy blobs overlap by design, so they sample the shadow map from a point well above their own surface (outside
   // their own blob): they then only see shadows cast by other crowns and trunks, never self-shadow acne.
   if (uMode == 5) sh = shadowAt(vW + keyL * 4.5, vec3(0.0));
   else sh = shadowAt(vW, n);
-  shSolid = sh;
-  // The foliage as a filter (see SUN_GAP_FN): world-fixed openings let the sun reach ground, trunks, bushes and the runner.
-  // The crowns themselves are the canopy top and stay in the sun.
-  // Trunks, bushes and rocks only dim a little under the foliage, so what you run past stays lit.
-  // Ground: every beam ends in a light pool with a strong core that fades outwards; between the pools the floor is clearly dimmer.
-  if (uMode == 3) {
-    vec2 pl = sunPool(sunField(vW, keyL));
-    float on = uShadowK * step(0.5, uShadowOn);
-    poolCore = pl.x * on; poolHalo = pl.y * on;
-    sh *= mix(1.0, mix(0.20, 1.0, pl.y) * (1.0 + 1.1 * pl.x), on);
-  }
-  else if (uMode != 5) sh *= mix(1.0, sunGap(vW, keyL, 0.30), 0.35 * uShadowK * step(0.5, uShadowOn));
 #endif
   // Dappled, drifting light: patches of sun / moonlight wander over trunks, ground, bushes and leaves.
   float dapA = sin(vW.x * 0.9 + sin(vW.z * 0.7) * 1.6);   // static dapple: the light pools stay fixed in the world
@@ -320,7 +270,7 @@ void main() {
   float dap = smoothstep(-0.55, 0.65, dapA * dapB);
   // Ground receives a stronger, broader dapple so the incoming key light reads as soft pools
   // between the trees. Keep foliage contrast unchanged to avoid washing out the canopy.
-  if (uMode == 3) sh *= mix(0.90, 1.10, dap);
+  if (uMode == 3) sh *= mix(0.68, 1.30, dap);
   else sh *= mix(0.6, 1.3, dap) * (uMode == 5 ? 0.7 : 1.0) + (uMode == 5 ? 0.3 : 0.0);
   if (uMode == 5) {
     // Foliage is translucent: wrapped diffuse on the lit side, and the light shining through leaves seen against it.
@@ -334,11 +284,6 @@ void main() {
     // without raising exposure or bleaching trunks and leaves.
     float keyBoost = (uMode == 3) ? 1.12 : 1.0;
     col += light(n, v, keyL, uMoon * sh * keyBoost, albedo, alpha);
-    if (uMode == 3) {
-      // Pool glow: strongest in the middle, fading to nothing at the rim; trunk / bush shadows (shSolid) still cut into it.
-      float up = clamp(dot(n, keyL) * 0.5 + 0.5, 0.0, 1.0);
-      col += albedo * uMoon * shSolid * (0.55 * poolHalo + 1.35 * poolCore) * (0.6 + 0.4 * up);
-    }
   }
   vec3 tl = uLampPos - vW; float d = length(tl);
   // Medium and High soften the very near field, so a trunk next to the lamp no longer burns out to white.
@@ -354,14 +299,6 @@ void main() {
       // Light stays low and is blocked by trunks: it no longer glows through a tree or lights the crowns far above.
       localAtten *= trunkShadow(i, uLocalPos[i].xyz, vW) * (1.0 - smoothstep(3.5, 8.5, vW.y - uLocalPos[i].y));
       col += light(n, v, tl / max(d, 1e-3), uLocalColor[i].rgb * localAtten, albedo, alpha);
-      if (uMode == 3) {
-        // Ground pool under the light, like the beams of the sun: a bright core right below it that fades smoothly outwards.
-        float hr = length(tl.xz) / max(uLocalColor[i].w * 0.62, 0.1);
-        float halo = 1.0 - smoothstep(0.0, 1.0, hr); halo *= halo;
-        float core = 1.0 - smoothstep(0.0, 0.42, hr); core *= core;
-        float gate = trunkShadow(i, uLocalPos[i].xyz, vW) * (1.0 - smoothstep(3.5, 8.5, vW.y - uLocalPos[i].y));
-        col += albedo * uLocalColor[i].rgb * uLocalPos[i].w * gate * (0.30 * halo + 0.95 * core) * 0.45;
-      }
     }
   }
 #ifdef Q_ENV
@@ -586,7 +523,6 @@ vec3 dofGather(vec2 uv, vec3 c0) {
   return acc / ws;
 }
 #ifdef Q_SHAFTS
-$SUN_GAP_FN
 float shadowMarch(vec3 wp) {
   vec4 l = uLightVP0 * vec4(wp, 1.0);
   vec3 s = l.xyz / l.w * 0.5 + 0.5;
@@ -595,15 +531,7 @@ float shadowMarch(vec3 wp) {
   vec2 e2 = min(s.xy, 1.0 - s.xy);
   float edge = smoothstep(0.0, 0.18, min(e2.x, e2.y));
   float v = (s.z < 1.0) ? texture(uShadowC0, vec3(clamp(s.xy, 0.0, 1.0), s.z)) : 1.0;
-  // The solid parts shade through the map; the foliage lets the light in only through its world-fixed openings.
-  float baseVis = mix(0.62, v, edge);
-  // Keep the original shaft energy: the world-fixed canopy only modulates contrast around neutral,
-  // instead of multiplying the whole beam by a dark foliage mask.
-  float gap = sunGap(wp, normalize(uMoonDir), 0.08);
-  // Soft, feathered beam edges; a stronger luminous core inside canopy openings.
-  float beamCore = smoothstep(0.16, 0.82, gap);
-  float foliage = mix(0.82, 1.52, beamCore);
-  return baseVis * foliage;
+  return mix(0.62, v, edge);
 }
 // Light shafts: march the view ray through height fog, asking the shadow map where the moon reaches.
 vec3 shafts(vec3 c, vec2 uv, float d) {
@@ -620,10 +548,10 @@ vec3 shafts(vec3 c, vec2 uv, float d) {
   float ph = fract(-dot(ro, rd) / dtFix);
   float j = ign(gl_FragCoord.xy);   // static per-pixel offset over a whole step: the world anchor stays, the banding (dashed lines) goes
   float cosT = dot(rd, uMoonDir);
-  float g = 0.64;   // tighter source lobe: clearer light origin, without turning shafts into hard cones
+  float g = 0.55;   // wider lobe: the beams still glow when the light is 20-30 degrees off the view axis
   float phase = (1.0 - g * g) / (12.566 * pow(max(1.0 + g * g - 2.0 * g * cosT, 0.12), 1.5));
   // The light is low and often off to the side: keep a floor under the forward lobe so the beams still glow when it is not dead ahead.
-  phase = phase * 0.72 + 0.075;
+  phase = phase * 0.78 + 0.13;
   float T = 1.0; vec3 sc = vec3(0.0);
   for (int i = 0; i < 48; i++) {
     if (i >= N) break;
@@ -638,16 +566,13 @@ vec3 shafts(vec3 c, vec2 uv, float d) {
     float dens = uFogDens * heightFog * canopy;
     float vis = shadowMarch(p);
     // A small ambient term keeps the beam visible at soft shadow edges without flattening contrast.
-    // Saturate the time-of-day tint without simply washing the atmosphere brighter.
-    vec3 shaftLum = vec3(dot(uMoonCol, vec3(0.2126, 0.7152, 0.0722)));
-    vec3 shaftTint = mix(shaftLum, uMoonCol, 1.28);
-    vec3 inscatter = shaftTint * (phase * vis + 0.032) * dens * seg;
+    vec3 inscatter = uMoonCol * (phase * vis + 0.045) * dens * seg;
     sc += inscatter * T;
     T *= exp(-dens * seg * 0.58);
   }
   // Lift the integrated scattering rather than hardening the shadow mask: beams read clearly,
   // while their edges and distance still dissolve naturally into the forest fog.
-  return c * T + sc * 1.82;
+  return c * T + sc * 1.48;
 }
 #endif
 #endif
@@ -787,8 +712,7 @@ void main() {
             1.0 + 0.002 * shadowGrade + 0.004 * highlightGrade,
             1.0 + 0.012 * shadowGrade - 0.010 * highlightGrade);
   float gradedLum = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  c = mix(vec3(gradedLum), c, 1.075);
-  c = (c - 0.18) * 1.045 + 0.18;
+  c = mix(vec3(gradedLum), c, 1.035);
 #endif
   // OutputPass: linear -> sRGB. From here on the picture is gamma encoded, like the browser's compositor.
   vec3 outS = linearToSrgb(clamp(c, 0.0, 1.0));
