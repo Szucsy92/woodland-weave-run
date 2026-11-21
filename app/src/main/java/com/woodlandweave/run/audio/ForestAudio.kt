@@ -25,6 +25,14 @@ enum class Cue { FREEZER, GHOST, SHOCKWAVE, RING, END, STUMBLE, GATE, HOLE, WARP
  * Native audio engine (AudioTrack only, no web audio). The forest loop streams through a
  * one-pole low-pass and gain that glide exactly like the old Web Audio chain did: dull in the
  * menu (220 Hz), open while running (4 kHz), dark once the lights die (380 Hz).
+ *
+ * Who decides what is heard:
+ *  - the loudness is the system's: the hardware volume keys (the activity routes them to STREAM_MUSIC) scale the stream,
+ *    and this class never second-guesses them (no ringer-mode rule, no volume broadcasts, no per-sample scaling);
+ *  - the in-app Audio switch and the activity being in the foreground decide whether a stream exists at all.
+ *
+ * A stream exists only while sound is audible: when Audio is off, the app is in the background or the music volume is at zero,
+ * the AudioTrack is released (not merely paused), so no audio session is left open and the output path can power down.
  */
 class ForestAudio(private val context: Context) {
     private companion object {
@@ -32,40 +40,44 @@ class ForestAudio(private val context: Context) {
         const val MUFFLED_HZ = 380f
         const val MENU_HZ = 220f
         const val RUN_HZ = 4000f
+        /** How often the music volume is looked at while deciding whether a stream should exist. */
+        const val VOLUME_POLL_NS = 200_000_000L
     }
 
     @Volatile private var enabled = true
     @Volatile private var running = false
     @Volatile private var foreground = true
     @Volatile private var muffled = false
-    @Volatile private var systemMuted = false
     @Volatile private var dipUntilNs = 0L
     @Volatile private var dipEndedNs = 0L
     @Volatile private var released = false
+    @Volatile private var volumeZero = false
+    @Volatile private var lastVolumeCheckNs = 0L
 
     private val handler = Handler(Looper.getMainLooper())
     private val attrs = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_GAME)
-        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
         .build()
     private val stings = java.util.concurrent.ConcurrentHashMap<Sting, ShortArray>()
     private val cues = java.util.concurrent.ConcurrentHashMap<Cue, ShortArray>()
     private var loop: LoopThread? = null
+    private val audioManager: AudioManager? by lazy { context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager }
 
-    @Volatile private var lastMuteCheckNs = 0L
-
-    /**
-     * The volume / ringer broadcasts are not reliable on every device, so the mute state is also polled (cheap, at most
-     * every 150 ms): volume at zero, a muted stream or a silent / vibrate ringer means no sound at all.
-     */
-    private fun canPlay(): Boolean {
+    /** True while the system music volume is at its lowest step: then no stream is opened (the keys have the last word). */
+    private fun musicVolumeZero(): Boolean {
         val now = System.nanoTime()
-        if (now - lastMuteCheckNs > 150_000_000L) { lastMuteCheckNs = now; refreshMute() }
-        return enabled && foreground && !systemMuted && !released
+        if (now - lastVolumeCheckNs > VOLUME_POLL_NS) {
+            lastVolumeCheckNs = now
+            volumeZero = try { (audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 1) <= 0 } catch (_: Exception) { false }
+        }
+        return volumeZero
     }
 
+    /** Sound exists only when the app switch is on, the activity is in front and the volume keys have not taken it to zero. */
+    private fun canPlay(): Boolean = enabled && foreground && !released && !musicVolumeZero()
+
     fun start() {
-        refreshMute()
         Thread({
             Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
             loadSting(Sting.START, R.raw.run_start, 1200f)
@@ -81,18 +93,9 @@ class ForestAudio(private val context: Context) {
         loop?.interrupt()
     }
 
-    fun refreshMute() {
-        val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
-        systemMuted = AudioOutputPolicy.shouldMute(
-            am.getStreamVolume(AudioManager.STREAM_MUSIC),
-            am.isStreamMute(AudioManager.STREAM_MUSIC),
-            am.ringerMode,
-        )
-    }
-
     fun setMode(enabled: Boolean, running: Boolean) { this.enabled = enabled; this.running = running }
     fun setMuffled(value: Boolean) { muffled = value }
-    fun onForeground() { foreground = true; refreshMute() }
+    fun onForeground() { foreground = true }
     fun onBackground() { foreground = false }
 
     /** 500 ms dip matching the impact glitch: instantly muffled, then back. */
@@ -135,33 +138,52 @@ class ForestAudio(private val context: Context) {
     // ---- the looping forest ----------------------------------------------------------------
 
     private inner class LoopThread : Thread("forest-loop") {
+        private fun open(): AudioTrack? {
+            return try {
+                val format = AudioFormat.Builder()
+                    .setSampleRate(RATE).setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build()
+                val minBuf = AudioTrack.getMinBufferSize(RATE, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT)
+                val created = AudioTrack.Builder().setAudioAttributes(attrs).setAudioFormat(format)
+                    .setBufferSizeInBytes(max(minBuf, 16384) * 2).setTransferMode(AudioTrack.MODE_STREAM).build()
+                if (created.state == AudioTrack.STATE_INITIALIZED) created else { created.release(); null }
+            } catch (_: Exception) { null }
+        }
+
+        /** Drops whatever is still buffered and frees the track, so nothing keeps the output open. */
+        private fun close(track: AudioTrack) {
+            try { track.pause(); track.flush() } catch (_: Exception) { }
+            try { track.release() } catch (_: Exception) { }
+        }
+
         override fun run() {
             Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
             val pcm = try { soften(readWav(R.raw.forest_loop)) } catch (_: Exception) { return }
-            val format = AudioFormat.Builder()
-                .setSampleRate(RATE).setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build()
-            val minBuf = AudioTrack.getMinBufferSize(RATE, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT)
-            val track = AudioTrack.Builder().setAudioAttributes(attrs).setAudioFormat(format)
-                .setBufferSizeInBytes(max(minBuf, 16384) * 2).setTransferMode(AudioTrack.MODE_STREAM).build()
             val frames = pcm.size / 2
             val chunkFrames = 1024
             val out = ShortArray(chunkFrames * 2)
+            var track: AudioTrack? = null
             var pos = 0
             var gain = 0f
             var cutoff = MENU_HZ
             var lpL = 0f
             var lpR = 0f
-            var playing = false
             val dt = chunkFrames.toFloat() / RATE
             try {
                 while (!released && !isInterrupted) {
                     if (!canPlay()) {
-                        if (playing) { track.pause(); track.flush(); playing = false; gain = 0f }
-                        sleep(60)
+                        // Off, in the background or at zero volume: no AudioTrack exists at all.
+                        track?.let { close(it) }; track = null
+                        gain = 0f; lpL = 0f; lpR = 0f
+                        sleep(200)
                         continue
                     }
-                    if (!playing) { track.play(); playing = true }
+                    var tr = track
+                    if (tr == null) {
+                        tr = open()
+                        if (tr == null) { sleep(500); continue }
+                        tr.play(); track = tr
+                    }
                     val now = System.nanoTime()
                     val dipping = now < dipUntilNs
                     val targetGain = if (running) (if (muffled) 0.26f else 0.45f) else 0.3f
@@ -179,12 +201,12 @@ class ForestAudio(private val context: Context) {
                         out[i * 2 + 1] = (lpR * gain).toInt().coerceIn(-32768, 32767).toShort()
                         if (++pos >= frames) pos = 0
                     }
-                    track.write(out, 0, out.size)
+                    // A negative result means the route died (headset pulled, audio server restarted): start over cleanly.
+                    if (tr.write(out, 0, out.size) < 0) { close(tr); track = null; gain = 0f; sleep(300) }
                 }
             } catch (_: InterruptedException) {
             } finally {
-                try { track.stop() } catch (_: Exception) { }
-                track.release()
+                track?.let { close(it) }
             }
         }
     }
