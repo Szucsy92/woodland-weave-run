@@ -1220,6 +1220,19 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         // dark gap in the beams) over the ground near the runner. Culling such trees with the visible set made that shadow
         // pop into the beams the moment the tree came into view. They are added here for the shadow map only.
         val vis = counts.copyOf()
+        // Far trees keep their lightweight crown-only visible LOD, but their roots and
+        // branches must still exist in the shadow instance stream. Otherwise the visible
+        // tree can no longer cast the branch-shaped shadows that reach the ground.
+        for (p in props) {
+            val dx = p.x - cam.ex; val dz = p.z - cam.ez
+            val dist = hypot(dx, dz)
+            if (dist <= CROWN_LOD_DISTANCE || dist > reach) continue
+            if ((dx * fwx + dz * fwz) / fl < -12 || s.cleared.contains(p.id)) continue
+            for (i in p.kinds.indices) {
+                val kind = p.kinds[i]
+                if (kind == K_ROOT || kind == K_BRANCH) emit(kind, p.m, i * 16)
+            }
+        }
         val lx = moonDirV[0].toDouble(); val lz = moonDirV[2].toDouble()
         val ll = hypot(lx, lz).coerceAtLeast(1e-6)
         val extraReach = SHADOW_FADE_END + 4.0   // beyond this the casters have faded away completely
