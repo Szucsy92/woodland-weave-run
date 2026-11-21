@@ -412,49 +412,27 @@ object Geo {
      * the vertices the two levels share (the vertices of the lower level come first, in the same order). The lumps and the shading
      * therefore agree with the near crown; only the fine sampling between the shared vertices is dropped.
      */
-    fun crownLod(near: Int, far: Int): MeshData = crown(far, false)
+    fun crownLod(near: Int, far: Int): MeshData {
+        val hi = crown(near, false)
+        val lo = icosphere(far)
+        val n = lo.vertexCount
+        val m = MeshData(hi.pos.copyOf(n * 3), hi.uv.copyOf(n * 2), lo.idx)
+        m.nor = hi.nor.copyOf(n * 3)
+        return m
+    }
 
-    /**
-     * A complete, irregular foliage spray rather than a single spherical crown blob.
-     * Five low-poly leaf masses overlap around a branching centre.  The mesh is shared
-     * by every tree instance, keeping CPU work and draw calls independent of tree count.
-     */
+    /** Lumpy leaf mass; CROWN_SUBDIVISIONS keeps the instance count affordable on phones. */
     fun crown(subdivisions: Int, flat: Boolean = true): MeshData {
-        val base = icosphere(0)
-        val centers = arrayOf(
-            floatArrayOf(0f, .12f, 0f),
-            floatArrayOf(-.48f, -.02f, .12f),
-            floatArrayOf(.43f, .04f, -.18f),
-            floatArrayOf(-.12f, .34f, -.38f),
-            floatArrayOf(.16f, -.22f, .40f),
-        )
-        val scales = arrayOf(
-            floatArrayOf(.60f, .78f, .56f),
-            floatArrayOf(.54f, .48f, .48f),
-            floatArrayOf(.56f, .53f, .48f),
-            floatArrayOf(.46f, .55f, .44f),
-            floatArrayOf(.48f, .48f, .43f),
-        )
-        val count = centers.size
-        val pos = FloatArray(base.vertexCount * count * 3)
-        val uv = FloatArray(base.vertexCount * count * 2)
-        val idx = ShortArray(base.idx.size * count)
-        for (cluster in 0 until count) {
-            val vo = cluster * base.vertexCount
-            for (v in 0 until base.vertexCount) {
-                val x = base.pos[v * 3]; val y = base.pos[v * 3 + 1]; val z = base.pos[v * 3 + 2]
-                val ripple = 1f + .10f * sin(x * 5.7f + y * 3.1f + cluster) * cos(z * 4.3f - y * 2.2f)
-                pos[(vo + v) * 3] = centers[cluster][0] + x * scales[cluster][0] * ripple
-                pos[(vo + v) * 3 + 1] = centers[cluster][1] + y * scales[cluster][1] * ripple
-                pos[(vo + v) * 3 + 2] = centers[cluster][2] + z * scales[cluster][2] * ripple
-                uv[(vo + v) * 2] = base.uv[v * 2]
-                uv[(vo + v) * 2 + 1] = base.uv[v * 2 + 1]
-            }
-            for (i in base.idx.indices) idx[cluster * base.idx.size + i] = (base.idx[i].toInt() + vo).toShort()
+        val g = if (flat) polyhedron(subdivisions) else icosphere(subdivisions)
+        g.forEachVertex { _, v ->
+            val n = sin(v[0] * 5.1f + v[1] * 2.3f) * sin(v[2] * 4.7f - v[1] * 3.1f) * .16f + sin(v[0] * 11 + v[2] * 9) * .05f
+            val lump = sin(v[0] * 2.1f + 1.3f) * sin(v[2] * 1.7f + v[1] * 2.6f) * .32f + sin(v[1] * 7.7f + v[0] * 6.1f) * cos(v[2] * 8.3f) * .12f
+            val k = max(.35f, 1 + n + lump)
+            v[0] *= k; v[1] *= k; v[2] *= k
+            v[1] *= if (v[1] < 0) .45f else .8f
         }
-        val result = MeshData(pos, uv, idx)
-        if (flat) result.computeFlatNormals() else result.computeNormals()
-        return result
+        if (flat) g.computeFlatNormals() else g.computeNormals()
+        return g
     }
 
     fun jittered(subdivisions: Int, xz: Float, y: Float, seed: Int, flat: Boolean = true): MeshData {

@@ -812,9 +812,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         // Beyond CROWN_LOD_DISTANCE (most trees, and mostly inside the fog) the crown has a quarter of the triangles but keeps
         // the near crown's vertices AND normals at the vertices they share: same lumps, same shading, no band at the LOD distance.
         meshes[K_CROWN_FAR] = Mesh(if (flat) Geo.crown(CROWN_FAR_SUBDIVISIONS, false) else Geo.crownLod(f.crownNearDetail, f.crownFarDetail), MAX_PROPS * 16)
-        meshes[K_TRUNK] = Mesh(Geo.trunkLifelike(), MAX_PROPS)
-        meshes[K_ROOT] = Mesh(Geo.rootLifelike(), MAX_PROPS * 5)
-        meshes[K_BRANCH] = Mesh(Geo.branchRound(), MAX_PROPS * 11)
+        meshes[K_TRUNK] = Mesh(if (f.lifelikeTrees) Geo.trunkLifelike() else Geo.trunk(), MAX_PROPS)
+        meshes[K_ROOT] = Mesh(if (f.lifelikeTrees) Geo.rootLifelike() else Geo.root(), MAX_PROPS * 5)
+        meshes[K_BRANCH] = Mesh(if (f.lifelikeTrees) Geo.branchRound() else Geo.branch(), MAX_PROPS * 11)
         // The shadow map only needs silhouettes: coarse copies of the trunk (20 sides, 12 rows, the flare kept fine), the roots
         // (6 x 6) and the branches (6 x 4) that use the very same instance matrices as the visible ones: about 1,300 triangles
         // per tree instead of 6,900, with the same shadow shapes.
