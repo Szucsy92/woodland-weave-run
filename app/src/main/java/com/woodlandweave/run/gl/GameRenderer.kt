@@ -393,7 +393,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         // Bloom is reserved for genuinely bright sources; foliage and fog should retain texture.
         pp.bloomScale = .78f - .08f * k + .025f * dusk
         // Volumetric shafts remain visible, but never overpower the forest itself.
-        pp.shaftScale = 1.30f - .14f * k + .16f * tw
+        pp.shaftScale = 1.52f - .12f * k + .18f * tw
         red = e.redMix.toFloat(); lights = 1f - e.dieRef.toFloat()
 
         // TWO lights, each with its own arc and its own on/off window (see SkyLight.kt):
@@ -803,9 +803,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             GL.glUniform3f(loc(shadowProg, "uSway"), 0f, 0f, 0f)   // shadows (and so the light beams) do not follow the wind: the light stays fixed
             meshes[kind].draw(bufs[kind], shadowCounts[kind])
         }
-        // Crowns use the shared world-space canopy transmission field in the lit and shaft shaders;
-        // keep the depth map for solid occluders only to avoid drawing every crown twice.
         draw(K_TRUNK, TREE_SWAY); draw(K_ROOT, TREE_SWAY); draw(K_BRANCH, TREE_SWAY)
+        draw(K_CROWN, TREE_SWAY); draw(K_CROWN_FAR, TREE_SWAY)
         draw(K_ROCK, 0f); draw(K_PLANT, 0f)
         sm.end()
     }
