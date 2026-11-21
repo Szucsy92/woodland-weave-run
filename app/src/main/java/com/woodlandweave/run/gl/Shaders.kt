@@ -130,10 +130,9 @@ uniform mat4 uLightVP0;
 uniform sampler2DShadow uShadow0;
 uniform float uShadowTexel;
 float pcf3(sampler2DShadow s, vec3 c, float tx) {
-  // Four taps, each already a bilinear compare in hardware: about the same soft edge as nine point taps.
-  float o = 0.75 * tx;
-  return 0.25 * (texture(s, vec3(c.xy + vec2(-o, -o), c.z)) + texture(s, vec3(c.xy + vec2(o, -o), c.z)) +
-                 texture(s, vec3(c.xy + vec2(-o, o), c.z)) + texture(s, vec3(c.xy + vec2(o, o), c.z)));
+  float sum = 0.0;
+  for (int i = -1; i <= 1; i++) for (int j = -1; j <= 1; j++) sum += texture(s, vec3(c.xy + vec2(float(i), float(j)) * tx, c.z));
+  return sum / 9.0;
 }
 float shadowRaw(vec3 wp, vec3 n) {
   if (uShadowOn < 0.5) return 1.0;
@@ -379,12 +378,9 @@ void main() {
     col += env * envF * envGain * 1.35;
   }
 #endif
-  // The pursuer light and the flood light are off almost all the time: skip their whole lighting model then.
-  if (uRedI > 0.001) {
-    tl = uRedPos - vW; d = length(tl);
-    col += light(n, v, tl / max(d, 1e-3), uRedCol * (uRedI / max(pow(d, 1.1), 0.01)) * falloff(d, 70.0), albedo, alpha);
-  }
-  if (dot(uFloodCol, vec3(1.0)) > 0.001) col += light(n, v, normalize(uFloodDir), uFloodCol, albedo, alpha);
+  tl = uRedPos - vW; d = length(tl);
+  col += light(n, v, tl / max(d, 1e-3), uRedCol * (uRedI / max(pow(d, 1.1), 0.01)) * falloff(d, 70.0), albedo, alpha);
+  col += light(n, v, normalize(uFloodDir), uFloodCol, albedo, alpha);
   o = vec4(finish(col + emissive, depth), outA);
 }
 """
@@ -628,9 +624,6 @@ vec3 shafts(vec3 c, vec2 uv, float d) {
   float phase = (1.0 - g * g) / (12.566 * pow(max(1.0 + g * g - 2.0 * g * cosT, 0.12), 1.5));
   // The light is low and often off to the side: keep a floor under the forward lobe so the beams still glow when it is not dead ahead.
   phase = phase * 0.72 + 0.075;
-  // Loop-invariant tint, computed once instead of in every step.
-  vec3 shaftLum = vec3(dot(uMoonCol, vec3(0.2126, 0.7152, 0.0722)));
-  vec3 shaftTint = mix(shaftLum, uMoonCol, 1.28);
   float T = 1.0; vec3 sc = vec3(0.0);
   for (int i = 0; i < 48; i++) {
     if (i >= N) break;
@@ -646,6 +639,8 @@ vec3 shafts(vec3 c, vec2 uv, float d) {
     float vis = shadowMarch(p);
     // A small ambient term keeps the beam visible at soft shadow edges without flattening contrast.
     // Saturate the time-of-day tint without simply washing the atmosphere brighter.
+    vec3 shaftLum = vec3(dot(uMoonCol, vec3(0.2126, 0.7152, 0.0722)));
+    vec3 shaftTint = mix(shaftLum, uMoonCol, 1.28);
     vec3 inscatter = shaftTint * (phase * vis + 0.032) * dens * seg;
     sc += inscatter * T;
     T *= exp(-dens * seg * 0.58);

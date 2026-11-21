@@ -69,7 +69,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
 
     // ---- GL objects ----
     private var litProg = 0; private var groundProg = 0; private var spriteProg = 0
-    private val locs = android.util.SparseArray<HashMap<String, Int>>()
+    private val locs = HashMap<String, Int>()
     private lateinit var meshes: Array<Mesh>
     private lateinit var box: Mesh; private lateinit var orb: Mesh; private lateinit var holeBody: Mesh
     private lateinit var cyl: Mesh; private lateinit var cone: Mesh; private lateinit var ico0: Mesh
@@ -142,8 +142,6 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     // (fog, about 45 m) PLUS the longest shadow (a crown 22 m up at 23 degrees throws it about 50 m), so that every visible
     // patch of ground has all the trees that can shade it. Then a pool of light is a fact of the forest, not of the loaded part.
     private val SHADOW_FADE_START = 100f
-    private var shadowTrunk: Mesh? = null; private var shadowRoot: Mesh? = null; private var shadowBranch: Mesh? = null
-    private val SHADOW_TRUNK_ROWS = listOf(22f, 18f, 14f, 10f, 6.5f, 4.2f, 3.2f, 2.4f, 1.6f, 0.9f, 0.4f, 0f)
     private val SHADOW_FADE_END = 118f
     private val one: FloatBuffer = GlUtil.floatBuffer(16)
 
@@ -251,10 +249,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     }
 
     // ---- uniform helpers ----
-    private fun loc(p: Int, name: String): Int {
-        val m = locs.get(p) ?: HashMap<String, Int>().also { locs.put(p, it) }
-        return m.getOrPut(name) { GL.glGetUniformLocation(p, name) }   // no per-call string building (it ran hundreds of times a frame)
-    }
+    private fun loc(p: Int, name: String) = locs.getOrPut("$p:$name") { GL.glGetUniformLocation(p, name) }
     private fun u3(p: Int, n: String, c: FloatArray) = GL.glUniform3f(loc(p, n), c[0], c[1], c[2])
     private fun u3(p: Int, n: String, x: Float, y: Float, z: Float) = GL.glUniform3f(loc(p, n), x, y, z)
     private fun u1(p: Int, n: String, v: Float) = GL.glUniform1f(loc(p, n), v)
@@ -809,19 +804,12 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         meshes[K_CROWN] = Mesh(Geo.crown(if (flat) CROWN_NEAR_SUBDIVISIONS else f.crownNearDetail, false), MAX_PROPS * 16)
         meshes[K_ROCK] = Mesh(if (flat) Geo.jittered(2, .18f, .14f, 33, true) else Geo.jittered(f.rockDetail, .18f, .14f, 33, false), MAX_PROPS)
         meshes[K_PLANT] = Mesh(if (flat) Geo.jittered(2, .35f, .4f, 47, true) else Geo.jittered(f.rockDetail, .35f, .4f, 47, false), MAX_PROPS)
-        // Beyond CROWN_LOD_DISTANCE (most trees, and mostly inside the fog) the crown has a quarter of the triangles but keeps
-        // the near crown's vertices AND normals at the vertices they share: same lumps, same shading, no band at the LOD distance.
-        meshes[K_CROWN_FAR] = Mesh(if (flat) Geo.crown(CROWN_FAR_SUBDIVISIONS, false) else Geo.crownLod(f.crownNearDetail, f.crownFarDetail), MAX_PROPS * 16)
+        // Keep near and far crown topology identical within a quality tier. A topology/normal
+        // discontinuity at CROWN_LOD_DISTANCE can otherwise read as a sudden foliage band.
+        meshes[K_CROWN_FAR] = Mesh(Geo.crown(if (flat) CROWN_FAR_SUBDIVISIONS else f.crownNearDetail, false), MAX_PROPS * 16)
         meshes[K_TRUNK] = Mesh(if (f.lifelikeTrees) Geo.trunkLifelike() else Geo.trunk(), MAX_PROPS)
         meshes[K_ROOT] = Mesh(if (f.lifelikeTrees) Geo.rootLifelike() else Geo.root(), MAX_PROPS * 5)
         meshes[K_BRANCH] = Mesh(if (f.lifelikeTrees) Geo.branchRound() else Geo.branch(), MAX_PROPS * 11)
-        // The shadow map only needs silhouettes: coarse copies of the trunk (20 sides, 12 rows, the flare kept fine), the roots
-        // (6 x 6) and the branches (6 x 4) that use the very same instance matrices as the visible ones: about 1,300 triangles
-        // per tree instead of 6,900, with the same shadow shapes.
-        shadowTrunk?.release(); shadowRoot?.release(); shadowBranch?.release()
-        shadowTrunk = Mesh(Geo.trunkLifelike(20, SHADOW_TRUNK_ROWS), MAX_PROPS)
-        shadowRoot = Mesh(Geo.rootLifelike(6, 6), MAX_PROPS * 5)
-        shadowBranch = Mesh(Geo.branchRound(6, 4), MAX_PROPS * 11)
         for (m in old) m.release()
         // Rings and posts: round on Medium and up.
         val oldRound = arrayListOf(cyl, torusA, torusB, torusC)
@@ -853,10 +841,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         }
         // Crowns are NOT drawn into the shadow map: how much light the foliage lets through is the world-fixed sun-gap field
         // (SUN_GAP_FN in Shaders.kt), the same for ground, trunks, bushes and the beams. The map only holds the solid parts.
-        GL.glUniform3f(loc(shadowProg, "uSway"), 0f, 0f, 0f)
-        shadowTrunk?.draw(bufs[K_TRUNK], shadowCounts[K_TRUNK])
-        shadowRoot?.draw(bufs[K_ROOT], shadowCounts[K_ROOT])
-        shadowBranch?.draw(bufs[K_BRANCH], shadowCounts[K_BRANCH])
+        draw(K_TRUNK, TREE_SWAY); draw(K_ROOT, TREE_SWAY); draw(K_BRANCH, TREE_SWAY)
         draw(K_ROCK, 0f); draw(K_PLANT, 0f)
         sm.end()
     }
