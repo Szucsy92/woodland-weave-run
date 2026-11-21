@@ -61,6 +61,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.woodlandweave.run.GameEngine
 import com.woodlandweave.run.UiState
 import com.woodlandweave.run.data.Settings
+import com.woodlandweave.run.gl.FX_NEUTRAL
 import com.woodlandweave.run.gl.GlassState
 import com.woodlandweave.run.gl.Quality
 import com.woodlandweave.run.gl.GameView
@@ -211,7 +212,7 @@ private fun Glass(alpha: Float, modifier: Modifier = Modifier, content: @Composa
 /** A floating readout of the effect being adjusted (the card is nearly invisible meanwhile). */
 @Composable
 private fun FxReadout(drag: FxDrag?) {
-    var last by remember { mutableStateOf(FxDrag("", 1f)) }
+    var last by remember { mutableStateOf(FxDrag("", 0f)) }
     SideEffect { if (drag != null) last = drag }
     val a by animateFloatAsState(if (drag != null) 1f else 0f, tween(if (drag != null) 120 else 300), label = "readout")
     if (a <= 0.01f) return
@@ -221,10 +222,11 @@ private fun FxReadout(drag: FxDrag?) {
             Modifier.graphicsLayer { alpha = a }.clip(shape).background(Color(0xB30E0E14)).border(1.dp, Edge, shape).padding(horizontal = 18.dp, vertical = 10.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text("${last.label}   ${(last.value * 100).toInt()}%", color = TextC, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text("${last.label}   ${last.value.toInt().let { if (it > 0) "+$it" else it.toString() }}%", color = TextC, fontSize = 14.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(7.dp))
             Box(Modifier.width(170.dp).height(3.dp).background(Edge)) {
-                Box(Modifier.fillMaxHeight().fillMaxWidth((last.value / 1.5f).coerceIn(0f, 1f)).background(TextC))
+                val amount = (last.value / 100f).coerceIn(-1f, 1f)
+                Box(Modifier.fillMaxHeight().fillMaxWidth(abs(amount)).align(if (amount < 0f) Alignment.CenterStart else Alignment.CenterEnd).background(TextC))
             }
         }
     }
@@ -513,22 +515,19 @@ private fun SettingsContent(ui: UiState, a: Actions, updates: UpdateController, 
     }
 }
 
-/** Graphics: three tabs, and an optional "Fine-tune" accordion with one slider per effect the chosen tab has. */
+/** Graphics: one tap-to-open row that holds three grouped, zero-centred sliders. */
 @Composable
 private fun GraphicsBlock(s: Settings, a: Actions, onDrag: (FxDrag?) -> Unit) {
     var open by remember { mutableStateOf(false) }
-    val tier = s.quality
     Column(Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(Edge))
         Spacer(Modifier.height(7.dp))
-        Text("Graphics", color = TextC, fontSize = 13.sp)
-        Tabs(listOf(Quality.LOW to "Low", Quality.MEDIUM to "Medium", Quality.HIGH to "High"), tier, a.setQuality)
         run {
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).clickable { open = !open }.padding(vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text("Fine-tune", color = Muted, fontSize = 11.sp)
+                Text("Graphics", color = TextC, fontSize = 13.sp)
                 Text(if (open) "▴" else "▾", color = Muted, fontSize = 11.sp)
             }
             AnimatedVisibility(
@@ -537,20 +536,24 @@ private fun GraphicsBlock(s: Settings, a: Actions, onDrag: (FxDrag?) -> Unit) {
                 exit = shrinkVertically(tween(260, easing = FastOutSlowInEasing)) + fadeOut(tween(160)),
             ) {
                 Column(Modifier.fillMaxWidth()) {
-                    FxSlider("Sharpness", s.fx.sharp, onDrag) { a.setFx("sharp", it) }
-                    if (tier != Quality.LOW) FxSlider("Bloom", s.fx.bloom, onDrag) { a.setFx("bloom", it) }
-                    if (tier == Quality.HIGH) {
-                        FxSlider("Filmic look", s.fx.tone, onDrag) { a.setFx("tone", it) }
-                        FxSlider("Shadows", s.fx.shadows, onDrag) { a.setFx("shadows", it) }
-                        FxSlider("Occlusion", s.fx.ao, onDrag) { a.setFx("ao", it) }
-                        FxSlider("Light shafts", s.fx.shafts, onDrag) { a.setFx("shafts", it) }
-                        FxSlider("Depth of field", s.fx.dof, onDrag) { a.setFx("dof", it) }
-                        FxSlider("Motion blur", s.fx.motion, onDrag) { a.setFx("motion", it) }
+                    FxSlider("Image & contrast", fxOffset(s.fx.bloom, s.fx.tone), onDrag) { value ->
+                        val strength = fxStrength(value)
+                        a.setFx("bloom", strength); a.setFx("tone", strength)
+                    }
+                    FxSlider("Light & atmosphere", fxOffset(s.fx.shadows, s.fx.shafts), onDrag) { value ->
+                        val strength = fxStrength(value)
+                        a.setFx("shadows", strength); a.setFx("shafts", strength)
+                    }
+                    FxSlider("Focus & motion", fxOffset(s.fx.dof, s.fx.motion), onDrag) { value ->
+                        val strength = fxStrength(value)
+                        a.setFx("dof", strength); a.setFx("motion", strength)
                     }
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
                         Text(
-                            "Reset", color = Muted, fontSize = 11.sp,
-                            modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { for (k in listOf("sharp", "bloom", "tone", "shadows", "ao", "shafts", "dof", "motion")) a.setFx(k, 1f) }.padding(horizontal = 8.dp, vertical = 6.dp),
+                            "Reset to 0", color = Muted, fontSize = 11.sp,
+                            modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable {
+                                for (k in listOf("bloom", "tone", "shadows", "shafts", "dof", "motion")) a.setFx(k, FX_NEUTRAL)
+                            }.padding(horizontal = 8.dp, vertical = 6.dp),
                         )
                     }
                 }
@@ -558,6 +561,10 @@ private fun GraphicsBlock(s: Settings, a: Actions, onDrag: (FxDrag?) -> Unit) {
         }
     }
 }
+
+/** The neutral position (0) is FX_NEUTRAL, the look the renderer is tuned for; -100 turns the group off, +100 doubles it. */
+private fun fxStrength(offset: Float): Float = (FX_NEUTRAL * (1f + offset.coerceIn(-100f, 100f) / 100f)).coerceIn(0f, 2f * FX_NEUTRAL)
+private fun fxOffset(first: Float, second: Float): Float = ((((first + second) * .5f) / FX_NEUTRAL) - 1f).coerceIn(-1f, 1f) * 100f
 
 /** Tabs with an underline: the chosen one is bright, the others muted. */
 @Composable
@@ -579,15 +586,21 @@ private fun <T> Tabs(items: List<Pair<T, String>>, selected: T, onPick: (T) -> U
 private fun FxSlider(label: String, value: Float, onDrag: (FxDrag?) -> Unit, onChange: (Float) -> Unit) {
     var drag by remember { mutableStateOf<Float?>(null) }
     DisposableEffect(Unit) { onDispose { onDrag(null) } }
-    val v = drag ?: value
-    Row(Modifier.fillMaxWidth().height(34.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = TextC, fontSize = 12.sp, modifier = Modifier.width(92.dp))
-        Slider(
-            value = v, onValueChange = { drag = it; onChange(it); onDrag(FxDrag(label, it)) }, onValueChangeFinished = { drag = null; onDrag(null) },
-            valueRange = 0f..1.5f, modifier = Modifier.weight(1f),
-            colors = SliderDefaults.colors(thumbColor = TextC, activeTrackColor = TextC, inactiveTrackColor = Edge),
-        )
-        Text("${(v * 100).toInt()}%", color = Muted, fontSize = 10.sp, modifier = Modifier.width(36.dp), textAlign = TextAlign.End)
+    val v = (drag ?: value).coerceIn(-100f, 100f)
+    Row(Modifier.fillMaxWidth().height(38.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = TextC, fontSize = 11.sp, modifier = Modifier.width(112.dp))
+        Box(Modifier.weight(1f).height(34.dp).drawBehind {
+            val x = size.width * .5f
+            drawLine(Muted.copy(alpha = .9f), Offset(x, size.height * .5f - 4.dp.toPx()), Offset(x, size.height * .5f + 4.dp.toPx()), strokeWidth = 2.dp.toPx())
+        }, contentAlignment = Alignment.Center) {
+            Slider(
+                value = v, onValueChange = { drag = it; onChange(it); onDrag(FxDrag(label, it)) }, onValueChangeFinished = { drag = null; onDrag(null) },
+                valueRange = -100f..100f, modifier = Modifier.fillMaxWidth(),
+                colors = SliderDefaults.colors(thumbColor = TextC, activeTrackColor = TextC, inactiveTrackColor = Edge),
+            )
+        }
+        val shown = v.toInt()
+        Text(if (shown > 0) "+$shown%" else "$shown%", color = Muted, fontSize = 10.sp, modifier = Modifier.width(38.dp), textAlign = TextAlign.End)
     }
 }
 
