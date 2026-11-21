@@ -446,11 +446,9 @@ object Geo {
         return g
     }
 
-    /** 129 x 129 lattice over 200 m; the vertex shader lifts it with groundHeight(). */
+    /** 161 x 161 lattice over 200 m; the vertex shader lifts it with groundHeight(). */
     fun groundGrid(): Pair<FloatArray, ShortArray> {
-        // The visible ground is fog-limited and rendered below native resolution. 128x128
-        // retains the terrain silhouette while reducing vertex and index traffic by ~36%.
-        val n = 128
+        val n = 160
         val pos = FloatArray((n + 1) * (n + 1) * 2)
         for (j in 0..n) for (i in 0..n) {
             pos[(j * (n + 1) + i) * 2] = -100f + i * (200f / n)
