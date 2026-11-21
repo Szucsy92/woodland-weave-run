@@ -327,12 +327,15 @@ fun obstaclesAround(cx: Int, cz: Int, keep: Double = 0.84): List<Obstacle> {
         val gx = cx + i; val gz = cz + j
         if (hash(gx, gz, 9) <= keep) continue
         if (hash(gx, gz, 15) >= OBSTACLE_DENSITY) continue
+        // Large stone obstacles are intentionally removed. Keep only a sparse subset of the
+        // small undergrowth obstacles: fewer simulation objects, collision checks and draw instances.
+        if (hash(gx, gz, 13) > 0.86) continue
+        if (hash(gx, gz, 16) > 0.38) continue
         val x = gx * CELL + hash(gx, gz, 11) * CELL
         val z = gz * CELL + hash(gx, gz, 12) * CELL
         if (x * x + z * z < 12 * 12) continue
-        val big = hash(gx, gz, 13) > 0.86
-        val radius = if (big) 0.5 + hash(gx, gz, 14) * 0.45 else 0.22 + hash(gx, gz, 14) * 0.15
-        out += Obstacle(x, z, big, radius, "o$gx:$gz")
+        val radius = 0.22 + hash(gx, gz, 14) * 0.15
+        out += Obstacle(x, z, false, radius, "o$gx:$gz")
     }
     return out
 }

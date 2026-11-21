@@ -7,9 +7,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Every expected number below was produced by running the ORIGINAL simulation.ts (the web
- * version) under Node, so these tests prove the Kotlin port generates the same forest and the
- * same run, not merely a similar one.
+ * Core world math and tree placement remain parity-checked against the original simulation.
+ * Obstacle generation is intentionally tuned for the mobile renderer: stone hazards are removed
+ * and only a sparse subset of small undergrowth hazards is retained.
  */
 class SimulationParityTest {
     private val eps = 1e-9
@@ -37,8 +37,9 @@ class SimulationParityTest {
         assertEquals("13:12", t.last().id)
 
         val o = obstaclesAround(0, 0, 0.84)
-        assertEquals(49, o.size)
-        assertEquals("o-13:-4", o.first().id)
+        assertEquals(17, o.size)
+        assertEquals("o-12:-12", o.first().id)
+        assertTrue(o.all { !it.big })
 
         val t2 = treesAround(3, -4, 0.66, 2)
         assertEquals(482, t2.size)

@@ -38,11 +38,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         // ground depends on the real forest and not on the part of it that happens to be loaded around the runner.
         const val SHADOW_RADIUS = 22
         const val MAX_PROPS = (SHADOW_RADIUS * 2 + 1) * (SHADOW_RADIUS * 2 + 1)
-        const val GROUND_STEP = 200f / 160f
+        const val GROUND_STEP = 200f / 112f
         const val K_TRUNK = 0; const val K_SHADOW = 1; const val K_ROOT = 2; const val K_BRANCH = 3
         const val K_CROWN = 4; const val K_ROCK = 5; const val K_PLANT = 6; const val K_CROWN_FAR = 7
         const val KINDS = 8
-        const val TREE_PARTS = 34
+        const val TREE_PARTS = 23
         const val HOLE_SLOTS = 6
         const val SWARM = 48
         const val REMNANTS = 26
@@ -59,11 +59,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         const val ORB_ALPHA = .5f
         /** The one resolution: the scene is drawn at half the surface's width and height and scaled up in the final pass. */
         const val RENDER_SCALE = 0.5f
-        /** Off: the draw resolution stays at RENDER_SCALE (the old frame-rate driven scaler is kept below, unused). */
-        const val ADAPTIVE_SCALE = false
+        /** Adaptive: starts at the existing half-resolution target and scales down only when frame time requires it. */
+        const val ADAPTIVE_SCALE = true
         // Sharp by default: start close to the device's own resolution and only give ground when 60 fps is lost.
-        const val MIN_DENSITY = 1.5f
-        const val START_DENSITY = 2.25f
+        const val MIN_DENSITY = 1.0f
+        const val START_DENSITY = 1.5f
         const val TREE_SWAY = .15f
     }
 
@@ -131,7 +131,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private val bHole = Sprites(1600, { holeGlowTex }, true, false)
 
     private val bufs = Array(KINDS) {
-        GlUtil.floatBuffer(MAX_PROPS * (if (it == K_CROWN || it == K_CROWN_FAR) 16 else if (it == K_BRANCH) 11 else if (it == K_ROOT) 5 else 2) * 16)
+        GlUtil.floatBuffer(MAX_PROPS * (if (it == K_CROWN || it == K_CROWN_FAR) 16 else if (it == K_BRANCH) 7 else if (it == K_ROOT) 3 else 2) * 16)
     }
     private val counts = IntArray(KINDS)
     // Instances drawn into the shadow map: the visible ones plus trees beyond the view whose long shadows reach into it.
@@ -182,9 +182,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         spriteProg = GlUtil.program(Shaders.SPRITE_VS, Shaders.SPRITE_FS)
         locs.clear()
         meshes = arrayOf(
-            Mesh(Geo.trunk(), MAX_PROPS), Mesh(Geo.flatQuad(), MAX_PROPS * 2), Mesh(Geo.root(), MAX_PROPS * 5),
-            Mesh(Geo.branch(), MAX_PROPS * 11), Mesh(Geo.crown(CROWN_NEAR_SUBDIVISIONS, false), MAX_PROPS * 16),
-            Mesh(Geo.jittered(2, .18f, .14f, 33, FLAT_FACETS), MAX_PROPS), Mesh(Geo.jittered(2, .35f, .4f, 47, FLAT_FACETS), MAX_PROPS),
+            Mesh(Geo.trunk(), MAX_PROPS), Mesh(Geo.flatQuad(), MAX_PROPS * 2), Mesh(Geo.root(), MAX_PROPS * 3),
+            Mesh(Geo.branch(), MAX_PROPS * 7), Mesh(Geo.crown(CROWN_NEAR_SUBDIVISIONS, false), MAX_PROPS * 16),
+            Mesh(Geo.icosphere(0), 1), Mesh(Geo.jittered(1, .35f, .4f, 47, FLAT_FACETS), MAX_PROPS),
             Mesh(Geo.crown(CROWN_FAR_SUBDIVISIONS, false), MAX_PROPS * 16),
         )
         box = Mesh(Geo.box(1f, 1f, 1f), 4); orb = Mesh(Geo.icosphere(3), 4); holeBody = Mesh(Geo.icosphere(3), 4)
@@ -337,15 +337,15 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         fun oz(hh: Double) = hh * lx
         put(K_TRUNK, tree.x, base, tree.z, lx, h(5) * 6, lz, Mat.XYZ, girth, 1.0, girth)
         put(K_SHADOW, tree.x, groundHeight(tree.x, tree.z) + .05, tree.z, 0.0, 0.0, 0.0, Mat.XYZ, 3.4 * tree.scale, 1.0, 3.4 * tree.scale)
-        for (r in 0 until 5) {
-            val ang = (r / 5.0) * PI * 2 + h(210 + r) * .9
+        for (r in 0 until 3) {
+            val ang = (r / 3.0) * PI * 2 + h(210 + r) * .9
             val rx = tree.x + cos(ang) * .2 * girth; val rz = tree.z - sin(ang) * .2 * girth
             val rl = (.7 + h(230 + r) * .7) * (if (species == 2) 1.35 else 1.0)
             put(K_ROOT, rx, groundHeight(rx, rz) + .1, rz, 0.0, ang, -.12 - h(220 + r) * .15, Mat.XYZ, rl * girth * 1.2, girth * 1.3, girth * 1.3)
         }
-        for (b in 0 until 11) {
+        for (b in 0 until 7) {
             val seed = h(20 + b)
-            val upper = b < 5; val fork = species == 1 && b < 2
+            val upper = b < 3; val fork = species == 1 && b < 2
             var top = if (upper) base + 14.5 + h(60 + b) * 2.5 else base + 8 + h(60 + b) * 6.5
             if (fork) top = base + 7 + h(61) * 1.5
             val yaw = if (fork) h(202) * PI * 2 + b * PI else seed * PI * 2
@@ -360,7 +360,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 (h(83 + b) - .5) * .9, seed * PI * 2, (h(77 + b) - .5) * .9, Mat.YXZ,
                 cr * tree.scale, cr * (.5 + h(122 + b) * .3) * tree.scale, cr * tree.scale)
         }
-        for (c in 0 until 5) {
+        for (c in 0 until 4) {
             val spread = if (c == 0) .5 else 2.6 + h(81 + c) * 3.6
             val angle = h(74 + c) * PI * 2
             val r = (if (c == 0) 3.9 else 2.8) + h(73 + c) * 2.0
@@ -372,21 +372,17 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     }
 
     private fun obstacleProp(o: Obstacle): Prop {
+        // Stone obstacles have been removed from world generation. Keep this guard for old or
+        // externally supplied simulation snapshots so they cannot allocate or draw rock geometry.
+        if (o.big) return Prop(o.id, o.x, o.z, intArrayOf(), FloatArray(0))
         val fx = floor(o.x).toInt(); val fz = floor(o.z).toInt()
-        val r = if (o.big) o.radius * 1.3 else .7
+        val r = .7
         val gy = minOf(groundHeight(o.x, o.z), groundHeight(o.x + r, o.z), groundHeight(o.x - r, o.z), groundHeight(o.x, o.z + r), groundHeight(o.x, o.z - r))
         val spin = hash(fx, fz, 80) * 6
-        return if (o.big) {
-            val m = FloatArray(32)
-            Mat.compose(m, 0, o.x, gy + o.radius * .08, o.z, 0.0, spin, 0.0, Mat.XYZ, o.radius * 1.35, o.radius * (.55 + hash(fx, fz, 82) * .35), o.radius * 1.15)
-            Mat.compose(m, 16, o.x, groundHeight(o.x, o.z) + .05, o.z, 0.0, 0.0, 0.0, Mat.XYZ, o.radius * 3.2, 1.0, o.radius * 3)
-            Prop(o.id, o.x, o.z, intArrayOf(K_ROCK, K_SHADOW), m)
-        } else {
-            val bs = .85 + hash(fx, fz, 83) * .55
-            val m = FloatArray(16)
-            Mat.compose(m, 0, o.x, gy - .05, o.z, 0.0, spin, 0.0, Mat.XYZ, .8 * bs, (.4 + hash(fx, fz, 81) * .35) * bs, .8 * bs)
-            Prop(o.id, o.x, o.z, intArrayOf(K_PLANT), m)
-        }
+        val bs = .85 + hash(fx, fz, 83) * .55
+        val m = FloatArray(16)
+        Mat.compose(m, 0, o.x, gy - .05, o.z, 0.0, spin, 0.0, Mat.XYZ, .8 * bs, (.4 + hash(fx, fz, 81) * .35) * bs, .8 * bs)
+        return Prop(o.id, o.x, o.z, intArrayOf(K_PLANT), m)
     }
 
     // ---- the frame ----
@@ -632,8 +628,6 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         meshes[K_CROWN].draw(bufs[K_CROWN], counts[K_CROWN])
         meshes[K_CROWN_FAR].draw(bufs[K_CROWN_FAR], counts[K_CROWN_FAR])
         if (feat.wind) setSway(litProg, 0f, 0f, 0f)    // rocks and bushes stay put
-        material(litProg, Palette.rock, rough = .9f)
-        meshes[K_ROCK].draw(bufs[K_ROCK], counts[K_ROCK])
         material(litProg, Palette.plant, mode = 6, rough = .9f)
         meshes[K_PLANT].draw(bufs[K_PLANT], counts[K_PLANT])
         GL.glDisable(GL.GL_CULL_FACE)
@@ -772,7 +766,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         while (true) {
             val defs = f.litDefines()
             val lp = GlUtil.programOrNull(Shaders.LIT_VS, Shaders.litFs(defs))
-            val gp = if (lp != 0) GlUtil.programOrNull(Shaders.GROUND_VS, Shaders.litFs(defs)) else 0
+            val gp = if (lp != 0) GlUtil.programOrNull(Shaders.GROUND_VS, Shaders.litFs(defs + "#define Q_GROUND_FAST\n")) else 0
             var sm: ShadowMap? = null; var sp = 0
             var ok = lp != 0 && gp != 0
             if (ok && f.shadows) {
@@ -805,23 +799,22 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     /** Low keeps the faceted web look; Medium and up get smooth, finely tessellated round shapes and shapely trees. */
     private fun rebuildTierMeshes(f: Features) {
         val flat = !f.smoothMeshes
-        val old = arrayListOf(meshes[K_CROWN], meshes[K_ROCK], meshes[K_PLANT], meshes[K_CROWN_FAR], meshes[K_TRUNK], meshes[K_ROOT], meshes[K_BRANCH])
+        val old = arrayListOf(meshes[K_CROWN], meshes[K_PLANT], meshes[K_CROWN_FAR], meshes[K_TRUNK], meshes[K_ROOT], meshes[K_BRANCH])
         meshes[K_CROWN] = Mesh(Geo.crown(if (flat) CROWN_NEAR_SUBDIVISIONS else f.crownNearDetail, false), MAX_PROPS * 16)
-        meshes[K_ROCK] = Mesh(if (flat) Geo.jittered(2, .18f, .14f, 33, true) else Geo.jittered(f.rockDetail, .18f, .14f, 33, false), MAX_PROPS)
-        meshes[K_PLANT] = Mesh(if (flat) Geo.jittered(2, .35f, .4f, 47, true) else Geo.jittered(f.rockDetail, .35f, .4f, 47, false), MAX_PROPS)
+        meshes[K_PLANT] = Mesh(Geo.jittered(1, .35f, .4f, 47, flat), MAX_PROPS)
         // Beyond CROWN_LOD_DISTANCE (most trees, and mostly inside the fog) the crown has a quarter of the triangles but keeps
         // the near crown's vertices AND normals at the vertices they share: same lumps, same shading, no band at the LOD distance.
         meshes[K_CROWN_FAR] = Mesh(if (flat) Geo.crown(CROWN_FAR_SUBDIVISIONS, false) else Geo.crownLod(f.crownNearDetail, f.crownFarDetail), MAX_PROPS * 16)
-        meshes[K_TRUNK] = Mesh(if (f.lifelikeTrees) Geo.trunkLifelike() else Geo.trunk(), MAX_PROPS)
-        meshes[K_ROOT] = Mesh(if (f.lifelikeTrees) Geo.rootLifelike() else Geo.root(), MAX_PROPS * 5)
-        meshes[K_BRANCH] = Mesh(if (f.lifelikeTrees) Geo.branchRound() else Geo.branch(), MAX_PROPS * 11)
+        meshes[K_TRUNK] = Mesh(if (f.lifelikeTrees) Geo.trunkLifelike(20) else Geo.trunk(), MAX_PROPS)
+        meshes[K_ROOT] = Mesh(if (f.lifelikeTrees) Geo.rootLifelike(12, 8) else Geo.root(), MAX_PROPS * 3)
+        meshes[K_BRANCH] = Mesh(if (f.lifelikeTrees) Geo.branchRound(8, 6) else Geo.branch(), MAX_PROPS * 7)
         // The shadow map only needs silhouettes: coarse copies of the trunk (20 sides, 12 rows, the flare kept fine), the roots
         // (6 x 6) and the branches (6 x 4) that use the very same instance matrices as the visible ones: about 1,300 triangles
         // per tree instead of 6,900, with the same shadow shapes.
         shadowTrunk?.release(); shadowRoot?.release(); shadowBranch?.release()
         shadowTrunk = Mesh(Geo.trunkLifelike(20, SHADOW_TRUNK_ROWS), MAX_PROPS)
-        shadowRoot = Mesh(Geo.rootLifelike(6, 6), MAX_PROPS * 5)
-        shadowBranch = Mesh(Geo.branchRound(6, 4), MAX_PROPS * 11)
+        shadowRoot = Mesh(Geo.rootLifelike(6, 5), MAX_PROPS * 3)
+        shadowBranch = Mesh(Geo.branchRound(5, 4), MAX_PROPS * 7)
         for (m in old) m.release()
         // Rings and posts: round on Medium and up.
         val oldRound = arrayListOf(cyl, torusA, torusB, torusC)
@@ -857,7 +850,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         shadowTrunk?.draw(bufs[K_TRUNK], shadowCounts[K_TRUNK])
         shadowRoot?.draw(bufs[K_ROOT], shadowCounts[K_ROOT])
         shadowBranch?.draw(bufs[K_BRANCH], shadowCounts[K_BRANCH])
-        draw(K_ROCK, 0f); draw(K_PLANT, 0f)
+        draw(K_PLANT, 0f)
         sm.end()
     }
 
@@ -1193,7 +1186,13 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 if (age >= 0) { dissolving = true; k = min(1.0, age / SHOCKWAVE_DISSOLVE) }
             }
             if (!dissolving) {
-                for (i in p.kinds.indices) emit(if (far && p.kinds[i] == K_CROWN) K_CROWN_FAR else p.kinds[i], p.m, i * 16)
+                for (i in p.kinds.indices) {
+                    val kind = p.kinds[i]
+                    // At distance the crown defines the silhouette. Roots and fine branches are
+                    // sub-pixel detail there; omitting them saves instance bandwidth and vertex work.
+                    if (far && (kind == K_ROOT || kind == K_BRANCH)) continue
+                    emit(if (far && kind == K_CROWN) K_CROWN_FAR else kind, p.m, i * 16)
+                }
                 continue
             }
             // The wave shoves it into the depth, tips it over and rips it out of the ground.
@@ -1374,9 +1373,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     }
 
     /**
-     * Dynamic resolution: starts at the web build's 1.5x density and climbs towards the surface's own density while
-     * the device keeps 60 fps with room to spare; drops again (and remembers the failing level for a while) when it
-     * cannot. Only the effect pass's target is resized, never the surface.
+     * Dynamic resolution: starts at the existing half-resolution target and can step down to one-third
+     * of surface resolution on sustained frame-time pressure. Only the effect target is resized.
      */
     private inner class Scaler {
         var density = minOf(START_DENSITY, surfaceDensity)
