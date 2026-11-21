@@ -330,15 +330,14 @@ object Geo {
      * slightly elliptical and lobed sections, shallow bark fissures and knots, a gentle sway of the centre line.
      * Same height, radius and attachment points as the plain trunk, so branches and crowns still sit where they did.
      */
-    fun trunkLifelike(radial: Int = 28, coarseRows: List<Float>? = null): MeshData {
+    fun trunkLifelike(): MeshData {
+        val radial = 28
         // Rows run top to bottom: coarse up the stem, fine through the flare where the shape changes quickly.
         val hs = ArrayList<Float>()
-        if (coarseRows != null) hs.addAll(coarseRows) else {
-            var h = 22f
-            while (h > 4.2f) { hs += h; h -= 1.2f }
-            h = 4.2f
-            while (h >= -0.001f) { hs += max(h, 0f); h -= 0.3f }
-        }
+        var h = 22f
+        while (h > 4.2f) { hs += h; h -= 1.2f }
+        h = 4.2f
+        while (h >= -0.001f) { hs += max(h, 0f); h -= 0.3f }
         val rows = hs.size
         val pos = FloatArray(rows * (radial + 1) * 3); val uv = FloatArray(rows * (radial + 1) * 2); val centers = FloatArray(rows * 3)
         var n = 0

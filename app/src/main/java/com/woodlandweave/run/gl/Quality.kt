@@ -41,8 +41,6 @@ class Features(val quality: Quality) {
     // Shapes
     val smoothMeshes = r >= 1
     val crownNearDetail = 3
-    /** Crowns beyond CROWN_LOD_DISTANCE: every second vertex of the near crown (same lumps), a quarter of the triangles, mostly inside the fog. */
-    val crownFarDetail = 2
     val rockDetail = 3
     val lifelikeTrees = r >= 1
 
@@ -58,7 +56,7 @@ class Features(val quality: Quality) {
 
     // Image
     val bloom = r >= 1
-    val bloomLevels = 4
+    val bloomLevels = if (r >= 2) 5 else 4
     /** Base threshold in linear light; the renderer raises it on bright (day) scenes so the sky never blooms. */
     val bloomThreshold = 0.48f
     val bloomStrength = if (r >= 2) 0.20f else 0.23f
@@ -71,7 +69,7 @@ class Features(val quality: Quality) {
     val env = r >= 2
     val wind = r >= 2
     val shadows = r >= 2
-    val shadowRes = 1536
+    val shadowRes = 2048
     // Half-width of the shadow map in metres, centred ON the runner (not ahead of him): it covers everything the fog lets
     // you see in every direction, so turning never moves the edge of the map and the light never changes with the heading.
     val shadowExtent = 46f
@@ -81,7 +79,7 @@ class Features(val quality: Quality) {
     val ssaoStrength = 0.78f
     val shafts = r >= 2
     // Samples every 1.2 m, anchored in the world: thin beams between the trunks stay put while the runner moves.
-    val shaftSteps = 20
+    val shaftSteps = 28
     val shaftMax = 34f
     val fogDensity = 0.015f
     val dof = r >= 2

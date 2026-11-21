@@ -7,15 +7,15 @@ runs the highest tier the device can really handle instead of crashing (`PostFx.
 | Factor | Low | Medium | High |
 |---|---|---|---|
 | Linear HDR (RGBA16F) pipeline, three.js fog, sRGB maps, dither, glass UI | yes | yes | yes |
-| Bloom | | yes (4 levels) | yes (4 levels) |
+| Bloom | | yes (4 levels) | yes (5 levels) |
 | Round shapes: canopy, rocks, bushes smooth and finely tessellated (no polygon facets) | faceted (web look) | smooth | smooth |
 | Round rings and posts (relic rings, poles) | 6-8 sides | 12-20 sides | 12-20 sides |
 | Trunk and roots with a real form (see below) | | yes | yes |
 | Boxes (monolith, gate posts, lintel, lantern) | boxes | boxes | boxes |
 | Filmic tone mapping (ACES), film grain, faint chromatic aberration | | | yes |
-| Key-light shadow map (1536, 4-tap hardware PCF, 92 m wide, centred on the runner; coarse trunks, rocks, bushes), replaces the contact-shadow decals | | | yes |
+| Key-light shadow map (2048, PCF, 92 m wide, centred on the runner; trunks, roots, branches, rocks, bushes), replaces the contact-shadow decals | | | yes |
 | SSAO (half-res, 8 samples, bilateral blur) | | | yes |
-| Volumetric light shafts (shadow-map + canopy-gap raymarch, 20 world-anchored steps) | | | yes |
+| Volumetric light shafts (shadow-map + canopy-gap raymarch, 28 world-anchored steps) | | | yes |
 | Wet sheen (sky/ground mirror) and puddles on the ground | | | yes |
 | Light whole-tree sway (a smooth world-space gust field) | | | yes |
 | Depth of field (far background only) | | | yes |
@@ -75,7 +75,7 @@ Not compiled or run on a device in the environment this was written in: build wi
 
 ## Local power-up light spill (native renderer)
 
-Uncollected power-ups contribute compact coloured point lights to the lit scene. Their tint follows the pickup type (freezer, ghost or shockwave), their intensity fades with camera distance and pulses gently with the orb's energy, and their radius is deliberately limited to keep GLES 3.0 fragment work bounded. Low / Medium / High evaluate at most 1 / 2 / 4 nearby pickups respectively. The lights affect normal-mapped bark, ground and other lit materials through the existing GGX lighting path; they are separate from the orb's additive glow sprites. The local lights do not yet cast their own shadow maps: the existing 1536 directional key-light shadow remains a separate system.
+Uncollected power-ups contribute compact coloured point lights to the lit scene. Their tint follows the pickup type (freezer, ghost or shockwave), their intensity fades with camera distance and pulses gently with the orb's energy, and their radius is deliberately limited to keep GLES 3.0 fragment work bounded. Low / Medium / High evaluate at most 1 / 2 / 4 nearby pickups respectively. The lights affect normal-mapped bark, ground and other lit materials through the existing GGX lighting path; they are separate from the orb's additive glow sprites. The local lights do not yet cast their own shadow maps: the existing 2048 directional key-light shadow remains a separate system.
 
 ## Fades, shadows for lights, sharpness
 - **Lights fade, never pop or flash.** Sprites dissolve over their whole radius when you pass through them (smootherstep);
@@ -133,14 +133,3 @@ Uncollected power-ups contribute compact coloured point lights to the lit scene.
   the frame-rate driven resolution scaler is switched off (`ADAPTIVE_SCALE = false`), so the resolution stays fixed.
 - LOW / MEDIUM remain in code only as a safety net: if a device cannot compile the shaders or allocate the float / depth targets,
   the renderer still falls back to a lower tier instead of crashing.
-
-## Load (GPU and CPU) without changing the picture
-- The shadow pass draws a coarse trunk (10 sides, 9 rows, about 160 triangles) instead of trunk + 5 roots + 11 branches
-  (about 6,900 triangles per tree); only trunks are collected as casters, so far fewer matrices are copied every frame.
-- Crowns beyond 22 m use subdivision level 2 (every second vertex of the near crown, same displacement): a quarter of the triangles,
-  and most of those trees are already deep in the fog.
-- Shadow lookup is 4 hardware-bilinear taps instead of 9; the pursuer and flood lights are skipped when they are off;
-  depth of field gathers 9 taps instead of 16; the shaft march takes 20 steps instead of 28; bloom runs 4 levels instead of 5.
-- Uniform locations are cached without building strings; on 90/120 Hz screens the surface asks for 60 frames a second.
-- Not measured here (no device, no compiler): check the frame time on a weak phone, and compare the look of far crowns and
-  thin beams against the previous build.

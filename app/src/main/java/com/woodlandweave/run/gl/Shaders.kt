@@ -130,10 +130,9 @@ uniform mat4 uLightVP0;
 uniform sampler2DShadow uShadow0;
 uniform float uShadowTexel;
 float pcf3(sampler2DShadow s, vec3 c, float tx) {
-  // Four taps, each already a bilinear compare in hardware: about the same soft edge as nine point taps.
-  float o = 0.75 * tx;
-  return 0.25 * (texture(s, vec3(c.xy + vec2(-o, -o), c.z)) + texture(s, vec3(c.xy + vec2(o, -o), c.z)) +
-                 texture(s, vec3(c.xy + vec2(-o, o), c.z)) + texture(s, vec3(c.xy + vec2(o, o), c.z)));
+  float sum = 0.0;
+  for (int i = -1; i <= 1; i++) for (int j = -1; j <= 1; j++) sum += texture(s, vec3(c.xy + vec2(float(i), float(j)) * tx, c.z));
+  return sum / 9.0;
 }
 float shadowRaw(vec3 wp, vec3 n) {
   if (uShadowOn < 0.5) return 1.0;
@@ -379,12 +378,9 @@ void main() {
     col += env * envF * envGain * 1.35;
   }
 #endif
-  // The pursuer light and the flood light are off almost all the time: skip their whole lighting model then.
-  if (uRedI > 0.001) {
-    tl = uRedPos - vW; d = length(tl);
-    col += light(n, v, tl / max(d, 1e-3), uRedCol * (uRedI / max(pow(d, 1.1), 0.01)) * falloff(d, 70.0), albedo, alpha);
-  }
-  if (dot(uFloodCol, vec3(1.0)) > 0.001) col += light(n, v, normalize(uFloodDir), uFloodCol, albedo, alpha);
+  tl = uRedPos - vW; d = length(tl);
+  col += light(n, v, tl / max(d, 1e-3), uRedCol * (uRedI / max(pow(d, 1.1), 0.01)) * falloff(d, 70.0), albedo, alpha);
+  col += light(n, v, normalize(uFloodDir), uFloodCol, albedo, alpha);
   o = vec4(finish(col + emissive, depth), outA);
 }
 """
@@ -578,8 +574,8 @@ vec3 dofGather(vec2 uv, vec3 c0) {
   // a rotated spiral turns that into fine noise that the dither hides.
   float rot = ign(gl_FragCoord.xy) * 6.2831853;
   vec3 acc = c0; float ws = 1.0;
-  for (int i = 0; i < 9; i++) {
-    float fi = (float(i) + 0.5) / 9.0;
+  for (int i = 0; i < 16; i++) {
+    float fi = (float(i) + 0.5) / 16.0;
     float a = float(i) * 2.39996323 + rot;
     vec2 suv = uv + vec2(cos(a), sin(a)) * sqrt(fi) * rad * vec2(1.0 / asp, 1.0);
     float sz = linZ(texture(uDepth, suv).r);
