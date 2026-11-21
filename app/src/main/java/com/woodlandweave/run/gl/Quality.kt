@@ -1,14 +1,11 @@
 package com.woodlandweave.run.gl
 
 /**
- * Graphics tiers. Only HIGH is selectable now (shown as "Normal", drawn at half resolution, see GameRenderer.RENDER_SCALE); LOW and
- * MEDIUM stay in the enum only as the automatic fallback when a device cannot compile or allocate the full effect set.
- *
- * Earlier description: LOW is the web-parity look of the earlier builds; the other two build on it.
+ * Graphics tiers. LOW is the web-parity look of the earlier builds; the other two build on it.
  *
  *  MEDIUM  bloom, smooth round shapes (canopy, rocks, bushes, rings and posts are no longer faceted polygons),
  *          and a more lifelike trunk and roots. Nothing else changes.
- *  HIGH    + everything MEDIUM has, plus filmic tone mapping, key-light shadows, SSAO, volumetric light shafts,
+ *  HIGH    + everything MEDIUM has, plus filmic tone mapping, moon shadows, SSAO, volumetric light shafts,
  *          wet sheen and puddles, a light tree sway, film grain, depth of field and a speed-proportional motion blur.
  */
 enum class Quality(val label: String) {
@@ -20,18 +17,15 @@ enum class Quality(val label: String) {
  * An effect the tier does not have is unaffected.
  */
 data class FxTuning(
-    val bloom: Float = FX_NEUTRAL,
-    val tone: Float = FX_NEUTRAL,
-    val shadows: Float = FX_NEUTRAL,
-    val ao: Float = 0f,
-    val shafts: Float = FX_NEUTRAL,
-    val dof: Float = FX_NEUTRAL,
-    val motion: Float = FX_NEUTRAL,
-    val sharp: Float = 0f,
+    val bloom: Float = 1f,
+    val tone: Float = 1f,
+    val shadows: Float = 1f,
+    val ao: Float = 1f,
+    val shafts: Float = 1f,
+    val dof: Float = 1f,
+    val motion: Float = 1f,
+    val sharp: Float = 1f,
 )
-
-/** The neutral (0) position of the zero-centred fine-tune sliders: the look the renderer is tuned for. -100 turns a group off, +100 doubles it. */
-const val FX_NEUTRAL = 1f
 
 /** Everything a tier switches on. All tunables live here. */
 class Features(val quality: Quality) {
@@ -45,7 +39,7 @@ class Features(val quality: Quality) {
     val lifelikeTrees = r >= 1
 
     /** Contrast-adaptive sharpening of the final picture; counters the softness of upscaling, MSAA and bloom. */
-    val sharpen = 0f
+    val sharpen = if (r >= 2) 0.40f else if (r >= 1) 0.36f else 0.30f
     /** Negative texture LOD bias: bark and ground stay crisper at a distance. */
     val lodBias = if (r >= 1) -0.45f else -0.30f
     /** Medium and High see further before the fog closes in. */
@@ -70,10 +64,8 @@ class Features(val quality: Quality) {
     val wind = r >= 2
     val shadows = r >= 2
     val shadowRes = 2048
-    // Half-width of the shadow map in metres, centred ON the runner (not ahead of him): it covers everything the fog lets
-    // you see in every direction, so turning never moves the edge of the map and the light never changes with the heading.
-    val shadowExtent = 46f
-    val ssao = false
+    val shadowExtent = 28f
+    val ssao = r >= 2
     val ssaoSamples = 8
     val ssaoRadius = 0.50f
     val ssaoStrength = 0.78f
