@@ -1,5 +1,9 @@
 package com.woodlandweave.run
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.media.AudioManager
 import android.os.Build
@@ -29,6 +33,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var gameView: GameView
     private lateinit var tilt: TiltSensor
     private lateinit var updates: UpdateController
+
+    private val audioReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) { audio.refreshMute() }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -69,7 +77,6 @@ class MainActivity : ComponentActivity() {
             setTimeOfDay = { v -> lifecycleScope.launch { repo.setTimeOfDay(v) } },
             setQuality = { v -> lifecycleScope.launch { repo.setQuality(v) } },
             setFx = { k, v -> lifecycleScope.launch { repo.setFx(k, v) } },
-            audioStatus = { audio.status() },
             finish = { finish() },
         )
         setContent { ForestApp(engine, gameView, actions, updates) }
@@ -79,6 +86,13 @@ class MainActivity : ComponentActivity() {
         val c = WindowInsetsControllerCompat(window, window.decorView)
         c.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         c.hide(WindowInsetsCompat.Type.systemBars())
+    }
+
+    override fun onStart() {
+        super.onStart()
+        val f = IntentFilter(AudioManager.RINGER_MODE_CHANGED_ACTION).apply { addAction("android.media.VOLUME_CHANGED_ACTION") }
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(audioReceiver, f, Context.RECEIVER_NOT_EXPORTED)
+        else @Suppress("UnspecifiedRegisterReceiverFlag") registerReceiver(audioReceiver, f)
     }
 
     override fun onResume() {
@@ -102,14 +116,18 @@ class MainActivity : ComponentActivity() {
         super.onPause()
     }
 
+    override fun onStop() {
+        try { unregisterReceiver(audioReceiver) } catch (_: Exception) { }
+        super.onStop()
+    }
+
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) hideSystemBars()
     }
 
     override fun onDestroy() {
-        // Always: a destroyed (even if not finishing) activity gets a new ForestAudio in onCreate, so this one must not outlive it.
-        audio.release()
+        if (isFinishing) audio.release()
         super.onDestroy()
     }
 }
