@@ -249,14 +249,8 @@ void main() {
   float outA = uAlpha;
   if (uMode == 3) {
     // Mossy patches, darker damp earth and leaf litter baked into the ground colour.
-#ifdef Q_GROUND_FAST
-    // The ground is a dedicated program: retain the broad moss/damp pattern with fewer transcendental ops.
-    float mossN = sin(vW.x * .21 + vW.z * .17) * sin(vW.z * .19 - vW.x * .13);
-    float litN = sin(vW.x * 1.3 + vW.z * .7);
-#else
     float mossN = sin(vW.x * .21 + sin(vW.z * .17) * 2.) * sin(vW.z * .19 - sin(vW.x * .13) * 1.7);
     float litN = sin(vW.x * 1.3 + vW.z * .7) * sin(vW.z * 1.1 - vW.x * .5);
-#endif
     float moss = smoothstep(.25, .75, mossN);
     // smoothstep requires edge0 < edge1; invert the result for the damp-area mask.
     float damp = 1.0 - smoothstep(-.6, .2, mossN);
@@ -322,14 +316,9 @@ void main() {
   else if (uMode != 5) sh *= mix(1.0, sunGap(vW, keyL, 0.30), 0.35 * uShadowK * step(0.5, uShadowOn));
 #endif
   // Dappled, drifting light: patches of sun / moonlight wander over trunks, ground, bushes and leaves.
-#ifdef Q_GROUND_FAST
-  // A broad world-space dapple is enough on the ground; the full two-axis field remains on objects.
-  float dap = smoothstep(-0.55, 0.65, sin(vW.x * 0.9 + vW.z * 0.8));
-#else
   float dapA = sin(vW.x * 0.9 + sin(vW.z * 0.7) * 1.6);   // static dapple: the light pools stay fixed in the world
   float dapB = sin(vW.z * 0.8 + sin(vW.x * 0.6) * 1.4);
   float dap = smoothstep(-0.55, 0.65, dapA * dapB);
-#endif
   // Ground receives a stronger, broader dapple so the incoming key light reads as soft pools
   // between the trees. Keep foliage contrast unchanged to avoid washing out the canopy.
   if (uMode == 3) sh *= mix(0.90, 1.10, dap);

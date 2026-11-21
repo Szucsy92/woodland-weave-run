@@ -446,10 +446,9 @@ object Geo {
         return g
     }
 
-    /** 113 x 113 lattice over 200 m; the vertex shader lifts it with groundHeight(). */
+    /** 161 x 161 lattice over 200 m; the vertex shader lifts it with groundHeight(). */
     fun groundGrid(): Pair<FloatArray, ShortArray> {
-        // 113 x 113 vertices retain smooth height displacement while halving ground triangles.
-        val n = 112
+        val n = 160
         val pos = FloatArray((n + 1) * (n + 1) * 2)
         for (j in 0..n) for (i in 0..n) {
             pos[(j * (n + 1) + i) * 2] = -100f + i * (200f / n)

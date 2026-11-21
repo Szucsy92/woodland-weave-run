@@ -173,9 +173,7 @@ class PostFx {
         while (GL.glGetError() != GL.GL_NO_ERROR) { /* drop stale errors */ }
         val maxSamples = IntArray(1)
         GL.glGetIntegerv(GL.GL_MAX_SAMPLES, maxSamples, 0)
-        // 2x MSAA retains clean silhouettes while halving the multisample colour/depth
-        // traffic versus 4x. Resolution scaling handles the remaining low-end pressure.
-        val samples = min(2, maxSamples[0]).coerceAtLeast(1)
+        val samples = min(4, maxSamples[0])
         val fmt = if (hdr) GL.GL_RGBA16F else GL.GL_RGBA8
         val ids = IntArray(2)
         GL.glGenRenderbuffers(2, ids, 0)
