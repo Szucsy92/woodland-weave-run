@@ -7,13 +7,13 @@ runs the highest tier the device can really handle instead of crashing (`PostFx.
 | Factor | Low | Medium | High |
 |---|---|---|---|
 | Linear HDR (RGBA16F) pipeline, three.js fog, sRGB maps, dither, glass UI | yes | yes | yes |
-| Bloom | | yes (4 levels) | yes (5 levels) |
+| Bloom | | yes (4 levels) | yes (4 levels) |
 | Round shapes: canopy, rocks, bushes smooth and finely tessellated (no polygon facets) | faceted (web look) | smooth | smooth |
 | Round rings and posts (relic rings, poles) | 6-8 sides | 12-20 sides | 12-20 sides |
 | Trunk and roots with a real form (see below) | | yes | yes |
 | Boxes (monolith, gate posts, lintel, lantern) | boxes | boxes | boxes |
 | Filmic tone mapping (ACES), film grain, faint chromatic aberration | | | yes |
-| Key-light shadow map (2048, PCF, 92 m wide, centred on the runner; trunks, roots, branches, rocks, bushes), replaces the contact-shadow decals | | | yes |
+| Key-light shadow map (2048, 4-tap hardware PCF, 92 m wide, centred on the runner; coarse trunks, roots, branches, rocks, bushes), replaces the contact-shadow decals | | | yes |
 | SSAO (half-res, 8 samples, bilateral blur) | | | yes |
 | Volumetric light shafts (shadow-map + canopy-gap raymarch, 28 world-anchored steps) | | | yes |
 | Wet sheen (sky/ground mirror) and puddles on the ground | | | yes |
@@ -133,3 +133,17 @@ Uncollected power-ups contribute compact coloured point lights to the lit scene.
   the frame-rate driven resolution scaler is switched off (`ADAPTIVE_SCALE = false`), so the resolution stays fixed.
 - LOW / MEDIUM remain in code only as a safety net: if a device cannot compile the shaders or allocate the float / depth targets,
   the renderer still falls back to a lower tier instead of crashing.
+
+## Load (GPU and CPU) without changing the picture
+Everything that shapes the picture stays as it was (shadow map 2048, 28 shaft steps, 16 depth-of-field taps, 5 bloom levels);
+only work that does not show is removed.
+- The shadow pass draws coarse silhouettes of the trunk (20 sides, 12 rows, the flare kept fine), the roots (6 x 6) and the
+  branches (6 x 4) with the same instance matrices: about 1,300 triangles per tree instead of 6,900.
+- Crowns beyond 22 m have a quarter of the triangles but keep the near crown's vertices and normals at the shared vertices
+  (`Geo.crownLod`), so lumps and shading agree and there is no band at the LOD distance.
+- The shadow lookup is 4 hardware-bilinear taps (about the same soft edge as the former 9 point taps); the pursuer and
+  flood lights are skipped when they are off (they contributed nothing then); the shaft tint is computed once, not per step.
+- Uniform locations are cached without building strings; on 90/120 Hz screens the surface asks for 60 frames a second
+  (the one change that is about motion, not stills: remove `setFrameRate` in `GameView` to get the high refresh rate back).
+- Not measured here (no device, no compiler): check frame time on a weak phone and compare far crowns and thin shadows with
+  the previous build.
