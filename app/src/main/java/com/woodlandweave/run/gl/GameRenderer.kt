@@ -385,15 +385,15 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         // Twilight weight: 0 at full night / full day, 1 half way (dawn or dusk).
         val dusk = (1f - kotlin.math.abs(2f * k - 1f)).coerceIn(0f, 1f)
         val tw = ((dusk - .2f) / .6f).coerceIn(0f, 1f).let { it * it * (3f - 2f * it) }
-        val warmSky = floatArrayOf(1.00f, 0.30f, 0.075f)
-        val warmFog = floatArrayOf(0.48f, 0.12f, 0.045f)
+        val warmSky = floatArrayOf(1.00f, 0.58f, 0.32f)
+        val warmFog = floatArrayOf(0.42f, 0.22f, 0.12f)
         lampDay = if (feat.rank >= 1) 1f - .2f * k else 1f
         // Keep exposure nearly constant across the cycle: the eye should read the changing light, not an artificial brightness pump.
-        pp.exposureScale = .96f + .035f * k + .012f * dusk
+        pp.exposureScale = .98f + .020f * k + .008f * dusk
         // Bloom is reserved for genuinely bright sources; foliage and fog should retain texture.
-        pp.bloomScale = .78f - .08f * k + .025f * dusk
+        pp.bloomScale = .70f - .06f * k + .015f * dusk
         // Volumetric shafts remain visible, but never overpower the forest itself.
-        pp.shaftScale = 1.52f - .12f * k + .18f * tw
+        pp.shaftScale = 1.12f - .10f * k + .12f * tw
         red = e.redMix.toFloat(); lights = 1f - e.dieRef.toFloat()
 
         // TWO lights, each with its own arc and its own on/off window (see SkyLight.kt):
@@ -428,9 +428,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         sky = Palette.mix(Palette.mix(Palette.mix(Palette.moon, Palette.daySky, k), warmSky, tw * .24f), Palette.daySkyLight, dl)
         groundC = Palette.mix(fog, Palette.pursuer, red * .55f)
         // Ambient fill prevents crushed shadows without flattening the directional sunlight.
-        hemi = .78f + k * .34f + tw * .07f + dl * .16f + red * 1.4f
+        hemi = .62f + k * .25f + tw * .05f + dl * .11f + red * 1.4f
         // Fog starts later by day, so the distant lights stay readable.
-        fogNear = 7f + k * 2f
+        fogNear = 8f + k * 3f
 
         // Camera: lookAt, then the same local pitch / yaw / roll nudges three.js applied.
         Matrix.setLookAtM(view, 0, cam.ex.toFloat(), cam.ey.toFloat(), cam.ez.toFloat(), cam.tx.toFloat(), cam.ty.toFloat(), cam.tz.toFloat(), 0f, 1f, 0f)
@@ -451,11 +451,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         Matrix.invertM(pp.invVp, 0, vp, 0)
         pp.camX = cam.ex.toFloat(); pp.camY = cam.ey.toFloat(); pp.camZ = cam.ez.toFloat()
         // Bloom picks up lights, not the day sky: the threshold rises with the brightness of the fog.
-        pp.bloomThreshold = max(feat.bloomThreshold, (.2126f * fog[0] + .7152f * fog[1] + .0722f * fog[2]) * 1.45f + .18f)
+        pp.bloomThreshold = max(feat.bloomThreshold, (.2126f * fog[0] + .7152f * fog[1] + .0722f * fog[2]) * 1.55f + .20f)
         pp.near = .1f; pp.far = 220f; pp.aspect = aspectRatio
         pp.tanHalf = tan(Math.toRadians(FOV / 2.0)).toFloat()
         System.arraycopy(moonDirV, 0, pp.moonDir, 0, 3)
-        val shaftK = .95f - .10f * k
+        val shaftK = .88f - .08f * k
         pp.moonCol[0] = moonCol[0] * moonI * shaftK; pp.moonCol[1] = moonCol[1] * moonI * shaftK; pp.moonCol[2] = moonCol[2] * moonI * shaftK
         val camSpeed = if (dt > 0) hypot(cam.ex - lastCamX, cam.ez - lastCamZ) / dt else 0.0
         lastCamX = cam.ex; lastCamZ = cam.ez
@@ -803,8 +803,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             GL.glUniform3f(loc(shadowProg, "uSway"), 0f, 0f, 0f)   // shadows (and so the light beams) do not follow the wind: the light stays fixed
             meshes[kind].draw(bufs[kind], shadowCounts[kind])
         }
+        // Crowns use the shared world-space canopy transmission field in the lit and shaft shaders;
+        // keep the depth map for solid occluders only to avoid drawing every crown twice.
         draw(K_TRUNK, TREE_SWAY); draw(K_ROOT, TREE_SWAY); draw(K_BRANCH, TREE_SWAY)
-        draw(K_CROWN, TREE_SWAY); draw(K_CROWN_FAR, TREE_SWAY)
         draw(K_ROCK, 0f); draw(K_PLANT, 0f)
         sm.end()
     }

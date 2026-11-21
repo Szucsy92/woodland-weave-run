@@ -91,3 +91,8 @@ Uncollected power-ups contribute compact coloured point lights to the lit scene.
   Contrast-adaptive sharpening is on for every tier (0.30 / 0.36 / 0.40), textures use a negative LOD bias, and Medium
   and High see 12% further before the fog closes in. Settings -> Graphics -> Fine-tune now has a Sharpness slider on every
   tier.
+
+
+## World-anchored canopy light pools (High)
+
+The key light remains the existing time-of-day sun/moon direction and the existing single shadow map. A shared, deterministic world-space canopy-opening function projects each ground point and each volumetric sample to the same 15 m canopy layer along the key-light direction. The ground evaluates the field once per fragment and reuses that result for its soft pool and restrained irradiance lift; volumetric shafts evaluate it at their existing ray-march samples. This avoids an expanded shadow-only forest, extra per-frame tree generation, and a second ground-pool field. The canopy pattern is independent of camera, heading and time, while the projection moves naturally when the sun/moon direction changes.
