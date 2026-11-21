@@ -330,14 +330,15 @@ object Geo {
      * slightly elliptical and lobed sections, shallow bark fissures and knots, a gentle sway of the centre line.
      * Same height, radius and attachment points as the plain trunk, so branches and crowns still sit where they did.
      */
-    fun trunkLifelike(): MeshData {
-        val radial = 28
+    fun trunkLifelike(radial: Int = 28, coarseRows: List<Float>? = null): MeshData {
         // Rows run top to bottom: coarse up the stem, fine through the flare where the shape changes quickly.
         val hs = ArrayList<Float>()
-        var h = 22f
-        while (h > 4.2f) { hs += h; h -= 1.2f }
-        h = 4.2f
-        while (h >= -0.001f) { hs += max(h, 0f); h -= 0.3f }
+        if (coarseRows != null) hs.addAll(coarseRows) else {
+            var h = 22f
+            while (h > 4.2f) { hs += h; h -= 1.2f }
+            h = 4.2f
+            while (h >= -0.001f) { hs += max(h, 0f); h -= 0.3f }
+        }
         val rows = hs.size
         val pos = FloatArray(rows * (radial + 1) * 3); val uv = FloatArray(rows * (radial + 1) * 2); val centers = FloatArray(rows * 3)
         var n = 0
@@ -371,8 +372,7 @@ object Geo {
      * A surface root: a smooth tube along +x that rises out of the trunk flare, meanders, tapers and dives into the
      * soil. Wider than tall, with soft lumps, 12 sides and 24 steps.
      */
-    fun rootLifelike(): MeshData {
-        val segs = 24; val radial = 12
+    fun rootLifelike(segs: Int = 24, radial: Int = 12): MeshData {
         val rows = segs + 1
         val pos = FloatArray(rows * (radial + 1) * 3); val uv = FloatArray(rows * (radial + 1) * 2); val centers = FloatArray(rows * 3)
         var n = 0
@@ -397,14 +397,28 @@ object Geo {
     }
 
     /** The plain branch, with enough sides to be round up close. */
-    fun branchRound(): MeshData {
-        val g = cylinder(.03f, .07f, 2.2f, 10, 10)
+    fun branchRound(radial: Int = 10, heightSegs: Int = 10): MeshData {
+        val g = cylinder(.03f, .07f, 2.2f, radial, heightSegs)
         g.forEachVertex { _, p ->
             val y = p[1] + 1.1f; val t = y / 2.2f
             p[0] = p[0] + sin(t * 7.3f) * .09f * t + t * t * .25f; p[1] = y; p[2] = p[2] + sin(t * 5.1f + 1) * .08f * t
         }
         g.computeNormals()
         return g
+    }
+
+    /**
+     * The far crown: the triangles of [far] subdivisions, but the positions, normals and texture coordinates of the [near] crown at
+     * the vertices the two levels share (the vertices of the lower level come first, in the same order). The lumps and the shading
+     * therefore agree with the near crown; only the fine sampling between the shared vertices is dropped.
+     */
+    fun crownLod(near: Int, far: Int): MeshData {
+        val hi = crown(near, false)
+        val lo = icosphere(far)
+        val n = lo.vertexCount
+        val m = MeshData(hi.pos.copyOf(n * 3), hi.uv.copyOf(n * 2), lo.idx)
+        m.nor = hi.nor.copyOf(n * 3)
+        return m
     }
 
     /** Lumpy leaf mass; CROWN_SUBDIVISIONS keeps the instance count affordable on phones. */
