@@ -38,7 +38,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         // ground depends on the real forest and not on the part of it that happens to be loaded around the runner.
         const val SHADOW_RADIUS = 22
         const val MAX_PROPS = (SHADOW_RADIUS * 2 + 1) * (SHADOW_RADIUS * 2 + 1)
-        const val GROUND_STEP = 200f / 160f
+        const val GROUND_STEP = 200f / 128f
         const val K_TRUNK = 0; const val K_SHADOW = 1; const val K_ROOT = 2; const val K_BRANCH = 3
         const val K_CROWN = 4; const val K_ROCK = 5; const val K_PLANT = 6; const val K_CROWN_FAR = 7
         const val KINDS = 8
@@ -59,11 +59,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         const val ORB_ALPHA = .5f
         /** The one resolution: the scene is drawn at half the surface's width and height and scaled up in the final pass. */
         const val RENDER_SCALE = 0.5f
-        /** Off: the draw resolution stays at RENDER_SCALE (the old frame-rate driven scaler is kept below, unused). */
-        const val ADAPTIVE_SCALE = false
+        /** Adaptive: starts at the existing half-resolution target and scales down only when frame time requires it. */
+        const val ADAPTIVE_SCALE = true
         // Sharp by default: start close to the device's own resolution and only give ground when 60 fps is lost.
-        const val MIN_DENSITY = 1.5f
-        const val START_DENSITY = 2.25f
+        const val MIN_DENSITY = 1.0f
+        const val START_DENSITY = 1.5f
         const val TREE_SWAY = .15f
     }
 
@@ -772,7 +772,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         while (true) {
             val defs = f.litDefines()
             val lp = GlUtil.programOrNull(Shaders.LIT_VS, Shaders.litFs(defs))
-            val gp = if (lp != 0) GlUtil.programOrNull(Shaders.GROUND_VS, Shaders.litFs(defs)) else 0
+            val gp = if (lp != 0) GlUtil.programOrNull(Shaders.GROUND_VS, Shaders.litFs(defs + "#define Q_GROUND_FAST\n")) else 0
             var sm: ShadowMap? = null; var sp = 0
             var ok = lp != 0 && gp != 0
             if (ok && f.shadows) {
@@ -1193,7 +1193,13 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 if (age >= 0) { dissolving = true; k = min(1.0, age / SHOCKWAVE_DISSOLVE) }
             }
             if (!dissolving) {
-                for (i in p.kinds.indices) emit(if (far && p.kinds[i] == K_CROWN) K_CROWN_FAR else p.kinds[i], p.m, i * 16)
+                for (i in p.kinds.indices) {
+                    val kind = p.kinds[i]
+                    // At distance the crown defines the silhouette. Roots and fine branches are
+                    // sub-pixel detail there; omitting them saves instance bandwidth and vertex work.
+                    if (far && (kind == K_ROOT || kind == K_BRANCH)) continue
+                    emit(if (far && kind == K_CROWN) K_CROWN_FAR else kind, p.m, i * 16)
+                }
                 continue
             }
             // The wave shoves it into the depth, tips it over and rips it out of the ground.
@@ -1374,9 +1380,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     }
 
     /**
-     * Dynamic resolution: starts at the web build's 1.5x density and climbs towards the surface's own density while
-     * the device keeps 60 fps with room to spare; drops again (and remembers the failing level for a while) when it
-     * cannot. Only the effect pass's target is resized, never the surface.
+     * Dynamic resolution: starts at the existing half-resolution target and can step down to one-third
+     * of surface resolution on sustained frame-time pressure. Only the effect target is resized.
      */
     private inner class Scaler {
         var density = minOf(START_DENSITY, surfaceDensity)
