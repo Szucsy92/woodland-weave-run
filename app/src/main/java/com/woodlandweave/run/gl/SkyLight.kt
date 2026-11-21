@@ -63,6 +63,6 @@ object SkyLights {
     private const val OVERLAP = .015   // cycle units (about 20 minutes): the moon rises just before the sun has fully set
 
     // Both lights: 4 degrees at rise / set, 23 degrees at the highest point, exactly in the middle of the arc (due NORTH, straight ahead).
-    val SUN = SkyLight(startCyc = .25, lenCyc = .5, minElDeg = 4.0, maxElDeg = 23.0, intensityLow = 1.60f, intensityHigh = 2.45f)
-    val MOON = SkyLight(startCyc = .75 - OVERLAP, lenCyc = .5 + 2 * OVERLAP, minElDeg = 4.0, maxElDeg = 23.0, intensityLow = 0.95f, intensityHigh = 1.15f)
+    val SUN = SkyLight(startCyc = .25, lenCyc = .5, minElDeg = 4.0, maxElDeg = 23.0, intensityLow = 1.75f, intensityHigh = 2.75f)
+    val MOON = SkyLight(startCyc = .75 - OVERLAP, lenCyc = .5 + 2 * OVERLAP, minElDeg = 4.0, maxElDeg = 23.0, intensityLow = 1.35f, intensityHigh = 1.55f)
 }

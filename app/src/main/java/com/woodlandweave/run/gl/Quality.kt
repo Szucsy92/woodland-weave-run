@@ -20,11 +20,11 @@ data class FxTuning(
     val bloom: Float = 1f,
     val tone: Float = 1f,
     val shadows: Float = 1f,
-    val ao: Float = 0f,
+    val ao: Float = 1f,
     val shafts: Float = 1f,
     val dof: Float = 1f,
     val motion: Float = 1f,
-    val sharp: Float = 0f,
+    val sharp: Float = 1f,
 )
 
 /** Everything a tier switches on. All tunables live here. */
@@ -39,7 +39,7 @@ class Features(val quality: Quality) {
     val lifelikeTrees = r >= 1
 
     /** Contrast-adaptive sharpening of the final picture; counters the softness of upscaling, MSAA and bloom. */
-    val sharpen = 0f
+    val sharpen = if (r >= 2) 0.40f else if (r >= 1) 0.36f else 0.30f
     /** Negative texture LOD bias: bark and ground stay crisper at a distance. */
     val lodBias = if (r >= 1) -0.45f else -0.30f
     /** Medium and High see further before the fog closes in. */
@@ -52,12 +52,12 @@ class Features(val quality: Quality) {
     val bloom = r >= 1
     val bloomLevels = if (r >= 2) 5 else 4
     /** Base threshold in linear light; the renderer raises it on bright (day) scenes so the sky never blooms. */
-    val bloomThreshold = 0.54f
-    val bloomStrength = if (r >= 2) 0.17f else 0.19f
+    val bloomThreshold = 0.48f
+    val bloomStrength = if (r >= 2) 0.20f else 0.23f
     val tonemap = r >= 2
-    val exposure = 0.96f
-    val grain = if (r >= 2) 0.004f else 0f
-    val chroma = if (r >= 2) 0.001f else 0f
+    val exposure = 0.92f
+    val grain = if (r >= 2) 0.006f else 0f
+    val chroma = if (r >= 2) 0.0015f else 0f
 
     // Lighting and atmosphere (High)
     val env = r >= 2
@@ -65,7 +65,7 @@ class Features(val quality: Quality) {
     val shadows = r >= 2
     val shadowRes = 2048
     val shadowExtent = 28f
-    val ssao = false
+    val ssao = r >= 2
     val ssaoSamples = 8
     val ssaoRadius = 0.50f
     val ssaoStrength = 0.78f
@@ -73,7 +73,7 @@ class Features(val quality: Quality) {
     // Samples every 1.2 m, anchored in the world: thin beams between the trunks stay put while the runner moves.
     val shaftSteps = 28
     val shaftMax = 34f
-    val fogDensity = 0.0135f
+    val fogDensity = 0.015f
     val dof = r >= 2
     val dofStrength = 0.62f
     val focus = 18f
