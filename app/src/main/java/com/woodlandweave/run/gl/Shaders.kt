@@ -11,6 +11,32 @@ float gh(float x, float z) {
 """
 
 
+
+    /** One world-space canopy field shared by ground illumination and volumetric shafts. */
+    private const val CANOPY_LIGHT_FN = """
+float canopyOpen(vec2 p) {
+  vec2 w = p + vec2(sin(p.y * 0.075 + p.x * 0.035),
+                     sin(p.x * 0.065 - p.y * 0.045)) * 3.2;
+  float broad = sin(w.x * 0.17 + sin(w.y * 0.11) * 1.8)
+              * sin(w.y * 0.16 + sin(w.x * 0.13) * 1.6);
+  float mid = sin(w.x * 0.31 + w.y * 0.19 + sin(w.y * 0.21))
+            * sin(w.y * 0.27 - w.x * 0.16 + sin(w.x * 0.18));
+  float fine = sin(w.x * 0.53 + sin(w.y * 0.38) * 1.2)
+             * sin(w.y * 0.47 + sin(w.x * 0.29) * 1.1);
+  return broad * 0.68 + mid * 0.24 + fine * 0.08;
+}
+float canopyTransmission(vec3 p, vec3 L, float floorLight) {
+  float elevation = max(abs(L.y), 0.28);
+  vec2 horizontal = L.xz;
+  float hLen = length(horizontal);
+  vec2 lightDir = hLen > 0.001 ? horizontal / hLen : vec2(0.35, 0.94);
+  // Project the point to the same canopy layer for ground pools and every shaft sample.
+  float projection = clamp((15.0 - p.y) / elevation, 0.0, 34.0);
+  float opening = smoothstep(-0.12, 0.52, canopyOpen(p.xz + lightDir * projection));
+  return mix(floorLight, 1.0, opening);
+}
+"""
+
     /** Wind (High tier): the whole tree leans with a gust. A smooth field in world space, so branches and crowns stay attached. */
     private const val WIND_FN = """
 uniform float uTime;
@@ -87,6 +113,7 @@ uniform int uMode;
 uniform vec2 uUvScale;
 uniform sampler2D uTex, uNorm, uRoughTex;
 uniform float uTime;
+$CANOPY_LIGHT_FN
 #ifdef Q_SHADOW
 uniform float uShadowOn, uShadowK;
 uniform mat4 uLightVP0;
@@ -264,13 +291,20 @@ void main() {
   if (uMode == 5) sh = shadowAt(vW + keyL * 4.5, vec3(0.0));
   else sh = shadowAt(vW, n);
 #endif
+  float groundPool = 0.0;
+#ifdef Q_SHADOW
+  if (uMode == 3) {
+    groundPool = canopyTransmission(vW, keyL, 0.30);
+    sh *= groundPool;
+  }
+#endif
   // Dappled, drifting light: patches of sun / moonlight wander over trunks, ground, bushes and leaves.
   float dapA = sin(vW.x * 0.9 + sin(vW.z * 0.7) * 1.6);   // static dapple: the light pools stay fixed in the world
   float dapB = sin(vW.z * 0.8 + sin(vW.x * 0.6) * 1.4);
   float dap = smoothstep(-0.55, 0.65, dapA * dapB);
   // Ground receives a stronger, broader dapple so the incoming key light reads as soft pools
   // between the trees. Keep foliage contrast unchanged to avoid washing out the canopy.
-  if (uMode == 3) sh *= mix(0.68, 1.30, dap);
+  if (uMode == 3) sh *= mix(0.94, 1.06, dap);
   else sh *= mix(0.6, 1.3, dap) * (uMode == 5 ? 0.7 : 1.0) + (uMode == 5 ? 0.3 : 0.0);
   if (uMode == 5) {
     // Foliage is translucent: wrapped diffuse on the lit side, and the light shining through leaves seen against it.
@@ -282,8 +316,17 @@ void main() {
   } else {
     // A modest ground-only irradiance lift makes sun/moon pools visible on the forest floor
     // without raising exposure or bleaching trunks and leaves.
-    float keyBoost = (uMode == 3) ? 1.12 : 1.0;
+    float keyBoost = (uMode == 3) ? 1.08 : 1.0;
     col += light(n, v, keyL, uMoon * sh * keyBoost, albedo, alpha);
+#ifdef Q_SHADOW
+    if (uMode == 3) {
+      float poolShape = smoothstep(0.38, 0.86, groundPool);
+      float poolSoft = smoothstep(0.30, 0.78, groundPool);
+      vec3 poolTint = mix(vec3(1.0, 0.95, 0.84), vec3(0.88, 0.93, 1.0), clamp(uRed * 0.35, 0.0, 0.35));
+      col += albedo * poolTint * max(max(uMoon.r, uMoon.g), uMoon.b)
+           * (0.16 * poolSoft + 0.22 * poolShape);
+    }
+#endif
   }
   vec3 tl = uLampPos - vW; float d = length(tl);
   // Medium and High soften the very near field, so a trunk next to the lamp no longer burns out to white.
@@ -311,8 +354,8 @@ void main() {
     // Fresnel-weighted, roughness-filtered environment reflection. The sky/ground gradient
     // gives puddles a broad reflection while bark keeps a narrow, restrained wet glint.
     float envF = mix(.035, .72, fr);
-    float envGain = sm * sm * (0.18 + 1.05 * fr);
-    col += env * envF * envGain * 1.35;
+    float envGain = sm * sm * (0.16 + 0.90 * fr);
+    col += env * envF * envGain * 1.20;
   }
 #endif
   tl = uRedPos - vW; d = length(tl);
@@ -523,6 +566,7 @@ vec3 dofGather(vec2 uv, vec3 c0) {
   return acc / ws;
 }
 #ifdef Q_SHAFTS
+$CANOPY_LIGHT_FN
 float shadowMarch(vec3 wp) {
   vec4 l = uLightVP0 * vec4(wp, 1.0);
   vec3 s = l.xyz / l.w * 0.5 + 0.5;
@@ -531,7 +575,9 @@ float shadowMarch(vec3 wp) {
   vec2 e2 = min(s.xy, 1.0 - s.xy);
   float edge = smoothstep(0.0, 0.18, min(e2.x, e2.y));
   float v = (s.z < 1.0) ? texture(uShadowC0, vec3(clamp(s.xy, 0.0, 1.0), s.z)) : 1.0;
-  return mix(0.62, v, edge);
+  float solidVisibility = mix(0.62, v, edge);
+  float foliage = canopyTransmission(wp, normalize(uMoonDir), 0.08);
+  return solidVisibility * mix(0.88, 1.35, smoothstep(0.18, 0.84, foliage));
 }
 // Light shafts: march the view ray through height fog, asking the shadow map where the moon reaches.
 vec3 shafts(vec3 c, vec2 uv, float d) {
@@ -548,10 +594,10 @@ vec3 shafts(vec3 c, vec2 uv, float d) {
   float ph = fract(-dot(ro, rd) / dtFix);
   float j = ign(gl_FragCoord.xy);   // static per-pixel offset over a whole step: the world anchor stays, the banding (dashed lines) goes
   float cosT = dot(rd, uMoonDir);
-  float g = 0.55;   // wider lobe: the beams still glow when the light is 20-30 degrees off the view axis
+  float g = 0.58;   // broad atmospheric scattering; the beam remains directional but not spotlight-like
   float phase = (1.0 - g * g) / (12.566 * pow(max(1.0 + g * g - 2.0 * g * cosT, 0.12), 1.5));
   // The light is low and often off to the side: keep a floor under the forward lobe so the beams still glow when it is not dead ahead.
-  phase = phase * 0.78 + 0.13;
+  phase = phase * 0.72 + 0.08;
   float T = 1.0; vec3 sc = vec3(0.0);
   for (int i = 0; i < 48; i++) {
     if (i >= N) break;
@@ -566,13 +612,15 @@ vec3 shafts(vec3 c, vec2 uv, float d) {
     float dens = uFogDens * heightFog * canopy;
     float vis = shadowMarch(p);
     // A small ambient term keeps the beam visible at soft shadow edges without flattening contrast.
-    vec3 inscatter = uMoonCol * (phase * vis + 0.045) * dens * seg;
+    vec3 shaftLum = vec3(dot(uMoonCol, vec3(0.2126, 0.7152, 0.0722)));
+    vec3 shaftTint = mix(shaftLum, uMoonCol, 1.10);
+    vec3 inscatter = shaftTint * (phase * vis + 0.028) * dens * seg;
     sc += inscatter * T;
     T *= exp(-dens * seg * 0.58);
   }
   // Lift the integrated scattering rather than hardening the shadow mask: beams read clearly,
   // while their edges and distance still dissolve naturally into the forest fog.
-  return c * T + sc * 1.48;
+  return c * T + sc * 1.52;
 }
 #endif
 #endif
@@ -712,7 +760,7 @@ void main() {
             1.0 + 0.002 * shadowGrade + 0.004 * highlightGrade,
             1.0 + 0.012 * shadowGrade - 0.010 * highlightGrade);
   float gradedLum = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  c = mix(vec3(gradedLum), c, 1.035);
+  c = mix(vec3(gradedLum), c, 1.025);
 #endif
   // OutputPass: linear -> sRGB. From here on the picture is gamma encoded, like the browser's compositor.
   vec3 outS = linearToSrgb(clamp(c, 0.0, 1.0));
