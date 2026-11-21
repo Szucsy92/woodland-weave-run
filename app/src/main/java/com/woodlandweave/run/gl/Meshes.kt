@@ -408,6 +408,150 @@ object Geo {
     }
 
     /**
+     * Joins already transformed sub-meshes into one static mesh. Tree components are merged once when a
+     * quality tier is built, not per frame. The resulting geometry remains suitable for GLES 3.0 instancing.
+     */
+    private fun mergeTreeParts(parts: List<Pair<MeshData, FloatArray>>): MeshData {
+        val vertices = parts.sumOf { it.first.vertexCount }
+        require(vertices <= 65535) { "Merged tree mesh exceeds GLES2/3 unsigned-short index range: $vertices" }
+        val indexTotal = parts.sumOf { it.first.idx.size }
+        val pos = FloatArray(vertices * 3)
+        val uv = FloatArray(vertices * 2)
+        val mergedNormals = FloatArray(vertices * 3)
+        val idx = ShortArray(indexTotal)
+        var vertexBase = 0
+        var indexBase = 0
+        for ((data, m) in parts) {
+            val sx = kotlin.math.sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]).coerceAtLeast(1e-8f)
+            val sy = kotlin.math.sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]).coerceAtLeast(1e-8f)
+            val sz = kotlin.math.sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]).coerceAtLeast(1e-8f)
+            for (v in 0 until data.vertexCount) {
+                val x = data.pos[v * 3]; val y = data.pos[v * 3 + 1]; val z = data.pos[v * 3 + 2]
+                val d = (vertexBase + v) * 3
+                pos[d] = m[0] * x + m[4] * y + m[8] * z + m[12]
+                pos[d + 1] = m[1] * x + m[5] * y + m[9] * z + m[13]
+                pos[d + 2] = m[2] * x + m[6] * y + m[10] * z + m[14]
+                uv[(vertexBase + v) * 2] = data.uv[v * 2]
+                uv[(vertexBase + v) * 2 + 1] = data.uv[v * 2 + 1]
+                val nx = data.nor[v * 3] / sx; val ny = data.nor[v * 3 + 1] / sy; val nz = data.nor[v * 3 + 2] / sz
+                var tx = m[0] / sx * nx + m[4] / sy * ny + m[8] / sz * nz
+                var ty = m[1] / sx * nx + m[5] / sy * ny + m[9] / sz * nz
+                var tz = m[2] / sx * nx + m[6] / sy * ny + m[10] / sz * nz
+                val nl = kotlin.math.sqrt(tx * tx + ty * ty + tz * tz).coerceAtLeast(1e-8f)
+                tx /= nl; ty /= nl; tz /= nl
+                // Normals are packed after positions by Mesh; keep the merged normal data separately below.
+                mergedNormals[(vertexBase + v) * 3] = tx
+                mergedNormals[(vertexBase + v) * 3 + 1] = ty
+                mergedNormals[(vertexBase + v) * 3 + 2] = tz
+            }
+            for (j in data.idx.indices) idx[indexBase + j] = ((data.idx[j].toInt() and 0xffff) + vertexBase).toShort()
+            vertexBase += data.vertexCount
+            indexBase += data.idx.size
+        }
+        return MeshData(pos, uv, idx).also { it.nor = mergedNormals }
+    }
+
+    /** One reusable trunk+roots+branches mesh. Per-tree placement, scale and sway are one instance transform. */
+    fun treeBody(lifelike: Boolean, shadow: Boolean = false): MeshData {
+        val parts = ArrayList<Pair<MeshData, FloatArray>>(11)
+        fun add(data: MeshData, x: Double = 0.0, y: Double = 0.0, z: Double = 0.0,
+                rx: Double = 0.0, ry: Double = 0.0, rz: Double = 0.0,
+                sx: Double = 1.0, sy: Double = 1.0, sz: Double = 1.0, order: Int = Mat.XYZ) {
+            val m = FloatArray(16)
+            Mat.compose(m, 0, x, y, z, rx, ry, rz, order, sx, sy, sz)
+            parts += data to m
+        }
+        val trunk = when {
+            shadow -> trunkLifelike(12, listOf(22f, 18f, 14f, 10f, 6.5f, 4.2f, 3.2f, 2.4f, 1.6f, .9f, .4f, 0f))
+            lifelike -> trunkLifelike(20)
+            else -> trunk()
+        }
+        add(trunk)
+
+        val seedX = 0; val seedZ = 0
+        fun h(salt: Int) = hash(seedX, seedZ, salt)
+        val root = when {
+            shadow -> rootLifelike(6, 5)
+            lifelike -> rootLifelike(12, 8)
+            else -> root()
+        }
+        for (r in 0 until 3) {
+            val ang = (r / 3.0) * PI * 2 + h(210 + r) * .9
+            val rx = cos(ang) * .2
+            val rz = -sin(ang) * .2
+            val rl = (.7 + h(230 + r) * .7)
+            add(root, rx, 1.2, rz, 0.0, ang, -.12 - h(220 + r) * .15,
+                rl * 1.2, 1.3, 1.3)
+        }
+
+        val branchRaw = when {
+            shadow -> branchRound(5, 4)
+            lifelike -> branchRound(8, 6)
+            else -> branch()
+        }
+        // Encode a per-vertex branch material marker in U (negative U). The shader decodes it,
+        // preserving the old mode-0 branch shading inside the single merged body draw.
+        val branch = MeshData(branchRaw.pos.copyOf(), branchRaw.uv.copyOf(), branchRaw.idx).also { merged ->
+            merged.nor = branchRaw.nor.copyOf()
+            for (v in 0 until branchRaw.vertexCount) merged.uv[v * 2] = -(branchRaw.uv[v * 2] + 1f)
+        }
+        // A small fixed lean is baked into the shared model. Individual trees receive an additional
+        // deterministic lean/yaw in their instance matrix, so the forest does not look grid-cloned.
+        val leanDir = .73
+        val leanAmt = .018
+        val lx = cos(leanDir) * leanAmt
+        val lz = sin(leanDir) * leanAmt
+        fun ox(hh: Double) = -hh * lz
+        fun oz(hh: Double) = hh * lx
+        for (b in 0 until 7) {
+            val seed = h(20 + b)
+            val upper = b < 3
+            val top = if (upper) 14.5 + h(60 + b) * 2.5 else 8.0 + h(60 + b) * 6.5
+            val tilt = if (upper) .55 + h(40 + b) * .75 else 1.05 + h(40 + b) * .5
+            val thick = if (upper) 1.0 else 2.2 + h(90 + b) * 1.4
+            val len = if (upper) .7 + seed * .6 else 1.1 + h(95 + b) * 1.1
+            val yaw = seed * PI * 2
+            add(branch, ox(top), top, oz(top), tilt, yaw, (h(80 + b) - .5) * .4,
+                thick, len, thick, Mat.YXZ)
+        }
+        return mergeTreeParts(parts)
+    }
+
+    /** Seven larger, overlapping foliage lobes joined into one low-overdraw canopy mesh. */
+    fun treeCanopy(nearSubdivisions: Int, farSubdivisions: Int? = null): MeshData {
+        val parts = ArrayList<Pair<MeshData, FloatArray>>(7)
+        val crownMesh = if (farSubdivisions == null) crown(nearSubdivisions, false)
+            else crownLod(nearSubdivisions, farSubdivisions)
+        fun h(salt: Int) = hash(0, 0, salt)
+        val leanDir = .73
+        val leanAmt = .018
+        val lx = cos(leanDir) * leanAmt
+        val lz = sin(leanDir) * leanAmt
+        fun ox(hh: Double) = -hh * lz
+        fun oz(hh: Double) = hh * lx
+        fun add(x: Double, y: Double, z: Double, rx: Double, ry: Double, rz: Double, sx: Double, sy: Double, sz: Double) {
+            val m = FloatArray(16)
+            Mat.compose(m, 0, x, y, z, rx, ry, rz, Mat.YXZ, sx, sy, sz)
+            parts += crownMesh to m
+        }
+        // One upper crown and six interlocking side lobes retain a broken, leafy silhouette
+        // without drawing the original sixteen overlapping spheres.
+        add(ox(18.0), 18.0 + h(71) * 1.2, oz(18.0), .12, h(83) * PI * 2, -.08,
+            3.35, 3.0, 3.45)
+        for (c in 0 until 6) {
+            val angle = c / 6.0 * PI * 2 + h(74 + c) * .38
+            val spread = 2.65 + h(81 + c) * 1.25
+            val y = 11.5 + h(71 + c * 3) * 2.4
+            val r = 2.65 + h(73 + c) * 1.0
+            add(ox(y) + cos(angle) * spread, y, oz(y) + sin(angle) * spread,
+                (h(83 + c) - .5) * .75, angle, (h(77 + c) - .5) * .75,
+                r * (.85 + h(85 + c) * .3), r * (.72 + h(87 + c) * .28), r * (.85 + h(79 + c) * .3))
+        }
+        return mergeTreeParts(parts)
+    }
+
+
+    /**
      * The far crown: the triangles of [far] subdivisions, but the positions, normals and texture coordinates of the [near] crown at
      * the vertices the two levels share (the vertices of the lower level come first, in the same order). The lumps and the shading
      * therefore agree with the near crown; only the fine sampling between the shared vertices is dropped.
@@ -446,9 +590,10 @@ object Geo {
         return g
     }
 
-    /** 161 x 161 lattice over 200 m; the vertex shader lifts it with groundHeight(). */
+    /** 113 x 113 lattice over 200 m; the vertex shader lifts it with groundHeight(). */
     fun groundGrid(): Pair<FloatArray, ShortArray> {
-        val n = 160
+        // 113 x 113 vertices retain smooth height displacement while halving ground triangles.
+        val n = 112
         val pos = FloatArray((n + 1) * (n + 1) * 2)
         for (j in 0..n) for (i in 0..n) {
             pos[(j * (n + 1) + i) * 2] = -100f + i * (200f / n)
