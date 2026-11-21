@@ -13,9 +13,9 @@ runs the highest tier the device can really handle instead of crashing (`PostFx.
 | Trunk and roots with a real form (see below) | | yes | yes |
 | Boxes (monolith, gate posts, lintel, lantern) | boxes | boxes | boxes |
 | Filmic tone mapping (ACES), film grain, faint chromatic aberration | | | yes |
-| Key-light shadow map (2048, PCF, 92 m wide, centred on the runner; trunks, roots, branches, rocks, bushes), replaces the contact-shadow decals | | | yes |
+| Moon shadow map (2048, PCF), replaces the contact-shadow decals | | | yes |
 | SSAO (half-res, 8 samples, bilateral blur) | | | yes |
-| Volumetric light shafts (shadow-map + canopy-gap raymarch, 28 world-anchored steps) | | | yes |
+| Volumetric light shafts (shadow-map raymarch, 12 steps) | | | yes |
 | Wet sheen (sky/ground mirror) and puddles on the ground | | | yes |
 | Light whole-tree sway (a smooth world-space gust field) | | | yes |
 | Depth of field (far background only) | | | yes |
@@ -76,7 +76,7 @@ Not compiled or run on a device in the environment this was written in: build wi
 
 ## Local power-up light spill (native renderer)
 
-Uncollected power-ups contribute compact coloured point lights to the lit scene. Their tint follows the pickup type (freezer, ghost or shockwave), their intensity fades with camera distance and pulses gently with the orb's energy, and their radius is deliberately limited to keep GLES 3.0 fragment work bounded. Low / Medium / High evaluate at most 1 / 2 / 4 nearby pickups respectively. The lights affect normal-mapped bark, ground and other lit materials through the existing GGX lighting path; they are separate from the orb's additive glow sprites. The local lights do not yet cast their own shadow maps: the existing 2048 directional key-light shadow remains a separate system.
+Uncollected power-ups contribute compact coloured point lights to the lit scene. Their tint follows the pickup type (freezer, ghost or shockwave), their intensity fades with camera distance and pulses gently with the orb's energy, and their radius is deliberately limited to keep GLES 3.0 fragment work bounded. Low / Medium / High evaluate at most 1 / 2 / 4 nearby pickups respectively. The lights affect normal-mapped bark, ground and other lit materials through the existing GGX lighting path; they are separate from the orb's additive glow sprites. The local lights do not yet cast their own shadow maps: the existing 2048 directional moon shadow remains a separate system.
 
 ## Fades, shadows for lights, sharpness
 - **Lights fade, never pop or flash.** Sprites dissolve over their whole radius when you pass through them (smootherstep);
@@ -91,26 +91,3 @@ Uncollected power-ups contribute compact coloured point lights to the lit scene.
   Contrast-adaptive sharpening is on for every tier (0.30 / 0.36 / 0.40), textures use a negative LOD bias, and Medium
   and High see 12% further before the fog closes in. Settings -> Graphics -> Fine-tune now has a Sharpness slider on every
   tier.
-
-## Key light, shadows and beams
-- **Sun and moon follow the time of day** (Napszak slider / Auto clock), each on its own arc (`SkyLights.SUN` / `MOON`): rise in the
-  east, highest point straight ahead, set in the west. Only the stronger one is the key light that feeds the shadow map, the
-  light shafts and the ground pools. The angle depends on the time of day only: while running, beams and pools stay exactly
-  where they are.
-- **Solid parts and foliage are handled apart.** The shadow map holds only trunks, roots, branches, rocks and bushes. How much the
-  foliage lets through is `sunGap()` in `Shaders.kt`: a function of world position and the light direction only (a fixed
-  field of openings in a canopy layer 15 m up), so a beam is a slanting column below an opening and a pool of light is where that
-  column ends - the same from every side. Dragging the time slider moves the pools (the light direction changes); running does not.
-- **The base light stays.** The ground keeps at least 30% of the key light outside the openings, trunks / bushes / rocks only dim by
-  a third of that; the beams in the air use a lower floor (8%) so they stay contrasty. Crowns stay in the sun.
-- **The shadow map is centred on the runner** (half-width 46 m, `Features.shadowExtent`), never ahead along the heading.
-- **Shadow ring.** Casters come from a lattice wider than the playable window (`SHADOW_RADIUS` 22 cells): the very same
-  deterministic trees the forest has out there (with the same Freeroam clearing around secrets, gates and black holes), drawn
-  into the shadow map only, fading out between 100 and 118 m.
-- Tuning: `SkyLights` (arcs, strengths), `SUN_GAP_FN` (opening size, layer height) and the `lowest` arguments of `sunGap` in
-  `Shaders.kt` (ground / objects 0.30, beams 0.08).
-- Not compiled or run in the environment this was written in: build with CI and check on a device.
-
-## World-anchored canopy light pools
-
-The ground receives irregular, multi-scale pools projected from the world-space canopy-opening field along the key-light direction. The same canopy field modulates volumetric shafts, so visible beams and their ground impact stay spatially aligned. Pools are evaluated across the whole ground in world coordinates (not screen-space), with soft broad edges, subtle breakup, and a restrained shadow baseline to preserve dark forest contrast.
