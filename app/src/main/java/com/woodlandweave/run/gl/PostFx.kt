@@ -57,7 +57,7 @@ class PostFx {
     private var hdrAllowed = true
     private var requested = Features(Quality.LOW)
     private var blitChecks = 3
-    private val locs = HashMap<String, Int>()
+    private val locs = android.util.SparseArray<HashMap<String, Int>>()
     private val glassRect = FloatArray(8)
     private val glassParam = FloatArray(8)
 
@@ -262,7 +262,10 @@ class PostFx {
         GL.glViewport(0, 0, w, h)
     }
 
-    private fun loc(p: Int, n: String) = locs.getOrPut("$p:$n") { GL.glGetUniformLocation(p, n) }
+    private fun loc(p: Int, n: String): Int {
+        val m = locs.get(p) ?: HashMap<String, Int>().also { locs.put(p, it) }
+        return m.getOrPut(n) { GL.glGetUniformLocation(p, n) }   // no per-call string building
+    }
     private fun loc(n: String) = loc(program, n)
 
     private fun tex(unit: Int, id: Int) {

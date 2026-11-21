@@ -98,6 +98,7 @@ class Actions(
     val setTimeOfDay: (Float) -> Unit,
     val setQuality: (Quality) -> Unit,
     val setFx: (String, Float) -> Unit,
+    val audioStatus: () -> String,
     val finish: () -> Unit,
 )
 
@@ -507,7 +508,9 @@ private fun SettingsContent(ui: UiState, a: Actions, updates: UpdateController, 
                 GraphicsBlock(s, a, onFxDrag)
                 SettingRow("Controls") { Seg(listOf(false to "Tilt", true to "Touch"), s.touch, a.setTouch) }
                 SettingRow("Orientation") { Seg(listOf(false to "Landscape", true to "Any"), s.anyOrientation, a.setAnyOrientation) }
-                SettingRow("Audio") { OnOff(s.sound, a.setSound) }
+                // What the audio layer believes right now (system music volume, in-app switch, whether a stream exists).
+                val audioInfo by produceState("", a) { while (true) { value = a.audioStatus(); delay(500) } }
+                SettingRow("Audio", hint = audioInfo.ifEmpty { null }) { OnOff(s.sound, a.setSound) }
                 SettingRow("Haptics") { OnOff(s.haptics, a.setHaptics) }
                 UpdateRow(updates)
             }
