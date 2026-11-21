@@ -36,7 +36,7 @@ system installer through a FileProvider (it sends you to the "install unknown ap
 | `sim` | Pure game logic, a line-for-line port of `simulation.ts`. No Android imports. |
 | `GameEngine` | Frame loop, power-ups, survive sequence, camera, UI state (replaces the React refs). |
 | `gl` | OpenGL ES 3.0 renderer: displaced terrain, wet normal-mapped bark and ground, instanced forest with crown LOD, fog, headlamp, glow sprites, black holes and wormhole relics; `PostFx` is the MSAA full-screen effect pass (blur, glitch, lens, frost, shockwave rings, wormhole, hue). |
-| `audio` | AudioTrack loop with live low-pass, stings, synthesized cues, haptics. |
+| `audio` | AudioTrack loop with live low-pass, stings, synthesized cues, haptics. Loudness belongs to the system volume keys; the in-app Audio switch and the foreground decide whether a stream exists (the AudioTrack is released, not paused, when it must be silent). |
 | `data` | DataStore settings and best scores (replaces localStorage). |
 | `update` | The OTA updater (replaces the AndroidUpdater JavaScript bridge). |
 | `input` | Gravity-sensor tilt steering (no gimbal flip). |
