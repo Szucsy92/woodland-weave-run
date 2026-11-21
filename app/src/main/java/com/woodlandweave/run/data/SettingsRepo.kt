@@ -74,7 +74,7 @@ class SettingsRepo(private val context: Context) {
             quality = p.enumOf(K.quality, Quality.LOW),
             fx = FxTuning(
                 bloom = p[fxKey("bloom")] ?: 1f, tone = p[fxKey("tone")] ?: 1f, shadows = p[fxKey("shadows")] ?: 1f,
-                ao = p[fxKey("ao")] ?: 1f, sharp = p[fxKey("sharp")] ?: 1f, shafts = p[fxKey("shafts")] ?: 1f, dof = p[fxKey("dof")] ?: 1f, motion = p[fxKey("motion")] ?: 1f,
+                ao = 0f, sharp = 0f, shafts = p[fxKey("shafts")] ?: 1f, dof = p[fxKey("dof")] ?: 1f, motion = p[fxKey("motion")] ?: 1f,
             ),
             best = p[K.best] ?: 0,
             last = p[K.last] ?: 0,

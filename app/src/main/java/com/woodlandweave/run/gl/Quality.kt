@@ -20,11 +20,11 @@ data class FxTuning(
     val bloom: Float = 1f,
     val tone: Float = 1f,
     val shadows: Float = 1f,
-    val ao: Float = 1f,
+    val ao: Float = 0f,
     val shafts: Float = 1f,
     val dof: Float = 1f,
     val motion: Float = 1f,
-    val sharp: Float = 1f,
+    val sharp: Float = 0f,
 )
 
 /** Everything a tier switches on. All tunables live here. */
@@ -39,7 +39,7 @@ class Features(val quality: Quality) {
     val lifelikeTrees = r >= 1
 
     /** Contrast-adaptive sharpening of the final picture; counters the softness of upscaling, MSAA and bloom. */
-    val sharpen = if (r >= 2) 0.40f else if (r >= 1) 0.36f else 0.30f
+    val sharpen = 0f
     /** Negative texture LOD bias: bark and ground stay crisper at a distance. */
     val lodBias = if (r >= 1) -0.45f else -0.30f
     /** Medium and High see further before the fog closes in. */
@@ -65,7 +65,7 @@ class Features(val quality: Quality) {
     val shadows = r >= 2
     val shadowRes = 2048
     val shadowExtent = 28f
-    val ssao = r >= 2
+    val ssao = false
     val ssaoSamples = 8
     val ssaoRadius = 0.50f
     val ssaoStrength = 0.78f

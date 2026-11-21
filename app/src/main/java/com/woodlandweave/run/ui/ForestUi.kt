@@ -523,7 +523,7 @@ private fun GraphicsBlock(s: Settings, a: Actions, onDrag: (FxDrag?) -> Unit) {
         Spacer(Modifier.height(7.dp))
         Text("Graphics", color = TextC, fontSize = 13.sp)
         Tabs(listOf(Quality.LOW to "Low", Quality.MEDIUM to "Medium", Quality.HIGH to "High"), tier, a.setQuality)
-        run {
+        if (tier != Quality.LOW) run {
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).clickable { open = !open }.padding(vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween,
@@ -537,20 +537,25 @@ private fun GraphicsBlock(s: Settings, a: Actions, onDrag: (FxDrag?) -> Unit) {
                 exit = shrinkVertically(tween(260, easing = FastOutSlowInEasing)) + fadeOut(tween(160)),
             ) {
                 Column(Modifier.fillMaxWidth()) {
-                    FxSlider("Sharpness", s.fx.sharp, onDrag) { a.setFx("sharp", it) }
-                    if (tier != Quality.LOW) FxSlider("Bloom", s.fx.bloom, onDrag) { a.setFx("bloom", it) }
+                    if (tier != Quality.LOW) {
+                        FxGroupTitle("IMAGE & COLOR")
+                        FxSlider("Bloom", s.fx.bloom, onDrag) { a.setFx("bloom", it) }
+                    }
                     if (tier == Quality.HIGH) {
                         FxSlider("Filmic look", s.fx.tone, onDrag) { a.setFx("tone", it) }
+                        FxGroupTitle("LIGHTING")
                         FxSlider("Shadows", s.fx.shadows, onDrag) { a.setFx("shadows", it) }
-                        FxSlider("Occlusion", s.fx.ao, onDrag) { a.setFx("ao", it) }
                         FxSlider("Light shafts", s.fx.shafts, onDrag) { a.setFx("shafts", it) }
+                        FxGroupTitle("CAMERA & MOTION")
                         FxSlider("Depth of field", s.fx.dof, onDrag) { a.setFx("dof", it) }
                         FxSlider("Motion blur", s.fx.motion, onDrag) { a.setFx("motion", it) }
                     }
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
                         Text(
                             "Reset", color = Muted, fontSize = 11.sp,
-                            modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { for (k in listOf("sharp", "bloom", "tone", "shadows", "ao", "shafts", "dof", "motion")) a.setFx(k, 1f) }.padding(horizontal = 8.dp, vertical = 6.dp),
+                            modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable {
+                                for (k in listOf("bloom", "tone", "shadows", "shafts", "dof", "motion")) a.setFx(k, 1f)
+                            }.padding(horizontal = 8.dp, vertical = 6.dp),
                         )
                     }
                 }
@@ -573,6 +578,18 @@ private fun <T> Tabs(items: List<Pair<T, String>>, selected: T, onPick: (T) -> U
             }
         }
     }
+}
+
+@Composable
+private fun FxGroupTitle(label: String) {
+    Text(
+        label,
+        color = Muted.copy(alpha = .78f),
+        fontSize = 9.sp,
+        letterSpacing = 1.1.sp,
+        fontWeight = FontWeight.Medium,
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 2.dp),
+    )
 }
 
 @Composable
