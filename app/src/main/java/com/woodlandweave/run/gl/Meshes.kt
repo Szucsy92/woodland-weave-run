@@ -523,7 +523,7 @@ object Geo {
             Mat.compose(m, 0, x, y, z, rx, ry, rz, order, sx, sy, sz)
             parts += data to m
         }
-        val trunkRadial = if (shadow) 10 else if (lifelike) 20 else 12
+        val trunkRadial = if (shadow) 10 else if (lifelike) 16 else 12
         val species = variant.coerceIn(0, 3) // oak, pine, ancient, birch
         val trunk = if (shadow) {
             trunkLifelike(trunkRadial, listOf(22f, 16f, 10f, 5f, 2.2f, .7f, 0f))
@@ -542,7 +542,7 @@ object Geo {
         // Six broad, curved buttress roots radiate from inside the trunk flare. Their wide
         // proximal collars blend into the buried trunk; the flattened profile and descending
         // centreline make them read as roots rather than pipes laid on the ground.
-        val rootRadial = if (shadow) 4 else if (lifelike) 7 else 5
+        val rootRadial = if (shadow) 4 else if (lifelike) 6 else 5
         val rootCount = if (shadow) 4 else intArrayOf(6, 4, 7, 4)[species]
         val rootLength = doubleArrayOf(1.0, .76, 1.32, .78)[species]
         val rootWidth = doubleArrayOf(1.0, .76, 1.22, .74)[species]
@@ -565,7 +565,7 @@ object Geo {
         // outward and upward; a long radius falloff makes the joint organic instead of a pipe
         // inserted into the trunk. Secondary forks begin inside the parent limb for ghost safety.
         val branchCount = if (shadow) 5 else intArrayOf(8, 9, 9, 6)[species]
-        val branchRadial = if (shadow) 4 else if (lifelike) 7 else 5
+        val branchRadial = if (shadow) 4 else if (lifelike) 6 else 5
         for (b in 0 until branchCount) {
             val angle = b / branchCount.toDouble() * PI * 2 + (h(202 + b) - .5) * .42
             val dx = cos(angle); val dz = sin(angle)

@@ -139,6 +139,12 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private val bMist = Sprites(16, { glowTex }, false, true)
     private val bSpore = Sprites(128, { sporeTex }, true, false)
     private val bHole = Sprites(1600, { holeGlowTex }, true, false)
+    // One array for the whole run: the per-frame arrayOf() it replaces was a small allocation every frame.
+    private val spriteBatches = arrayOf(bMist, bGlow, bGlowFog, bSpore, bHole)
+    // The key-light shadow map is re-rendered every second frame (the light is fixed and the map snaps to whole texels, so a
+    // one-frame-old map is still exactly consistent with itself); the first frame after it (re)appears is always rendered.
+    private var shadowTick = 0
+    private var shadowValid = false
 
     private val bufs = Array(KINDS) {
         GlUtil.floatBuffer(MAX_PROPS * 2 * 16)
@@ -568,12 +574,17 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         GL.glBindVertexArray(0)
 
         // Forest.
-        fillInstances(s, cam)
+        if (!shadowActive) shadowValid = false
+        val shadowDue = shadowActive && (!shadowValid || (++shadowTick and 1) == 0)
+        fillInstances(s, cam, shadowDue)
         val smap = shadow
         if (smap != null && shadowActive) {
-            shadowPass(smap, cam)
-            post.bind()
-            GL.glEnable(GL.GL_DEPTH_TEST)
+            if (shadowDue) {
+                shadowPass(smap, cam)
+                shadowValid = true
+                post.bind()
+                GL.glEnable(GL.GL_DEPTH_TEST)
+            }
             System.arraycopy(smap.vp[0], 0, pp.lightVp0, 0, 16)
             pp.shadowTex0 = smap.tex[0]
         } else pp.shadowTex0 = 0
@@ -633,7 +644,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         }
 
         buildSprites(s, e)
-        for (b in arrayOf(bMist, bGlow, bGlowFog, bSpore, bHole)) drawSprites(b)
+        for (b in spriteBatches) drawSprites(b)
 
         post.present(effectState, e.glass, pp)
     }
@@ -712,7 +723,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val dx = op.x - cam.ex
             val dz = op.z - cam.ez
             val d2 = dx * dx + dz * dz
-            val dist = hypot(dx, dz)
+            val dist = sqrt(dx * dx + dz * dz)
             if (dist >= 23.0) continue
             if (picked == lightCount && d2 >= litD2[picked - 1]) continue
             var k = if (picked < lightCount) picked++ else picked - 1
@@ -782,6 +793,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 if (shadowProg != 0) GL.glDeleteProgram(shadowProg)
                 shadow?.release()
                 litProg = lp; groundProg = gp; shadowProg = sp; shadow = sm; feat = f
+                shadowValid = false   // a fresh (empty) shadow map must be drawn before it is used
                 break
             }
             if (lp != 0) GL.glDeleteProgram(lp)
@@ -1178,14 +1190,14 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         b.position(counts[kind] * 16); b.put(src, off, 16); counts[kind]++
     }
 
-    private fun fillInstances(s: Simulation, cam: CameraPose) {
+    private fun fillInstances(s: Simulation, cam: CameraPose, shadowDue: Boolean) {
         counts.fill(0)
         val fwx = cam.tx - cam.ex; val fwz = cam.tz - cam.ez
         val fl = hypot(fwx, fwz).coerceAtLeast(1e-6)
         val reach = FOG_END + 8
         for (p in props) {
             val dx = p.x - cam.ex; val dz = p.z - cam.ez
-            val dist = hypot(dx, dz)
+            val dist = sqrt(dx * dx + dz * dz)
             if (dist > reach) continue
             if ((dx * fwx + dz * fwz) / fl < -12) continue
             val far = dist > CROWN_LOD_DISTANCE
@@ -1230,11 +1242,12 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val ll = hypot(lx, lz).coerceAtLeast(1e-6)
         val extraReach = SHADOW_FADE_END + 4.0   // beyond this the casters have faded away completely
         val sideMax = feat.shadowExtent + 8.0   // beyond this sideways (crown radius included) a tree cannot touch the shadow map
+        if (!shadowDue) return   // the shadow map is not redrawn this frame: skip collecting its casters
         for (pass in 0..1) {
             // Pass 0: the playable window (minus what is already in the visible set). Pass 1: the shadow ring, never drawn otherwise.
             for (p in (if (pass == 0) props else shadowRing)) {
                 val dx = p.x - cam.ex; val dz = p.z - cam.ez
-                val dist = hypot(dx, dz)
+                val dist = sqrt(dx * dx + dz * dz)
                 if (pass == 0 && dist <= reach && (dx * fwx + dz * fwz) / fl >= -12) continue   // already in the visible set
                 if (dist > extraReach || (pass == 0 && s.cleared.contains(p.id))) continue
                 if ((dx * lx + dz * lz) / (ll * dist.coerceAtLeast(1e-6)) < .2) continue   // only trees on the light's side matter
