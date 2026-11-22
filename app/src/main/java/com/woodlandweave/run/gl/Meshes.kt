@@ -327,52 +327,48 @@ object Geo {
     }
 
     /**
-     * shoulders. Cross-sections stay softly lobed rather than polygonal; the flare flows
-     * into the surface roots instead of ending in a hard collar.
+     * A trunk with a real shape: round cross-sections (28 sides), a buttress flare whose ridges run into the roots,
+     * slightly elliptical and lobed sections, shallow bark fissures and knots, a gentle sway of the centre line.
+     * Same height, radius and attachment points as the plain trunk, so branches and crowns still sit where they did.
      */
     fun trunkLifelike(radial: Int = 28, coarseRows: List<Float>? = null): MeshData {
+        // Rows run top to bottom: coarse up the stem, fine through the flare where the shape changes quickly.
         val hs = ArrayList<Float>()
         if (coarseRows != null) hs.addAll(coarseRows) else {
             var h = 22f
-            while (h > 3.6f) { hs += h; h -= 1.0f }
-            h = 3.6f
-            while (h >= -0.001f) { hs += max(h, 0f); h -= 0.24f }
+            while (h > 4.2f) { hs += h; h -= 1.2f }
+            h = 4.2f
+            while (h >= -0.001f) { hs += max(h, 0f); h -= 0.3f }
         }
         val rows = hs.size
-        val pos = FloatArray(rows * (radial + 1) * 3)
-        val uv = FloatArray(rows * (radial + 1) * 2)
-        val centers = FloatArray(rows * 3)
+        val pos = FloatArray(rows * (radial + 1) * 3); val uv = FloatArray(rows * (radial + 1) * 2); val centers = FloatArray(rows * 3)
         var n = 0
         for (iy in 0 until rows) {
             val y = hs[iy]
-            val t = (1f - y / 22f).coerceIn(0f, 1f)
-            // A slow S-curve, almost upright at the roots and subtly leaning through the crown.
-            val wx = sin(y * .19f + .25f) * .30f - sin(.25f) * .30f +
-                sin(y * .43f + 1.1f) * .055f
-            val wz = cos(y * .17f + .55f) * .20f - cos(.55f) * .20f
+            val wx = sin(y * .3f) * .09f + sin(y * .71f + 1.3f) * .05f
+            val wz = cos(y * .26f + .7f) * .08f
             centers[iy * 3] = wx; centers[iy * 3 + 1] = y; centers[iy * 3 + 2] = wz
-            val stem = .43f - .17f * (y / 22f)
-            val foot = (1f - y / 3.8f).coerceIn(0f, 1f)
+            val r0 = .27f + .13f * (1f - y / 22f)
             for (ix in 0..radial) {
                 val th = ix.toFloat() / radial * 2f * PI.toFloat()
-                val a = atan2(cos(th), sin(th))
-                val broadRidge = max(0f, cos(a * 5f + .28f)).pow(2.0f).toFloat()
-                val softLobes = 1f + sin(a * 3f + y * .12f) * .045f +
-                    sin(a * 5f - y * .16f) * .035f + sin(a * 2f + .7f) * .035f
-                // Root flare is broad and low, with rounded buttresses rather than spikes.
-                val flare = 1f + foot * foot * (.72f + broadRidge * 1.05f)
-                val rr = stem * softLobes * flare
-                val ell = 1f + sin(a * 2f + y * .11f) * .045f
-                pos[n * 3] = sin(th) * rr * ell + wx
-                pos[n * 3 + 1] = y
-                pos[n * 3 + 2] = cos(th) * rr / ell + wz
-                uv[n * 2] = ix.toFloat() / radial
-                uv[n * 2 + 1] = y / 22f
+                val sx = sin(th); val cz = cos(th)
+                val a = atan2(cz, sx)
+                val knot = Math.pow(max(0.0, (sin(a * 3 + y * 1.7f) * sin(y * 2.3f + a)).toDouble()), 4.0).toFloat() * .15f
+                val swell = 1 + sin(a * 5 + y * .9f) * .06f + sin(a * 7 - y * .4f) * .03f + sin(a * 2 + y * .23f) * .05f +
+                    sin(a * 7 + sin(y * .5f) * 1.4f) * .018f + knot
+                val ell = 1 + sin(2 * a + y * .15f) * .06f
+                val foot = max(0f, 1 - y / 3.4f)
+                val ridge = Math.pow(max(0.0, cos(a * 5 + .4f).toDouble()), 2.2).toFloat()
+                val flare = 1 + foot * foot * (.55f + ridge * 1.6f)
+                val rr = r0 * swell * flare
+                pos[n * 3] = sx * rr * ell + wx; pos[n * 3 + 1] = y; pos[n * 3 + 2] = cz * rr / ell + wz
+                uv[n * 2] = ix.toFloat() / radial; uv[n * 2 + 1] = y / 22f
                 n++
             }
         }
         return finishTube(pos, uv, rows, radial, centers)
     }
+
     /**
      * A surface root: a smooth tube along +x that rises out of the trunk flare, meanders, tapers and dives into the
      * soil. Wider than tall, with soft lumps, 12 sides and 24 steps.
@@ -540,29 +536,29 @@ object Geo {
         fun h(salt: Int) = hash(species, 0, salt)
         // The trunk's small centre-line wander, repeated here so roots and limbs enter the actual
         // trunk surface rather than appearing beside it.
-        fun trunkX(y: Double) = sin(y * .19 + .25) * .30 - sin(.25) * .30 + sin(y * .43 + 1.1) * .055
-        fun trunkZ(y: Double) = cos(y * .17 + .55) * .20 - cos(.55) * .20
+        fun trunkX(y: Double) = sin(y * .3) * .09 + sin(y * .71 + 1.3) * .05
+        fun trunkZ(y: Double) = cos(y * .26 + .7) * .08
 
-        // Roots are broad, low buttresses that visibly grow out of the trunk base.
-        // Their oval section and long taper keep them root-like, never like surface pipes.
-        val rootRadial = if (shadow) 6 else 10
+        // Six broad, curved buttress roots radiate from inside the trunk flare. Their wide
+        // proximal collars blend into the buried trunk; the flattened profile and descending
+        // centreline make them read as roots rather than pipes laid on the ground.
+        val rootRadial = if (shadow) 4 else if (lifelike) 6 else 5
         val rootCount = if (shadow) 4 else intArrayOf(6, 4, 7, 4)[species]
         val rootLength = doubleArrayOf(1.0, .76, 1.32, .78)[species]
         val rootWidth = doubleArrayOf(1.0, .76, 1.22, .74)[species]
         val rootPoints = listOf(
-            floatArrayOf(0f, .62f, 0f), floatArrayOf(.28f, .53f, .015f),
-            floatArrayOf(.72f, .38f, .055f), floatArrayOf(1.22f, .20f, .12f),
-            floatArrayOf(1.82f, .045f, .20f), floatArrayOf(2.48f, -.055f, .30f),
-            floatArrayOf(3.12f, -.13f, .40f), floatArrayOf(3.48f, -.20f, .44f)
+            floatArrayOf(-.38f, 1.34f, 0f), floatArrayOf(.02f, 1.32f, .015f),
+            floatArrayOf(.48f, 1.27f, .045f), floatArrayOf(.98f, 1.19f, .09f),
+            floatArrayOf(1.52f, 1.08f, .15f), floatArrayOf(2.10f, .91f, .22f),
+            floatArrayOf(2.62f, .66f, .29f)
         )
-        val rootRadii = floatArrayOf(.55f, .52f, .45f, .35f, .24f, .14f, .055f, .006f)
-            .map { it * rootWidth.toFloat() }.toFloatArray()
-        val root = sweptTube(rootPoints, rootRadii, rootRadial, verticalScale = .48f)
+        val rootRadii = floatArrayOf(.46f, .43f, .37f, .29f, .20f, .095f, .009f).map { it * rootWidth.toFloat() }.toFloatArray()
+        val root = sweptTube(rootPoints, rootRadii, rootRadial, verticalScale = .78f)
         for (r in 0 until rootCount) {
-            val ang = (r / rootCount.toDouble()) * PI * 2 + (h(210 + r) - .5) * .34
+            val ang = (r / rootCount.toDouble()) * PI * 2 + (h(210 + r) - .5) * .28
             val rootScale = (.88 + h(230 + r) * .24) * rootLength
-            add(root, cos(ang) * .035, 0.0, -sin(ang) * .035, 0.0, ang, 0.0,
-                rootScale, .88, rootScale, Mat.XYZ)
+            add(root, cos(ang) * .12, 0.0, -sin(ang) * .12, 0.0, ang, 0.0,
+                rootScale, .92, rootScale, Mat.XYZ)
         }
 
         // Primary limbs grow from broad collars buried in the stem. Their centre lines arc
