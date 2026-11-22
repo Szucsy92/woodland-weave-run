@@ -72,7 +72,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         const val START_DENSITY = 1.5f
         const val TREE_SWAY = .15f
         /** The shadow map is redrawn every N frames (1 = every frame). 2 halves the shadow pass; set back to 1 if the shadows ever jump. */
-        const val SHADOW_EVERY = 1
+        const val SHADOW_EVERY = 2
     }
 
     // ---- GL objects ----
