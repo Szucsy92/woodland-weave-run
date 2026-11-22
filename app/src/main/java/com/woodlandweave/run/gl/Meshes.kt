@@ -402,7 +402,7 @@ object Geo {
      * and secondary forks. Every limb starts inside its parent surface, so no detached/floating ends
      * are exposed when the tree is rendered translucently by the ghost power-up.
      */
-    private fun sweptTube(points: List<FloatArray>, radii: FloatArray, radial: Int): MeshData {
+    private fun sweptTube(points: List<FloatArray>, radii: FloatArray, radial: Int, verticalScale: Float = 1f): MeshData {
         require(points.size >= 2 && points.size == radii.size && radial >= 3)
         val rows = points.size
         val pos = FloatArray(rows * (radial + 1) * 3)
@@ -437,7 +437,7 @@ object Geo {
                 val r = radii[row] * wobble
                 val ca = cos(a); val sa = sin(a)
                 pos[n * 3] = p[0] + (ux * ca + vx * sa) * r
-                pos[n * 3 + 1] = p[1] + (uy * ca + vy * sa) * r
+                pos[n * 3 + 1] = p[1] + (uy * ca + vy * sa) * r * verticalScale
                 pos[n * 3 + 2] = p[2] + (uz * ca + vz * sa) * r
                 uv[n * 2] = side.toFloat() / radial
                 uv[n * 2 + 1] = row.toFloat() / (rows - 1)
@@ -535,66 +535,69 @@ object Geo {
         fun trunkX(y: Double) = sin(y * .3) * .09 + sin(y * .71 + 1.3) * .05
         fun trunkZ(y: Double) = cos(y * .26 + .7) * .08
 
-        // Five broad radial roots retain the original five-way layout. Their proximal ends overlap
-        // the trunk flare; the first section is just above grade and the distal sections descend
-        // below grade, avoiding the old hovering-root appearance.
-        val rootRadial = if (shadow) 4 else if (lifelike) 8 else 5
-        val rootRadii = floatArrayOf(.17f, .18f, .14f, .07f, .012f)
-        val root = sweptTube(
-            listOf(
-                floatArrayOf(-.20f, 0f, 0f),
-                floatArrayOf(.18f, .08f, .012f),
-                floatArrayOf(.88f, .06f, .055f),
-                floatArrayOf(1.72f, -.08f, .10f),
-                floatArrayOf(2.55f, -.34f, .14f)
-            ), rootRadii, rootRadial
+        // Six broad, curved buttress roots radiate from inside the trunk flare. Their wide
+        // proximal collars blend into the buried trunk; the flattened profile and descending
+        // centreline make them read as roots rather than pipes laid on the ground.
+        val rootRadial = if (shadow) 5 else if (lifelike) 8 else 6
+        val rootPoints = listOf(
+            floatArrayOf(-.34f, 1.28f, 0f),
+            floatArrayOf(.10f, 1.27f, .018f),
+            floatArrayOf(.58f, 1.23f, .055f),
+            floatArrayOf(1.16f, 1.17f, .105f),
+            floatArrayOf(1.82f, 1.08f, .17f),
+            floatArrayOf(2.48f, .94f, .235f),
+            floatArrayOf(3.02f, .72f, .29f)
         )
-        for (r in 0 until 5) {
-            val ang = (r / 5.0) * PI * 2 + (h(210 + r) - .5) * .34
-            val rootScale = .88 + h(230 + r) * .24
-            add(root, cos(ang) * .20, 1.0, -sin(ang) * .20, 0.0, ang, 0.0,
-                rootScale * 1.05, .8, 1.0, Mat.XYZ)
+        val rootRadii = floatArrayOf(.43f, .405f, .355f, .285f, .195f, .095f, .012f)
+        val root = sweptTube(rootPoints, rootRadii, rootRadial, verticalScale = .58f)
+        for (r in 0 until 6) {
+            val ang = (r / 6.0) * PI * 2 + (h(210 + r) - .5) * .22
+            val rootScale = .91 + h(230 + r) * .18
+            add(root, cos(ang) * .12, 0.0, -sin(ang) * .12, 0.0, ang, 0.0,
+                rootScale, .92, rootScale, Mat.XYZ)
         }
 
-        // Main limbs are swept from points embedded in the trunk. Their bases are deliberately
-        // thicker than the visible trunk intersection; the branch only emerges after it crosses
-        // the bark silhouette, which prevents detached-looking starts in the translucent ghost pass.
+        // Primary limbs grow from broad collars buried in the stem. Their centre lines arc
+        // outward and upward; a long radius falloff makes the joint organic instead of a pipe
+        // inserted into the trunk. Secondary forks begin inside the parent limb for ghost safety.
         val branchCount = if (shadow || !lifelike) 6 else 7
         val branchRadial = if (shadow) 4 else if (lifelike) 8 else 5
         for (b in 0 until branchCount) {
-            val angle = b / branchCount.toDouble() * PI * 2 + (h(202 + b) - .5) * .48
+            val angle = b / branchCount.toDouble() * PI * 2 + (h(202 + b) - .5) * .42
             val dx = cos(angle); val dz = sin(angle)
             val sideX = -dz; val sideZ = dx
-            val y = 8.0 + b * (if (branchCount == 7) 1.30 else 1.48) + h(60 + b) * .45
-            val length = 2.65 + h(95 + b) * 1.25
-            val bend = (h(80 + b) - .5) * .34
+            val y = 8.1 + b * (if (branchCount == 7) 1.28 else 1.48) + h(60 + b) * .38
+            val length = 2.55 + h(95 + b) * 1.05
+            val bend = (h(80 + b) - .5) * .48
             val cx = trunkX(y); val cz = trunkZ(y)
             val points = listOf(
-                floatArrayOf((cx + dx * .13).toFloat(), y.toFloat(), (cz + dz * .13).toFloat()),
-                floatArrayOf((cx + dx * (length * .22) + sideX * bend * .18).toFloat(), (y + .14).toFloat(), (cz + dz * (length * .22) + sideZ * bend * .18).toFloat()),
-                floatArrayOf((cx + dx * (length * .48) + sideX * bend * .52).toFloat(), (y + .40).toFloat(), (cz + dz * (length * .48) + sideZ * bend * .52).toFloat()),
-                floatArrayOf((cx + dx * (length * .76) + sideX * bend).toFloat(), (y + .78).toFloat(), (cz + dz * (length * .76) + sideZ * bend).toFloat()),
-                floatArrayOf((cx + dx * length + sideX * bend * 1.15).toFloat(), (y + 1.16).toFloat(), (cz + dz * length + sideZ * bend * 1.15).toFloat())
+                floatArrayOf((cx + dx * .015).toFloat(), (y - .34).toFloat(), (cz + dz * .015).toFloat()),
+                floatArrayOf((cx + dx * (length * .13) + sideX * bend * .08).toFloat(), (y - .19).toFloat(), (cz + dz * (length * .13) + sideZ * bend * .08).toFloat()),
+                floatArrayOf((cx + dx * (length * .31) + sideX * bend * .28).toFloat(), (y + .015).toFloat(), (cz + dz * (length * .31) + sideZ * bend * .28).toFloat()),
+                floatArrayOf((cx + dx * (length * .55) + sideX * bend * .62).toFloat(), (y + .34).toFloat(), (cz + dz * (length * .55) + sideZ * bend * .62).toFloat()),
+                floatArrayOf((cx + dx * (length * .80) + sideX * bend).toFloat(), (y + .82).toFloat(), (cz + dz * (length * .80) + sideZ * bend).toFloat()),
+                floatArrayOf((cx + dx * length + sideX * bend * 1.12).toFloat(), (y + 1.42).toFloat(), (cz + dz * length + sideZ * bend * 1.12).toFloat())
             )
-            val thickness = (.9 + h(90 + b) * .22).toFloat()
-            val radii = floatArrayOf(.215f, .17f, .125f, .075f, .022f).map { it * thickness }.toFloatArray()
+            val thickness = (.92 + h(90 + b) * .16).toFloat()
+            val radii = floatArrayOf(.36f, .325f, .265f, .195f, .112f, .022f).map { it * thickness }.toFloatArray()
             add(markAsBranch(sweptTube(points, radii, branchRadial)))
 
-            // A small number of secondary forks add a natural silhouette without adding per-tree
-            // objects or draw calls. Their bases overlap the main limb instead of starting in air.
+            // A few small forks are also curved and tapered; their first ring is embedded in
+            // the parent branch so the translucent ghost pass cannot reveal a floating cut end.
             if (lifelike && !shadow && b % 2 == 0) {
-                val forkBase = points[2]
+                val forkBase = points[3]
                 val forkDir = if (b % 4 == 0) 1.0 else -1.0
                 val fx = forkBase[0].toDouble(); val fy = forkBase[1].toDouble(); val fz = forkBase[2].toDouble()
                 val forkPoints = listOf(
                     forkBase.copyOf(),
-                    floatArrayOf((fx + dx * .22 + sideX * .28 * forkDir).toFloat(), (fy + .13).toFloat(), (fz + dz * .22 + sideZ * .28 * forkDir).toFloat()),
-                    floatArrayOf((fx + dx * .50 + sideX * .66 * forkDir).toFloat(), (fy + .36).toFloat(), (fz + dz * .50 + sideZ * .66 * forkDir).toFloat()),
-                    floatArrayOf((fx + dx * .72 + sideX * .95 * forkDir).toFloat(), (fy + .62).toFloat(), (fz + dz * .72 + sideZ * .95 * forkDir).toFloat())
+                    floatArrayOf((fx + dx * .20 + sideX * .22 * forkDir).toFloat(), (fy + .12).toFloat(), (fz + dz * .20 + sideZ * .22 * forkDir).toFloat()),
+                    floatArrayOf((fx + dx * .46 + sideX * .52 * forkDir).toFloat(), (fy + .34).toFloat(), (fz + dz * .46 + sideZ * .52 * forkDir).toFloat()),
+                    floatArrayOf((fx + dx * .72 + sideX * .82 * forkDir).toFloat(), (fy + .66).toFloat(), (fz + dz * .72 + sideZ * .82 * forkDir).toFloat())
                 )
-                add(markAsBranch(sweptTube(forkPoints, floatArrayOf(.115f, .078f, .043f, .012f), max(5, branchRadial - 1))))
+                add(markAsBranch(sweptTube(forkPoints, floatArrayOf(.145f, .105f, .060f, .012f), max(5, branchRadial - 1))))
             }
         }
+
         return mergeTreeParts(parts)
     }
 
