@@ -117,7 +117,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     // Local-light selection scratch (top-K by distance, no per-frame allocation).
     private val litIdx = IntArray(4); private val litD2 = DoubleArray(4); private val litDist = DoubleArray(4)
     // Wall-clock hours, refreshed once a second (the value only has minute resolution anyway).
-    private var clockStamp = Long.MIN_VALUE; private var clockValue = 0.0
+    private var clockStamp = 0L; private var clockValue = 0.0
     private var fogFar = FOG_END.toFloat()
 
     private class Sprites(val capacity: Int, val texture: () -> Int, val additive: Boolean, val fog: Boolean) {
