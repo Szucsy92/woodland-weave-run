@@ -308,7 +308,8 @@ void main() {
 #ifdef Q_SHADOW
   // Canopy blobs overlap by design, so they sample the shadow map from a point well above their own surface (outside
   // their own blob): they then only see shadows cast by other crowns and trunks, never self-shadow acne.
-  if (uMode == 5) sh = shadowAt(vW + keyL * 4.5, vec3(0.0));
+  // Foliage takes no map shadow: the crowns are the canopy top and stay in the light (saves the shadow lookups on the most overdrawn surface).
+  if (uMode == 5) sh = 1.0;
   else sh = shadowAt(vW, n);
   shSolid = sh;
 #endif
