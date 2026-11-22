@@ -124,6 +124,9 @@ uniform vec2 uUvScale;
 uniform sampler2D uTex, uNorm, uRoughTex;
 uniform float uTime;
 $SUN_GAP_FN
+#ifndef Q_SHADOW
+uniform float uShadowOn, uShadowK;   // no shadow map: they only gate the canopy light (pools, dimming under the foliage)
+#endif
 #ifdef Q_SHADOW
 uniform float uShadowOn, uShadowK;
 uniform mat4 uLightVP0;
@@ -308,6 +311,7 @@ void main() {
   if (uMode == 5) sh = shadowAt(vW + keyL * 4.5, vec3(0.0));
   else sh = shadowAt(vW, n);
   shSolid = sh;
+#endif
   // The foliage as a filter (see SUN_GAP_FN): world-fixed openings let the sun reach ground, trunks, bushes and the runner.
   // The crowns themselves are the canopy top and stay in the sun.
   // Trunks, bushes and rocks only dim a little under the foliage, so what you run past stays lit.
@@ -319,7 +323,6 @@ void main() {
     sh *= mix(1.0, mix(0.20, 1.0, pl.y) * (1.0 + 1.1 * pl.x), on);
   }
   else if (uMode != 5) sh *= mix(1.0, sunGap(vW, keyL, 0.30), 0.35 * uShadowK * step(0.5, uShadowOn));
-#endif
   // Dappled, drifting light: patches of sun / moonlight wander over trunks, ground, bushes and leaves.
   float dapA = sin(vW.x * 0.9 + sin(vW.z * 0.7) * 1.6);   // static dapple: the light pools stay fixed in the world
   float dapB = sin(vW.z * 0.8 + sin(vW.x * 0.6) * 1.4);
@@ -595,9 +598,10 @@ vec3 dofGather(vec2 uv, vec3 c0) {
   }
   return acc / ws;
 }
-#ifdef Q_SHAFTS
+#if defined(Q_SHAFTS) || defined(Q_SHAFTS_LITE)
 $SUN_GAP_FN
 float shadowMarch(vec3 wp) {
+#ifdef Q_SHAFTS
   vec4 l = uLightVP0 * vec4(wp, 1.0);
   vec3 s = l.xyz / l.w * 0.5 + 0.5;
   // Fade the shadow pattern out towards its mean near the map's border, so the edge of the map never shows as a
@@ -607,6 +611,11 @@ float shadowMarch(vec3 wp) {
   float v = (s.z < 1.0) ? texture(uShadowC0, vec3(clamp(s.xy, 0.0, 1.0), s.z)) : 1.0;
   // The solid parts shade through the map; the foliage lets the light in only through its world-fixed openings.
   float baseVis = mix(0.62, v, edge);
+#else
+  // No shadow map (Low, Medium): the beams are shaped by the world-fixed canopy openings alone, at a steady mean visibility
+  // (LITE_VIS: tuning constant, the average the High beams settle to; trunks no longer cut into the beams).
+  float baseVis = 0.80;
+#endif
   // Keep the original shaft energy: the world-fixed canopy only modulates contrast around neutral,
   // instead of multiplying the whole beam by a dark foliage mask.
   float gap = sunGap(wp, normalize(uMoonDir), 0.08);
@@ -745,7 +754,7 @@ void main() {
   // Run the expensive depth-of-field gather and volumetric ray march at scene resolution.
   if (uDofK > 0.001) c = dofGather(uv, c);
   float preDepth = texture(uDepth, uv).r;
-#ifdef Q_SHAFTS
+#if defined(Q_SHAFTS) || defined(Q_SHAFTS_LITE)
   if (uShaftSteps > 0.5) c = shafts(c, uv, preDepth);
 #endif
   o = vec4(c, 1.0);
@@ -781,7 +790,7 @@ void main() {
   {
     float dd0 = texture(uDepth, uv).r;
     if (uAoK > 0.0) c *= mix(1.0, texture(uAO, vUv).r, uAoK);
-#ifdef Q_SHAFTS
+#if defined(Q_SHAFTS) || defined(Q_SHAFTS_LITE)
     if (uShaftSteps > 0.5) c = shafts(c, uv, dd0);
 #endif
   }

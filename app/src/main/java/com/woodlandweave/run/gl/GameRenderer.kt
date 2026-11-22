@@ -534,7 +534,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 GL.glUniformMatrix4fv(loc(p, "uLightVP0"), 1, false, sm.vp[0], 0)
                 GL.glUniform1f(loc(p, "uShadowTexel"), 1f / sm.res)
                 u1(p, "uShadowOn", 1f); u1(p, "uShadowK", min(1f, pp.tune.shadows))
-            } else u1(p, "uShadowOn", 0f)
+            } else {
+                // A tier without a shadow map still gets the world-fixed canopy light (pools, dim under the foliage): the
+                // shader's own gate is uShadowOn. High with its shadows slider at zero keeps everything off, as before.
+                u1(p, "uShadowOn", if (feat.shadows) 0f else 1f); u1(p, "uShadowK", min(1f, pp.tune.shadows))
+            }
             u3(p, "uFog", fog); u1(p, "uFogNear", fogNear); u1(p, "uFogFar", fogFar)
             u3(p, "uSky", sky); u3(p, "uGroundC", groundC); u1(p, "uHemi", hemi)
             u3(p, "uMoonDir", moonDirV[0], moonDirV[1], moonDirV[2])

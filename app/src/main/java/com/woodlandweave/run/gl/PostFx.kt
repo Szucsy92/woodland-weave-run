@@ -90,7 +90,9 @@ class PostFx {
         var q = f.quality
         if (!hdrAllowed && q != Quality.LOW) q = Quality.LOW        // the extras need a linear float target
         if (!depthSupported && q.ordinal > Quality.MEDIUM.ordinal) q = Quality.MEDIUM
-        return if (q == f.quality) f else Features(q)
+        // Beams need the resolved depth and a linear float target on every tier; without them the tier simply has no beams.
+        val depthOk = depthSupported && hdrAllowed
+        return if (q == f.quality && depthOk == f.depthOk) f else Features(q, depthOk)
     }
 
     private fun buildPrograms(f: Features) {
@@ -100,7 +102,7 @@ class PostFx {
         while (true) {
             p = GlUtil.programOrNull(Shaders.POST_VS, Shaders.postFs(SHOCKWAVE_RINGS, SHOCKWAVE_GAP, SHOCKWAVE_SPEED, feat.postDefines()))
             if (p != 0 || feat.quality == Quality.LOW) break
-            feat = Features(Quality.values()[feat.quality.ordinal - 1])
+            feat = Features(Quality.values()[feat.quality.ordinal - 1], feat.depthOk)
         }
         if (p == 0) throw IllegalStateException("Effect shader failed to compile")
         program = p
@@ -157,7 +159,8 @@ class PostFx {
             }
             if (!ok) throw IllegalStateException("Scene framebuffer is incomplete")
             // If the device cannot do the requested tier (no float target, no depth resolve), drop to what it can.
-            if (clampForDevice(requested).quality == effective.quality || attempts++ >= 2) break
+            val want = clampForDevice(requested)
+            if ((want.quality == effective.quality && want.needsDepth == effective.needsDepth) || attempts++ >= 2) break
             buildPrograms(requested)
         }
         buildExtraTargets()
@@ -376,11 +379,11 @@ class PostFx {
         GL.glUniform1f(loc(prepassProg, "uMotion"), 0f)
         GL.glUniform1f(loc(prepassProg, "uDofK"), if (f.dof) f.dofStrength * pp.tune.dof else 0f)
         GL.glUniform1f(loc(prepassProg, "uFocus"), f.focus)
-        val shaftsOn = f.shafts && f.shadows && pp.shadowTex0 != 0 && pp.tune.shafts > 0.01f
+        val shaftsOn = f.shafts && (!f.shadows || pp.shadowTex0 != 0) && pp.tune.shafts > 0.01f
         GL.glUniform1f(loc(prepassProg, "uShaftSteps"), if (shaftsOn) f.shaftSteps.toFloat() else 0f)
         GL.glUniform1f(loc(prepassProg, "uShaftMax"), f.shaftMax)
         GL.glUniform1f(loc(prepassProg, "uFogDens"), f.fogDensity * pp.tune.shafts * pp.shaftScale)
-        if (shaftsOn) {
+        if (shaftsOn && f.shadows) {
             tex(4, pp.shadowTex0)
             GL.glUniform1i(loc(prepassProg, "uShadowC0"), 4)
             GL.glUniformMatrix4fv(loc(prepassProg, "uLightVP0"), 1, false, pp.lightVp0, 0)
@@ -482,7 +485,7 @@ class PostFx {
             GL.glUniform3f(loc("uMoonDir"), pp.moonDir[0], pp.moonDir[1], pp.moonDir[2])
             GL.glUniform3f(loc("uMoonCol"), pp.moonCol[0], pp.moonCol[1], pp.moonCol[2])
             GL.glUniform1f(loc("uAoK"), if (useAo) (f.ssaoStrength * t.ao).coerceAtMost(1f) else 0f)
-            GL.glUniform1f(loc("uShaftSteps"), if (!prepassed && f.shafts && f.shadows && pp.shadowTex0 != 0 && t.shafts > 0.01f) minOf(f.shaftSteps, 20).toFloat() else 0f)
+            GL.glUniform1f(loc("uShaftSteps"), if (!prepassed && f.shafts && (!f.shadows || pp.shadowTex0 != 0) && t.shafts > 0.01f) minOf(f.shaftSteps, 20).toFloat() else 0f)
             GL.glUniform1f(loc("uShaftMax"), f.shaftMax)
             GL.glUniform1f(loc("uFogDens"), f.fogDensity * t.shafts * pp.shaftScale)
             GL.glUniform1f(loc("uDofK"), if (!prepassed && f.dof) f.dofStrength * t.dof else 0f)

@@ -34,7 +34,7 @@ data class FxTuning(
 const val FX_NEUTRAL = 1f
 
 /** Everything a tier switches on. All tunables live here. */
-class Features(val quality: Quality) {
+class Features(val quality: Quality, val depthOk: Boolean = true) {
     private val r = quality.ordinal
     val rank get() = r
 
@@ -79,10 +79,12 @@ class Features(val quality: Quality) {
     val ssaoSamples = 8
     val ssaoRadius = 0.50f
     val ssaoStrength = 0.78f
-    val shafts = r >= 2
+    // Every tier has the beams (when the device can resolve depth). High marches 28 steps through the shadow map; Low and
+    // Medium march a few steps and take the beam shape from the world-fixed canopy openings alone (Q_SHAFTS_LITE).
+    val shafts = depthOk
     // Samples every 1.2 m, anchored in the world: thin beams between the trunks stay put while the runner moves.
     // The DOF/shaft pre-pass runs at scene resolution, so 28 steps cost less than the old 20-step full-screen march.
-    val shaftSteps = 28
+    val shaftSteps = if (r >= 2) 28 else 9
     val shaftMax = 34f
     val fogDensity = 0.015f
     val dof = r >= 2
@@ -106,6 +108,7 @@ class Features(val quality: Quality) {
     fun postDefines(): String = buildString {
         if (r >= 1) append("#define Q_FULL\n")
         if (needsDepth) append("#define Q_DEPTH\n")
-        if (shadows && shafts) append("#define Q_SHAFTS\n")
+        // Beams with the shadow map (High) or from the canopy openings only (Low, Medium).
+        if (shafts) append(if (shadows) "#define Q_SHAFTS\n" else "#define Q_SHAFTS_LITE\n")
     }
 }
