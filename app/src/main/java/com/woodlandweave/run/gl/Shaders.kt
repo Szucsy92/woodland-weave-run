@@ -900,7 +900,9 @@ void main() {
     float a = ang + float(i) * 2.399963;
     float zz = fi; float rr = sqrt(1.0 - zz * zz);
     vec3 d = tn * (cos(a) * rr) + bn * (sin(a) * rr) + n * zz;
-    vec3 sp = p + d * (uRadius * mix(0.2, 1.0, fi * fi));
+    // Even radial spacing avoids clustering taps into narrow concentric bands.
+    // Same 8 samples and texture-fetch count; removes the extra radial multiply.
+    vec3 sp = p + d * (uRadius * mix(0.2, 1.0, fi));
     vec4 pp = uProj * vec4(sp, 1.0);
     vec2 suv = pp.xy / pp.w * 0.5 + 0.5;
     float sd = vpos(suv).z;
