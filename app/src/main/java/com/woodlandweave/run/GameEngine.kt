@@ -286,14 +286,17 @@ class GameEngine(
                 orbs += Orb(p); lastOrbSpawn = s.distance
             }
         }
-        val gone = ArrayList<Orb>()
-        for (orb in orbs) {
+        // In-place compaction: keeps the survivors in order without a temporary list and set every frame.
+        var kept = 0
+        for (r in 0 until orbs.size) {
+            val orb = orbs[r]
             val taken = orb.taken
-            if (taken != null) { if ((s.elapsed - taken) / .25 >= 1) gone += orb; continue }
-            if (hypot(orb.p.x - s.x, orb.p.z - s.z) > 70) { gone += orb; continue }
+            if (taken != null) { if ((s.elapsed - taken) / .25 >= 1) continue; orbs[kept++] = orb; continue }
+            if (hypot(orb.p.x - s.x, orb.p.z - s.z) > 70) continue
             if (collectPowerUp(s, orb.p)) { orb.taken = s.elapsed; onPowerUp(orb.p.type) }
+            orbs[kept++] = orb
         }
-        orbs.removeAll(gone.toSet())
+        while (orbs.size > kept) orbs.removeAt(orbs.size - 1)
 
         if (lastPowerUp != null && s.powerUp == null) onPowerUpEnd()
         lastPowerUp = s.powerUp

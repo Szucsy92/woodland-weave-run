@@ -114,6 +114,10 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var treeN = 0
     private var treeX = FloatArray(0); private var treeZ = FloatArray(0); private var treeR = FloatArray(0)
     private val pickD = DoubleArray(6); private val pickI = IntArray(6)
+    // Local-light selection scratch (top-K by distance, no per-frame allocation).
+    private val litIdx = IntArray(4); private val litD2 = DoubleArray(4); private val litDist = DoubleArray(4)
+    // Wall-clock hours, refreshed once a second (the value only has minute resolution anyway).
+    private var clockStamp = Long.MIN_VALUE; private var clockValue = 0.0
     private var fogFar = FOG_END.toFloat()
 
     private class Sprites(val capacity: Int, val texture: () -> Int, val additive: Boolean, val fog: Boolean) {
@@ -387,7 +391,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         if (appliedQuality != wantQ) applyQuality(wantQ)
 
         // Day cycle: fog, moon light and hemisphere drift towards day colours, and towards blood near the pursuer.
-        val hours = Calendar.getInstance().let { it.get(Calendar.HOUR_OF_DAY) + it.get(Calendar.MINUTE) / 60.0 }
+        val hours = clockHours()
         val target = timeOfDayFor(e.settings.mood, e.settings.timeOfDay.toDouble(), hours)
         if (cyc < 0) cyc = target
         else {
@@ -696,17 +700,24 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val baseIntensity = if (feat.rank >= 2) 19f else if (feat.rank >= 1) 13f else 8f
         val lightRadius = if (feat.rank >= 2) 15.5f else if (feat.rank >= 1) 14f else 12.5f
         val t = s.elapsed
-        e.orbs.asSequence()
-            .map { orbState ->
-                val dx = orbState.p.x - cam.ex
-                val dz = orbState.p.z - cam.ez
-                Triple(orbState, dx * dx + dz * dz, hypot(dx, dz))
-            }
-            .filter { it.third < 23.0 }
-            .sortedBy { it.second }
-            .take(lightCount)
-            .forEachIndexed { index, entry ->
-                val orbState = entry.first
+        // Nearest `lightCount` orbs within 23 m, ascending by squared distance (ties keep list order, as the old stable sort did).
+        var picked = 0
+        val orbList = e.orbs
+        for (oi in 0 until orbList.size) {
+            val op = orbList[oi].p
+            val dx = op.x - cam.ex
+            val dz = op.z - cam.ez
+            val d2 = dx * dx + dz * dz
+            val dist = hypot(dx, dz)
+            if (dist >= 23.0) continue
+            if (picked == lightCount && d2 >= litD2[picked - 1]) continue
+            var k = if (picked < lightCount) picked++ else picked - 1
+            while (k > 0 && litD2[k - 1] > d2) { litD2[k] = litD2[k - 1]; litIdx[k] = litIdx[k - 1]; litDist[k] = litDist[k - 1]; k-- }
+            litD2[k] = d2; litIdx[k] = oi; litDist[k] = dist
+        }
+        for (index in 0 until picked) {
+                val orbState = orbList[litIdx[index]]
+                val entryDist = litDist[index]
                 val taken = orbState.taken
                 val kk = if (taken != null) min(1.0, (t - taken) / .25) else 0.0
                 val flow = min(1.0, kk * 1.5)
@@ -714,7 +725,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 val px = if (taken != null) orbState.p.x + (cam.ex - orbState.p.x) * flow * .6 else orbState.p.x
                 val pz = if (taken != null) orbState.p.z + (cam.ez - orbState.p.z) * flow * .6 else orbState.p.z
                 val py = if (taken != null) base + (cam.ey - .35 - base) * flow else base
-                val distanceFade = (1.0 - (entry.third / 23.0)).coerceIn(0.0, 1.0).toFloat()
+                val distanceFade = (1.0 - (entryDist / 23.0)).coerceIn(0.0, 1.0).toFloat()
                 val pulse = 0.92f + 0.08f * sin(animT.toFloat() * (2.0f + index * 0.17f) + index * 1.31f)
                 val offset = index * 4
                 localLightPositions[offset] = px.toFloat()
@@ -733,6 +744,15 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private val orbSeen = HashMap<String, Double>()
     /** 0 -> 1 over 1.4 s from the moment an orb is first seen, so a new orb grows in instead of popping. */
     private fun orbIn(o: Orb, t: Double): Double = smoothRange(t - orbSeen.getOrPut(o.p.id) { t }, 0.0, 1.4)
+
+    private fun clockHours(): Double {
+        val now = System.currentTimeMillis()
+        if (now - clockStamp >= 1000L || now < clockStamp) {
+            clockStamp = now
+            clockValue = Calendar.getInstance().let { it.get(Calendar.HOUR_OF_DAY) + it.get(Calendar.MINUTE) / 60.0 }
+        }
+        return clockValue
+    }
 
     private fun farFade(x: Double, z: Double, s: Simulation, a: Double, b: Double) = 1.0 - smoothRange(hypot(x - s.x, z - s.z), a, b)
 
@@ -1000,11 +1020,12 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         bHole.add(px, py, pz, w * scale, h * scale, hue, .38)
     }
 
-    private fun eulerApply(v: DoubleArray, ex: Double, ey: Double, ez: Double) {
+    /** Euler rotation (z, then y, then x) with the sines and cosines supplied, so a whole sheet or ring computes them once. */
+    private fun eulerApplyCs(v: DoubleArray, cx: Double, sx: Double, cy: Double, sy: Double, cz: Double, sz: Double) {
         var x = v[0]; var y = v[1]; var z = v[2]
-        var nx = x * cos(ez) - y * sin(ez); var ny = x * sin(ez) + y * cos(ez); x = nx; y = ny
-        nx = x * cos(ey) + z * sin(ey); val nz = -x * sin(ey) + z * cos(ey); x = nx; z = nz
-        ny = y * cos(ex) - z * sin(ex); val nz2 = y * sin(ex) + z * cos(ex); y = ny; z = nz2
+        var nx = x * cz - y * sz; var ny = x * sz + y * cz; x = nx; y = ny
+        nx = x * cy + z * sy; val nz = -x * sy + z * cy; x = nx; z = nz
+        ny = y * cx - z * sx; val nz2 = y * sx + z * cx; y = ny; z = nz2
         v[0] = x; v[1] = y; v[2] = z
     }
 
@@ -1058,10 +1079,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val ay = groundHeight(ax, az) + 3 + rnd(sh + off, 33.0) * 8
             val ex = rnd(sh + off, 34.0) * 6.3 + t * .05; val ey = rnd(sh + off, 35.0) * 6.3; val ez = rnd(sh + off, 36.0) * 6.3 + t * .04
             val shown = reveal(1, sh)
+            val cx = cos(ex); val sx = sin(ex); val cy = cos(ey); val sy = sin(ey); val cz = cos(ez); val sz = sin(ez)
             for (gx in 0 until SHEET_N) for (gz in 0 until SHEET_N) {
                 val lx = (gx - (SHEET_N - 1) / 2.0) * 1.1; val lz = (gz - (SHEET_N - 1) / 2.0) * 1.1
                 val ripple = sin(hypot(lx, lz) * .9 - t * 2.4 + sh) * .8 + sin(lx * .6 + t * 1.1) * .3
-                v[0] = lx; v[1] = ripple; v[2] = lz; eulerApply(v, ex, ey, ez)
+                v[0] = lx; v[1] = ripple; v[2] = lz; eulerApplyCs(v, cx, sx, cy, sy, cz, sz)
                 put(ax + v[0], ay + v[1], az + v[2], (.75 + sin(t * 2 + gx * .7 + gz * .5) * .25) * shown)
             }
         }
@@ -1071,10 +1093,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val ex = rnd(r + off, 54.0) * 6.3; val ey = rnd(r + off, 55.0) * 6.3 + t * .1; val ez = rnd(r + off, 56.0) * 6.3
             val rad = 2.4 + rnd(r + off, 57.0) * 2 + sin(t * .8 + r) * .9
             val shown = reveal(2, r)
+            val cx = cos(ex); val sx = sin(ex); val cy = cos(ey); val sy = sin(ey); val cz = cos(ez); val sz = sin(ez)
             for (k in 0 until RING_N) {
                 val a = (k.toDouble() / RING_N) * PI * 2 + t * (.6 + r * .15) * (if (r % 2 == 1) -1 else 1)
                 val rise = if (r % 2 == 1) (k.toDouble() / RING_N - .5) * 5 else sin(k * .9 + t * 2) * .35
-                v[0] = cos(a) * rad; v[1] = rise; v[2] = sin(a) * rad; eulerApply(v, ex, ey, ez)
+                v[0] = cos(a) * rad; v[1] = rise; v[2] = sin(a) * rad; eulerApplyCs(v, cx, sx, cy, sy, cz, sz)
                 put(ax + v[0], ay + v[1], az + v[2], (.8 + sin(t * 3 + k) * .2) * shown)
             }
         }

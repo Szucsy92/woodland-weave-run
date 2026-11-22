@@ -785,7 +785,9 @@ class Mesh(data: MeshData, private val instanceCapacity: Int) {
         matrices.position(0); matrices.limit(n * 16)
         GL.glBindVertexArray(vao[0])
         GL.glBindBuffer(GL.GL_ARRAY_BUFFER, instVbo[0])
-        GL.glBufferSubData(GL.GL_ARRAY_BUFFER, 0, n * 64, matrices)
+        // Re-specify (orphan) the store with the new matrices instead of patching it: the GPU may still be reading last frame's
+        // copy, and glBufferSubData on a buffer in flight can stall the driver on tiling mobile GPUs.
+        GL.glBufferData(GL.GL_ARRAY_BUFFER, n * 64, matrices, GL.GL_STREAM_DRAW)
         GL.glDrawElementsInstanced(GL.GL_TRIANGLES, indexCount, GL.GL_UNSIGNED_SHORT, 0, n)
         GL.glBindVertexArray(0)
         matrices.limit(matrices.capacity())
