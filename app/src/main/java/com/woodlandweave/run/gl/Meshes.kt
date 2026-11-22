@@ -542,23 +542,18 @@ object Geo {
         // Six broad, curved buttress roots radiate from inside the trunk flare. Their wide
         // proximal collars blend into the buried trunk; the flattened profile and descending
         // centreline make them read as roots rather than pipes laid on the ground.
-        // Broad, flattened buttress roots. Their upper faces stay above the soil for the first
-        // part of each run, so they remain visible instead of disappearing inside the trunk flare.
-        // A low vertical scale turns the cross-section into a root plank, not a round pipe.
-        val rootRadial = if (shadow) 6 else if (lifelike) 10 else 8
-        val rootCount = if (shadow) 6 else intArrayOf(7, 5, 8, 5)[species]
-        val rootLength = doubleArrayOf(1.0, .88, 1.28, .92)[species]
-        val rootWidth = doubleArrayOf(1.0, .88, 1.18, .90)[species]
+        val rootRadial = if (shadow) 4 else if (lifelike) 6 else 5
+        val rootCount = if (shadow) 4 else intArrayOf(6, 4, 7, 4)[species]
+        val rootLength = doubleArrayOf(1.0, .76, 1.32, .78)[species]
+        val rootWidth = doubleArrayOf(1.0, .76, 1.22, .74)[species]
         val rootPoints = listOf(
-            floatArrayOf(-.30f, 1.38f, 0f), floatArrayOf(.18f, 1.36f, .015f),
-            floatArrayOf(.78f, 1.32f, .045f), floatArrayOf(1.48f, 1.27f, .09f),
-            floatArrayOf(2.28f, 1.20f, .15f), floatArrayOf(3.12f, 1.14f, .22f),
-            floatArrayOf(3.88f, 1.105f, .29f)
+            floatArrayOf(-.38f, 1.34f, 0f), floatArrayOf(.02f, 1.32f, .015f),
+            floatArrayOf(.48f, 1.27f, .045f), floatArrayOf(.98f, 1.19f, .09f),
+            floatArrayOf(1.52f, 1.08f, .15f), floatArrayOf(2.10f, .91f, .22f),
+            floatArrayOf(2.62f, .66f, .29f)
         )
-        // Wide collars blend into the trunk; the long, slow taper creates visible spreading roots.
-        val rootRadii = floatArrayOf(.72f, .68f, .59f, .48f, .35f, .20f, .018f)
-            .map { it * rootWidth.toFloat() }.toFloatArray()
-        val root = sweptTube(rootPoints, rootRadii, rootRadial, verticalScale = .28f)
+        val rootRadii = floatArrayOf(.46f, .43f, .37f, .29f, .20f, .095f, .009f).map { it * rootWidth.toFloat() }.toFloatArray()
+        val root = sweptTube(rootPoints, rootRadii, rootRadial, verticalScale = .78f)
         for (r in 0 until rootCount) {
             val ang = (r / rootCount.toDouble()) * PI * 2 + (h(210 + r) - .5) * .28
             val rootScale = (.88 + h(230 + r) * .24) * rootLength
