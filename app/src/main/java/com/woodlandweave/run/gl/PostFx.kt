@@ -45,6 +45,8 @@ class PostFx {
     var depthSupported = true; private set
 
     private var program = 0
+    private var prepassProg = 0
+    private var prepassFbo = 0; private var prepassTex = 0
     private var ssaoProg = 0; private var aoBlurProg = 0; private var bloomDownProg = 0; private var bloomUpProg = 0
     private var msaaFbo = 0; private var colorRb = 0; private var depthRb = 0
     private var resolveFbo = 0; private var resolveTex = 0; private var depthTex = 0
@@ -66,7 +68,8 @@ class PostFx {
 
     fun create() {
         locs.clear()
-        program = 0; ssaoProg = 0; aoBlurProg = 0; bloomDownProg = 0; bloomUpProg = 0
+        program = 0; prepassProg = 0; prepassFbo = 0; prepassTex = 0
+        ssaoProg = 0; aoBlurProg = 0; bloomDownProg = 0; bloomUpProg = 0
         msaaFbo = 0; colorRb = 0; depthRb = 0; resolveFbo = 0; resolveTex = 0; depthTex = 0
         aoFbo = IntArray(2); aoTex = IntArray(2); bloomFbo = IntArray(0); bloomTex = IntArray(0)
         val ext = GL.glGetString(GL.GL_EXTENSIONS).orEmpty()
@@ -101,6 +104,10 @@ class PostFx {
         }
         if (p == 0) throw IllegalStateException("Effect shader failed to compile")
         program = p
+        if (prepassProg != 0) GL.glDeleteProgram(prepassProg)
+        prepassProg = if (feat.needsDepth) GlUtil.programOrNull(Shaders.POST_VS, Shaders.postFs(
+            SHOCKWAVE_RINGS, SHOCKWAVE_GAP, SHOCKWAVE_SPEED, feat.postDefines() + "#define Q_PREPASS\n"
+        )) else 0
         ssaoProg = 0; aoBlurProg = 0; bloomDownProg = 0; bloomUpProg = 0
         if (feat.bloom) {
             bloomDownProg = GlUtil.programOrNull(Shaders.POST_VS, Shaders.BLOOM_DOWN_FS)
@@ -163,9 +170,14 @@ class PostFx {
             GL.glDeleteTextures(1, intArrayOf(resolveTex), 0)
             if (depthTex != 0) GL.glDeleteTextures(1, intArrayOf(depthTex), 0)
         }
+        if (prepassTex != 0) {
+            GL.glDeleteFramebuffers(1, intArrayOf(prepassFbo), 0)
+            GL.glDeleteTextures(1, intArrayOf(prepassTex), 0)
+        }
         if (aoTex[0] != 0) { GL.glDeleteFramebuffers(2, aoFbo, 0); GL.glDeleteTextures(2, aoTex, 0) }
         if (bloomTex.isNotEmpty() && bloomTex[0] != 0) { GL.glDeleteFramebuffers(bloomFbo.size, bloomFbo, 0); GL.glDeleteTextures(bloomTex.size, bloomTex, 0) }
         msaaFbo = 0; colorRb = 0; depthRb = 0; resolveFbo = 0; resolveTex = 0; depthTex = 0
+        prepassFbo = 0; prepassTex = 0
         aoFbo = IntArray(2); aoTex = IntArray(2); bloomFbo = IntArray(0); bloomTex = IntArray(0)
     }
 
@@ -173,7 +185,9 @@ class PostFx {
         while (GL.glGetError() != GL.GL_NO_ERROR) { /* drop stale errors */ }
         val maxSamples = IntArray(1)
         GL.glGetIntegerv(GL.GL_MAX_SAMPLES, maxSamples, 0)
-        val samples = min(4, maxSamples[0])
+        // 2x MSAA retains clean silhouettes while halving the multisample colour/depth
+        // traffic versus 4x. Resolution scaling handles the remaining low-end pressure.
+        val samples = min(2, maxSamples[0]).coerceAtLeast(1)
         val fmt = if (hdr) GL.GL_RGBA16F else GL.GL_RGBA8
         val ids = IntArray(2)
         GL.glGenRenderbuffers(2, ids, 0)
@@ -219,12 +233,12 @@ class PostFx {
         return msaaOk && resolveOk && GL.glGetError() == GL.GL_NO_ERROR
     }
 
-    private fun smallTex(fmt: Int, tw: Int, th: Int, fbo: IntArray, tex: IntArray, i: Int): Boolean {
+    private fun smallTex(fmt: Int, tw: Int, th: Int, fbo: IntArray, tex: IntArray, i: Int, levels: Int = 1): Boolean {
         val t = IntArray(1); val f = IntArray(1)
         GL.glGenTextures(1, t, 0); GL.glGenFramebuffers(1, f, 0)
         tex[i] = t[0]; fbo[i] = f[0]
         GL.glBindTexture(GL.GL_TEXTURE_2D, t[0])
-        GL.glTexStorage2D(GL.GL_TEXTURE_2D, 1, fmt, tw, th)
+        GL.glTexStorage2D(GL.GL_TEXTURE_2D, levels, fmt, tw, th)
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE)
@@ -247,6 +261,16 @@ class PostFx {
                 if (!smallTex(GL.GL_RGBA16F, bloomW[i], bloomH[i], bloomFbo, bloomTex, i)) ok = false
             }
             if (!ok) { bloomDownProg = 0; bloomUpProg = 0 }
+        }
+        if (prepassProg != 0 && linear && depthTex != 0) {
+            val pf = IntArray(1); val pt = IntArray(1)
+            if (smallTex(GL.GL_RGBA16F, w, h, pf, pt, 0)) {
+                prepassFbo = pf[0]; prepassTex = pt[0]
+            } else {
+                if (pf[0] != 0) GL.glDeleteFramebuffers(1, pf, 0)
+                if (pt[0] != 0) GL.glDeleteTextures(1, pt, 0)
+                prepassProg = 0
+            }
         }
         if (f.ssao && ssaoProg != 0 && depthTex != 0) {
             val aw = max(2, w / 2); val ah = max(2, h / 2)
@@ -323,6 +347,50 @@ class PostFx {
         GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
     }
 
+    /** DOF and volumetric shafts are evaluated once at the scene target's resolution, then bilinearly upscaled. */
+    private fun depthPrepass(pp: PostParams): Boolean {
+        if (prepassProg == 0 || prepassFbo == 0 || prepassTex == 0 || depthTex == 0 || !linear) return false
+        val f = effective
+        while (GL.glGetError() != GL.GL_NO_ERROR) { /* isolate prepass errors */ }
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, prepassFbo)
+        GL.glViewport(0, 0, w, h)
+        GL.glDisable(GL.GL_DEPTH_TEST); GL.glDisable(GL.GL_BLEND)
+        GL.glUseProgram(prepassProg)
+        tex(0, resolveTex); tex(1, depthTex)
+        GL.glUniform1i(loc(prepassProg, "tDiffuse"), 0)
+        GL.glUniform1i(loc(prepassProg, "uDepth"), 1)
+        GL.glUniform1f(loc(prepassProg, "uSrcSrgb"), 0f)
+        GL.glUniform2f(loc(prepassProg, "resolution"), w.toFloat(), h.toFloat())
+        GL.glUniform1f(loc(prepassProg, "blur"), 0f); GL.glUniform1f(loc(prepassProg, "glitch"), 0f)
+        GL.glUniform1f(loc(prepassProg, "lens"), 0f); GL.glUniform1f(loc(prepassProg, "warp"), 0f)
+        GL.glUniform1f(loc(prepassProg, "wave"), 0f); GL.glUniform1f(loc(prepassProg, "flash"), 0f)
+        GL.glUniform1f(loc(prepassProg, "uSharpen"), 0f); GL.glUniform1f(loc(prepassProg, "uChroma"), 0f)
+        GL.glUniform4f(loc(prepassProg, "hole"), 0f, 0f, 0f, 0f)
+        GL.glUniform2f(loc(prepassProg, "uNF"), pp.near, pp.far)
+        GL.glUniform2f(loc(prepassProg, "uTanAspect"), pp.tanHalf * pp.aspect, pp.tanHalf)
+        GL.glUniformMatrix4fv(loc(prepassProg, "uInvVP"), 1, false, pp.invVp, 0)
+        GL.glUniformMatrix4fv(loc(prepassProg, "uVP"), 1, false, pp.vp, 0)
+        GL.glUniform3f(loc(prepassProg, "uCamPos"), pp.camX, pp.camY, pp.camZ)
+        GL.glUniform3f(loc(prepassProg, "uMoonDir"), pp.moonDir[0], pp.moonDir[1], pp.moonDir[2])
+        GL.glUniform3f(loc(prepassProg, "uMoonCol"), pp.moonCol[0], pp.moonCol[1], pp.moonCol[2])
+        GL.glUniform1f(loc(prepassProg, "uMotion"), 0f)
+        GL.glUniform1f(loc(prepassProg, "uDofK"), if (f.dof) f.dofStrength * pp.tune.dof else 0f)
+        GL.glUniform1f(loc(prepassProg, "uFocus"), f.focus)
+        val shaftsOn = f.shafts && f.shadows && pp.shadowTex0 != 0 && pp.tune.shafts > 0.01f
+        GL.glUniform1f(loc(prepassProg, "uShaftSteps"), if (shaftsOn) f.shaftSteps.toFloat() else 0f)
+        GL.glUniform1f(loc(prepassProg, "uShaftMax"), f.shaftMax)
+        GL.glUniform1f(loc(prepassProg, "uFogDens"), f.fogDensity * pp.tune.shafts * pp.shaftScale)
+        if (shaftsOn) {
+            tex(4, pp.shadowTex0)
+            GL.glUniform1i(loc(prepassProg, "uShadowC0"), 4)
+            GL.glUniformMatrix4fv(loc(prepassProg, "uLightVP0"), 1, false, pp.lightVp0, 0)
+        }
+        GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
+        GL.glActiveTexture(GL.GL_TEXTURE0)
+        return GL.glGetError() == GL.GL_NO_ERROR
+    }
+
     /** True when the depth resolve failed on this device: the renderer should drop to MEDIUM. */
     var depthFailed = false; private set
 
@@ -340,6 +408,7 @@ class PostFx {
         if (bloomDownProg != 0 && bloomTex.isNotEmpty() && t.bloom > 0.01f) bloomPass(pp.bloomThreshold)
         val useAo = ssaoProg != 0 && aoTex[0] != 0 && depthTex != 0 && t.ao > 0.01f
         if (useAo) ssaoPass(pp)
+        val prepassed = depthPrepass(pp)
 
         GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
         GL.glViewport(0, 0, sw, sh)
@@ -358,10 +427,17 @@ class PostFx {
             }
         }
 
-        tex(0, resolveTex)
-        if (glassCount > 0) GL.glGenerateMipmap(GL.GL_TEXTURE_2D)
+        tex(0, if (prepassed) prepassTex else resolveTex)
+        tex(5, resolveTex)
+        if (glassCount > 0) {
+            GL.glActiveTexture(GL.GL_TEXTURE5)
+            GL.glBindTexture(GL.GL_TEXTURE_2D, resolveTex)
+            GL.glGenerateMipmap(GL.GL_TEXTURE_2D)
+        }
+        GL.glActiveTexture(GL.GL_TEXTURE0)
         GL.glUseProgram(program)
         GL.glUniform1i(loc("tDiffuse"), 0)
+        GL.glUniform1i(loc("uBackdrop"), 5)
         // Same rule as in the lit shader: the shadow sampler must never sit on unit 0 beside a sampler2D.
         GL.glUniform1i(loc("uShadowC0"), 4)
         val full = f.rank >= 1
@@ -376,7 +452,7 @@ class PostFx {
             GL.glUniformMatrix4fv(loc("uLightVP0"), 1, false, pp.lightVp0, 0)
         }
         GL.glActiveTexture(GL.GL_TEXTURE0)
-        GL.glUniform1f(loc("uSrcSrgb"), if (linear) 0f else 1f)
+        GL.glUniform1f(loc("uSrcSrgb"), if (prepassed || linear) 0f else 1f)
         GL.glUniform1f(loc("uSharpen"), pp.sharpen)
         GL.glUniform1f(loc("blur"), e.blur.toFloat()); GL.glUniform1f(loc("glitch"), e.glitch.toFloat())
         GL.glUniform1f(loc("frost"), e.frost.toFloat()); GL.glUniform1f(loc("lens"), e.lens.toFloat())
@@ -406,10 +482,10 @@ class PostFx {
             GL.glUniform3f(loc("uMoonDir"), pp.moonDir[0], pp.moonDir[1], pp.moonDir[2])
             GL.glUniform3f(loc("uMoonCol"), pp.moonCol[0], pp.moonCol[1], pp.moonCol[2])
             GL.glUniform1f(loc("uAoK"), if (useAo) (f.ssaoStrength * t.ao).coerceAtMost(1f) else 0f)
-            GL.glUniform1f(loc("uShaftSteps"), if (f.shafts && f.shadows && pp.shadowTex0 != 0 && t.shafts > 0.01f) f.shaftSteps.toFloat() else 0f)
+            GL.glUniform1f(loc("uShaftSteps"), if (!prepassed && f.shafts && f.shadows && pp.shadowTex0 != 0 && t.shafts > 0.01f) minOf(f.shaftSteps, 20).toFloat() else 0f)
             GL.glUniform1f(loc("uShaftMax"), f.shaftMax)
             GL.glUniform1f(loc("uFogDens"), f.fogDensity * t.shafts * pp.shaftScale)
-            GL.glUniform1f(loc("uDofK"), if (f.dof) f.dofStrength * t.dof else 0f)
+            GL.glUniform1f(loc("uDofK"), if (!prepassed && f.dof) f.dofStrength * t.dof else 0f)
             GL.glUniform1f(loc("uFocus"), f.focus)
             GL.glUniform1f(loc("uMotion"), if (f.motionBlur) pp.motion else 0f)
         }

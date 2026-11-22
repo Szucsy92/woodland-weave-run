@@ -6,6 +6,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.exp
@@ -396,6 +397,63 @@ object Geo {
         return finishTube(pos, uv, rows, radial, centers)
     }
 
+    /**
+     * Builds a tapered, gently irregular tube along a 3D centreline. Used for roots, primary limbs
+     * and secondary forks. Every limb starts inside its parent surface, so no detached/floating ends
+     * are exposed when the tree is rendered translucently by the ghost power-up.
+     */
+    private fun sweptTube(points: List<FloatArray>, radii: FloatArray, radial: Int, verticalScale: Float = 1f): MeshData {
+        require(points.size >= 2 && points.size == radii.size && radial >= 3)
+        val rows = points.size
+        val pos = FloatArray(rows * (radial + 1) * 3)
+        val uv = FloatArray(rows * (radial + 1) * 2)
+        val centers = FloatArray(rows * 3)
+        var n = 0
+        for (row in 0 until rows) {
+            val p = points[row]
+            val before = points[if (row == 0) 0 else row - 1]
+            val after = points[if (row == rows - 1) rows - 1 else row + 1]
+            var tx = after[0] - before[0]
+            var ty = after[1] - before[1]
+            var tz = after[2] - before[2]
+            val tl = sqrt(tx * tx + ty * ty + tz * tz).coerceAtLeast(1e-6f)
+            tx /= tl; ty /= tl; tz /= tl
+            // Pick a stable reference axis so the tube frame cannot flip on near-vertical limbs.
+            val refX = 0f
+            val refY = if (abs(ty) > .88f) 0f else 1f
+            val refZ = if (abs(ty) > .88f) 1f else 0f
+            var ux = ty * refZ - tz * refY
+            var uy = tz * refX - tx * refZ
+            var uz = tx * refY - ty * refX
+            val ul = sqrt(ux * ux + uy * uy + uz * uz).coerceAtLeast(1e-6f)
+            ux /= ul; uy /= ul; uz /= ul
+            val vx = ty * uz - tz * uy
+            val vy = tz * ux - tx * uz
+            val vz = tx * uy - ty * ux
+            centers[row * 3] = p[0]; centers[row * 3 + 1] = p[1]; centers[row * 3 + 2] = p[2]
+            for (side in 0..radial) {
+                val a = side.toFloat() / radial * 2f * PI.toFloat()
+                val wobble = 1f + sin(a * 3f + row * .73f) * .035f + sin(a * 5f - row * .41f) * .018f
+                val r = radii[row] * wobble
+                val ca = cos(a); val sa = sin(a)
+                pos[n * 3] = p[0] + (ux * ca + vx * sa) * r
+                pos[n * 3 + 1] = p[1] + (uy * ca + vy * sa) * r * verticalScale
+                pos[n * 3 + 2] = p[2] + (uz * ca + vz * sa) * r
+                uv[n * 2] = side.toFloat() / radial
+                uv[n * 2 + 1] = row.toFloat() / (rows - 1)
+                n++
+            }
+        }
+        return finishTube(pos, uv, rows, radial, centers)
+    }
+
+    /** Branch UV marker lets the shared bark shader avoid applying trunk-foot darkening to limbs. */
+    private fun markAsBranch(data: MeshData): MeshData {
+        val uv = data.uv.copyOf()
+        for (v in 0 until data.vertexCount) uv[v * 2] = -(uv[v * 2] + 1f)
+        return MeshData(data.pos.copyOf(), uv, data.idx).also { it.nor = data.nor.copyOf() }
+    }
+
     /** The plain branch, with enough sides to be round up close. */
     fun branchRound(radial: Int = 10, heightSegs: Int = 10): MeshData {
         val g = cylinder(.03f, .07f, 2.2f, radial, heightSegs)
@@ -406,6 +464,215 @@ object Geo {
         g.computeNormals()
         return g
     }
+
+    /**
+     * Joins already transformed sub-meshes into one static mesh. Tree components are merged once when a
+     * quality tier is built, not per frame. The resulting geometry remains suitable for GLES 3.0 instancing.
+     */
+    private fun mergeTreeParts(parts: List<Pair<MeshData, FloatArray>>): MeshData {
+        val vertices = parts.sumOf { it.first.vertexCount }
+        require(vertices <= 65535) { "Merged tree mesh exceeds GLES2/3 unsigned-short index range: $vertices" }
+        val indexTotal = parts.sumOf { it.first.idx.size }
+        val pos = FloatArray(vertices * 3)
+        val uv = FloatArray(vertices * 2)
+        val mergedNormals = FloatArray(vertices * 3)
+        val idx = ShortArray(indexTotal)
+        var vertexBase = 0
+        var indexBase = 0
+        for ((data, m) in parts) {
+            val sx = kotlin.math.sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]).coerceAtLeast(1e-8f)
+            val sy = kotlin.math.sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]).coerceAtLeast(1e-8f)
+            val sz = kotlin.math.sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]).coerceAtLeast(1e-8f)
+            for (v in 0 until data.vertexCount) {
+                val x = data.pos[v * 3]; val y = data.pos[v * 3 + 1]; val z = data.pos[v * 3 + 2]
+                val d = (vertexBase + v) * 3
+                pos[d] = m[0] * x + m[4] * y + m[8] * z + m[12]
+                pos[d + 1] = m[1] * x + m[5] * y + m[9] * z + m[13]
+                pos[d + 2] = m[2] * x + m[6] * y + m[10] * z + m[14]
+                uv[(vertexBase + v) * 2] = data.uv[v * 2]
+                uv[(vertexBase + v) * 2 + 1] = data.uv[v * 2 + 1]
+                val nx = data.nor[v * 3] / sx; val ny = data.nor[v * 3 + 1] / sy; val nz = data.nor[v * 3 + 2] / sz
+                var tx = m[0] / sx * nx + m[4] / sy * ny + m[8] / sz * nz
+                var ty = m[1] / sx * nx + m[5] / sy * ny + m[9] / sz * nz
+                var tz = m[2] / sx * nx + m[6] / sy * ny + m[10] / sz * nz
+                val nl = kotlin.math.sqrt(tx * tx + ty * ty + tz * tz).coerceAtLeast(1e-8f)
+                tx /= nl; ty /= nl; tz /= nl
+                // Normals are packed after positions by Mesh; keep the merged normal data separately below.
+                mergedNormals[(vertexBase + v) * 3] = tx
+                mergedNormals[(vertexBase + v) * 3 + 1] = ty
+                mergedNormals[(vertexBase + v) * 3 + 2] = tz
+            }
+            for (j in data.idx.indices) idx[indexBase + j] = ((data.idx[j].toInt() and 0xffff) + vertexBase).toShort()
+            vertexBase += data.vertexCount
+            indexBase += data.idx.size
+        }
+        return MeshData(pos, uv, idx).also { it.nor = mergedNormals }
+    }
+
+    /**
+     * One reusable, low-cost tree-body mesh. Roots grow out of the buttress flare and sink into
+     * the soil; limbs begin inside the trunk and taper continuously into smaller forks. All pieces
+     * are merged once per species variant and submitted through a shared instanced batch.
+     */
+    fun treeBody(lifelike: Boolean, shadow: Boolean = false, variant: Int = 0): MeshData {
+        val parts = ArrayList<Pair<MeshData, FloatArray>>(20)
+        fun add(data: MeshData, x: Double = 0.0, y: Double = 0.0, z: Double = 0.0,
+                rx: Double = 0.0, ry: Double = 0.0, rz: Double = 0.0,
+                sx: Double = 1.0, sy: Double = 1.0, sz: Double = 1.0, order: Int = Mat.XYZ) {
+            val m = FloatArray(16)
+            Mat.compose(m, 0, x, y, z, rx, ry, rz, order, sx, sy, sz)
+            parts += data to m
+        }
+        val trunkRadial = if (shadow) 10 else if (lifelike) 20 else 12
+        val species = variant.coerceIn(0, 3) // oak, pine, ancient, birch
+        val trunk = if (shadow) {
+            trunkLifelike(trunkRadial, listOf(22f, 16f, 10f, 5f, 2.2f, .7f, 0f))
+        } else trunkLifelike(trunkRadial)
+        // Species silhouette comes from the trunk profile, not additional geometry.
+        val trunkScale = doubleArrayOf(1.0, .80, 1.30, .70)[species]
+        val lean = doubleArrayOf(.006, .014, .032, .010)[species]
+        add(trunk, rx = lean, rz = -lean * .55, sx = trunkScale, sz = trunkScale)
+
+        fun h(salt: Int) = hash(species, 0, salt)
+        // The trunk's small centre-line wander, repeated here so roots and limbs enter the actual
+        // trunk surface rather than appearing beside it.
+        fun trunkX(y: Double) = sin(y * .3) * .09 + sin(y * .71 + 1.3) * .05
+        fun trunkZ(y: Double) = cos(y * .26 + .7) * .08
+
+        // Six broad, curved buttress roots radiate from inside the trunk flare. Their wide
+        // proximal collars blend into the buried trunk; the flattened profile and descending
+        // centreline make them read as roots rather than pipes laid on the ground.
+        val rootRadial = if (shadow) 4 else if (lifelike) 7 else 5
+        val rootCount = if (shadow) 4 else intArrayOf(6, 4, 7, 4)[species]
+        val rootLength = doubleArrayOf(1.0, .76, 1.32, .78)[species]
+        val rootWidth = doubleArrayOf(1.0, .76, 1.22, .74)[species]
+        val rootPoints = listOf(
+            floatArrayOf(-.38f, 1.34f, 0f), floatArrayOf(.02f, 1.32f, .015f),
+            floatArrayOf(.48f, 1.27f, .045f), floatArrayOf(.98f, 1.19f, .09f),
+            floatArrayOf(1.52f, 1.08f, .15f), floatArrayOf(2.10f, .91f, .22f),
+            floatArrayOf(2.62f, .66f, .29f)
+        )
+        val rootRadii = floatArrayOf(.46f, .43f, .37f, .29f, .20f, .095f, .009f).map { it * rootWidth.toFloat() }.toFloatArray()
+        val root = sweptTube(rootPoints, rootRadii, rootRadial, verticalScale = .78f)
+        for (r in 0 until rootCount) {
+            val ang = (r / rootCount.toDouble()) * PI * 2 + (h(210 + r) - .5) * .28
+            val rootScale = (.88 + h(230 + r) * .24) * rootLength
+            add(root, cos(ang) * .12, 0.0, -sin(ang) * .12, 0.0, ang, 0.0,
+                rootScale, .92, rootScale, Mat.XYZ)
+        }
+
+        // Primary limbs grow from broad collars buried in the stem. Their centre lines arc
+        // outward and upward; a long radius falloff makes the joint organic instead of a pipe
+        // inserted into the trunk. Secondary forks begin inside the parent limb for ghost safety.
+        val branchCount = if (shadow) 5 else intArrayOf(8, 9, 9, 6)[species]
+        val branchRadial = if (shadow) 4 else if (lifelike) 7 else 5
+        for (b in 0 until branchCount) {
+            val angle = b / branchCount.toDouble() * PI * 2 + (h(202 + b) - .5) * .42
+            val dx = cos(angle); val dz = sin(angle)
+            val sideX = -dz; val sideZ = dx
+            val level = b / (if (species == 1) 3.0 else 2.0)
+            val y = when (species) {
+                1 -> 5.0 + level * 4.2 + h(60 + b) * .42
+                2 -> 6.8 + b * 1.32 + h(60 + b) * .5
+                3 -> 10.0 + b * 1.55 + h(60 + b) * .45
+                else -> 7.2 + b * 1.42 + h(60 + b) * .45
+            }
+            val rawLength = when (species) {
+                1 -> 4.1 - level * .78
+                2 -> 3.1 + h(95 + b) * 1.15
+                3 -> 2.0 + h(95 + b) * .9
+                else -> 3.0 + h(95 + b) * 1.25
+            }
+            val length = rawLength.coerceAtLeast(1.0) * doubleArrayOf(1.0, .9, 1.16, .92)[species]
+            val bend = (h(80 + b) - .5) * if (species == 2) .82 else .58
+            val cx = trunkX(y); val cz = trunkZ(y)
+            val points = listOf(
+                floatArrayOf((cx + dx * .015).toFloat(), (y - .34).toFloat(), (cz + dz * .015).toFloat()),
+                floatArrayOf((cx + dx * (length * .13) + sideX * bend * .08).toFloat(), (y - .19).toFloat(), (cz + dz * (length * .13) + sideZ * bend * .08).toFloat()),
+                floatArrayOf((cx + dx * (length * .31) + sideX * bend * .28).toFloat(), (y + .015).toFloat(), (cz + dz * (length * .31) + sideZ * bend * .28).toFloat()),
+                floatArrayOf((cx + dx * (length * .55) + sideX * bend * .62).toFloat(), (y + .30).toFloat(), (cz + dz * (length * .55) + sideZ * bend * .62).toFloat()),
+                floatArrayOf((cx + dx * (length * .80) + sideX * bend).toFloat(), (y + .72).toFloat(), (cz + dz * (length * .80) + sideZ * bend).toFloat()),
+                floatArrayOf((cx + dx * length + sideX * bend * 1.12).toFloat(), (y + 1.28).toFloat(), (cz + dz * length + sideZ * bend * 1.12).toFloat())
+            )
+            val speciesThickness = doubleArrayOf(1.0, .82, 1.28, .72)[species]
+            val thickness = ((.90 + h(90 + b) * .20) * speciesThickness).toFloat()
+            val radii = floatArrayOf(.36f, .325f, .265f, .195f, .112f, .022f).map { it * thickness }.toFloatArray()
+            add(markAsBranch(sweptTube(points, radii, branchRadial)))
+
+            // A few small forks are also curved and tapered; their first ring is embedded in
+            // the parent branch so the translucent ghost pass cannot reveal a floating cut end.
+            if (lifelike && !shadow && (species >= 2 || b % 2 == 0)) {
+                val forkBase = points[3]
+                val forkDir = if (b % 4 == 0) 1.0 else -1.0
+                val fx = forkBase[0].toDouble(); val fy = forkBase[1].toDouble(); val fz = forkBase[2].toDouble()
+                val forkPoints = listOf(
+                    forkBase.copyOf(),
+                    floatArrayOf((fx + dx * .20 + sideX * .22 * forkDir).toFloat(), (fy + .12).toFloat(), (fz + dz * .20 + sideZ * .22 * forkDir).toFloat()),
+                    floatArrayOf((fx + dx * .46 + sideX * .52 * forkDir).toFloat(), (fy + .34).toFloat(), (fz + dz * .46 + sideZ * .52 * forkDir).toFloat()),
+                    floatArrayOf((fx + dx * .72 + sideX * .82 * forkDir).toFloat(), (fy + .66).toFloat(), (fz + dz * .72 + sideZ * .82 * forkDir).toFloat())
+                )
+                add(markAsBranch(sweptTube(forkPoints, floatArrayOf(.145f, .105f, .060f, .012f), max(5, branchRadial - 1))))
+            }
+        }
+
+        return mergeTreeParts(parts)
+    }
+
+    /** Species-specific foliage silhouettes joined into one low-overdraw canopy mesh. */
+    fun treeCanopy(nearSubdivisions: Int, farSubdivisions: Int? = null, variant: Int = 0): MeshData {
+        val parts = ArrayList<Pair<MeshData, FloatArray>>(7)
+        val crownMesh = if (farSubdivisions == null) crown(nearSubdivisions, false)
+            else crownLod(nearSubdivisions, farSubdivisions)
+        fun h(salt: Int) = hash(variant, 0, salt)
+        val leanDir = .73
+        val leanAmt = doubleArrayOf(.018, .045, .012, .030)[variant.coerceIn(0, 3)]
+        val lx = cos(leanDir) * leanAmt
+        val lz = sin(leanDir) * leanAmt
+        fun ox(hh: Double) = -hh * lz
+        fun oz(hh: Double) = hh * lx
+        fun add(x: Double, y: Double, z: Double, rx: Double, ry: Double, rz: Double, sx: Double, sy: Double, sz: Double) {
+            val m = FloatArray(16)
+            Mat.compose(m, 0, x, y, z, rx, ry, rz, Mat.YXZ, sx, sy, sz)
+            parts += crownMesh to m
+        }
+        if (variant == 1) {
+            // Pine: five compact overlapping tiers form a readable conical crown.
+            for (tier in 0 until 5) {
+                val y = 7.8 + tier * 2.75
+                val radius = 4.45 - tier * .70
+                add((h(20 + tier) - .5) * .28, y, (h(30 + tier) - .5) * .28,
+                    .025, h(40 + tier) * PI * 2, .025, radius, 1.55 - tier * .10, radius * .94)
+            }
+            return mergeTreeParts(parts)
+        }
+        if (variant == 3) {
+            // Birch: tall, narrow crown with separated vertical lobes.
+            add(0.0, 18.1, 0.0, .02, h(83) * PI * 2, -.02, 2.45, 3.65, 2.55)
+            for (c in 0 until 5) {
+                val a = c / 5.0 * PI * 2 + h(74 + c) * .35
+                val spread = 1.35 + h(81 + c) * .75
+                add(cos(a) * spread, 12.0 + h(71 + c) * 2.0, sin(a) * spread,
+                    .12, a, -.10, 1.75, 2.65, 1.85)
+            }
+            return mergeTreeParts(parts)
+        }
+        // Oak and ancient: broad broken crowns, with extra spread and irregularity on the old tree.
+        val ancient = variant == 2
+        val lobeCount = if (ancient) 7 else 6
+        add(ox(18.0), 18.0 + h(71) * 1.2, oz(18.0), .12, h(83) * PI * 2, -.08,
+            if (ancient) 4.0 else 3.35, if (ancient) 2.65 else 3.0, if (ancient) 4.1 else 3.45)
+        for (c in 0 until lobeCount) {
+            val angle = c / lobeCount.toDouble() * PI * 2 + h(74 + c) * .48
+            val spread = (if (ancient) 3.1 else 2.7) + h(81 + c) * (if (ancient) 1.65 else 1.25)
+            val y = (if (ancient) 12.0 else 11.5) + h(71 + c * 3) * 2.5
+            val r = (if (ancient) 3.1 else 2.65) + h(73 + c) * (if (ancient) 1.25 else .95)
+            add(ox(y) + cos(angle) * spread, y, oz(y) + sin(angle) * spread,
+                (h(83 + c) - .5) * .75, angle, (h(77 + c) - .5) * .75,
+                r * (.84 + h(85 + c) * .30), r * (.72 + h(87 + c) * .28), r * (.84 + h(79 + c) * .30))
+        }
+        return mergeTreeParts(parts)
+    }
+
 
     /**
      * The far crown: the triangles of [far] subdivisions, but the positions, normals and texture coordinates of the [near] crown at
@@ -446,9 +713,10 @@ object Geo {
         return g
     }
 
-    /** 161 x 161 lattice over 200 m; the vertex shader lifts it with groundHeight(). */
+    /** 113 x 113 lattice over 200 m; the vertex shader lifts it with groundHeight(). */
     fun groundGrid(): Pair<FloatArray, ShortArray> {
-        val n = 160
+        // 113 x 113 vertices retain smooth height displacement while halving ground triangles.
+        val n = 112
         val pos = FloatArray((n + 1) * (n + 1) * 2)
         for (j in 0..n) for (i in 0..n) {
             pos[(j * (n + 1) + i) * 2] = -100f + i * (200f / n)

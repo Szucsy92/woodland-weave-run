@@ -71,7 +71,7 @@ class Features(val quality: Quality) {
     val env = r >= 2
     val wind = r >= 2
     val shadows = r >= 2
-    val shadowRes = 2048
+    val shadowRes = 1024
     // Half-width of the shadow map in metres, centred ON the runner (not ahead of him): it covers everything the fog lets
     // you see in every direction, so turning never moves the edge of the map and the light never changes with the heading.
     val shadowExtent = 46f
@@ -81,6 +81,7 @@ class Features(val quality: Quality) {
     val ssaoStrength = 0.78f
     val shafts = r >= 2
     // Samples every 1.2 m, anchored in the world: thin beams between the trunks stay put while the runner moves.
+    // The DOF/shaft pre-pass runs at scene resolution, so 28 steps cost less than the old 20-step full-screen march.
     val shaftSteps = 28
     val shaftMax = 34f
     val fogDensity = 0.015f

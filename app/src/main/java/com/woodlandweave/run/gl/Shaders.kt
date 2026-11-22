@@ -131,7 +131,8 @@ uniform sampler2DShadow uShadow0;
 uniform float uShadowTexel;
 float pcf3(sampler2DShadow s, vec3 c, float tx) {
   // Four taps, each already a bilinear compare in hardware: about the same soft edge as nine point taps.
-  float o = 0.75 * tx;
+  // Keep the 1024 map's penumbra tight enough to retain thin branch silhouettes (~18 cm).
+  float o = 0.50 * tx;
   return 0.25 * (texture(s, vec3(c.xy + vec2(-o, -o), c.z)) + texture(s, vec3(c.xy + vec2(o, -o), c.z)) +
                  texture(s, vec3(c.xy + vec2(-o, o), c.z)) + texture(s, vec3(c.xy + vec2(o, o), c.z)));
 }
@@ -235,8 +236,12 @@ void main() {
   float geometryRoughness = max(max(dxy.x, dxy.y), dxy.z);
   vec3 albedo = uColor;
   float rough = uRough;
+  // Negative U marks branch vertices in the merged tree-body mesh. Decode the marker while
+  // preserving their original bark UVs; this keeps the old branch shading in one draw.
+  bool branchSurface = (uMode == 4) && vUv.x < 0.0;
+  float barkU = branchSurface ? (-vUv.x - 1.0) : vUv.x;
   // Texture rows start at the top of the image here, three.js flips them: undo that so maps and normals line up.
-  vec2 tuv = vec2(vUv.x * uUvScale.x, (1.0 - vUv.y) * uUvScale.y);
+  vec2 tuv = vec2(barkU * uUvScale.x, (1.0 - vUv.y) * uUvScale.y);
   if (uMaps > 0.5) {
     // The colour maps are SRGB8_ALPHA8 textures: the sampler already returns filtered linear light.
     albedo *= texture(uTex, tuv, uLodBias).rgb;
@@ -268,7 +273,7 @@ void main() {
     rough = mix(rough, max(.055, rough * .30), wet);
     n = normalize(mix(n, vec3(0., 1., 0.), pud * .92));
 #endif
-  } else if (uMode == 4) {
+  } else if (uMode == 4 && !branchSurface) {
     // Contact darkening and moss at the trunk foot, plus a soft wet-bark rim glint near the runner.
     float foot = 1. - smoothstep(.72, 2.8, vLY);
     float rootCrease = foot * (0.5 + 0.5 * sin(vW.x * 3.7 + vW.z * 2.9));
@@ -493,6 +498,7 @@ precision highp sampler2D;
 precision highp sampler2DShadow;
 in vec2 vUv;
 uniform sampler2D tDiffuse;
+uniform sampler2D uBackdrop;
 uniform float blur, glitch, frost, lens, wave, waveT, warp, flash, hue, time;
 uniform float uSrcSrgb;
 uniform float uSharpen;
@@ -672,7 +678,7 @@ vec3 backdrop(vec2 uv, float sigmaDp) {
     float a = fi * 2.39996323;
     vec2 off = vec2(cos(a), sin(a)) * r * sg;
     float w = exp(-0.5 * r * r);
-    vec3 c = textureLod(tDiffuse, clamp(uv + off, vec2(0.002), vec2(0.998)), lod).rgb;
+    vec3 c = textureLod(uBackdrop, clamp(uv + off, vec2(0.002), vec2(0.998)), lod).rgb;
     acc += (uSrcSrgb > 0.5 ? srgbToLinear(c) : c) * w; wsum += w;
   }
   return acc / wsum;
@@ -735,6 +741,16 @@ void main() {
     c.r = tap(uv + off).r; c.b = tap(uv - off).b;
   }
 #endif
+#ifdef Q_PREPASS
+  // Run the expensive depth-of-field gather and volumetric ray march at scene resolution.
+  if (uDofK > 0.001) c = dofGather(uv, c);
+  float preDepth = texture(uDepth, uv).r;
+#ifdef Q_SHAFTS
+  if (uShaftSteps > 0.5) c = shafts(c, uv, preDepth);
+#endif
+  o = vec4(c, 1.0);
+  return;
+#else
 #ifdef Q_DEPTH
   if (uMotion > 0.001) {
     vec3 acc = c;
@@ -838,6 +854,7 @@ void main() {
   dn += (ign(fc * 1.37 + vec2(time * 61.0, 0.0)) - 0.5) * uGrain;
 #endif
   o = vec4(clamp(outS + dn, 0.0, 1.0), 1.0);
+#endif
 }
 """
     }
