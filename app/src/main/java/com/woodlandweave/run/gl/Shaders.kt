@@ -235,12 +235,8 @@ void main() {
   float geometryRoughness = max(max(dxy.x, dxy.y), dxy.z);
   vec3 albedo = uColor;
   float rough = uRough;
-  // Negative U marks branch vertices in the merged tree-body mesh. Decode the marker while
-  // preserving their original bark UVs; this keeps the old branch shading in one draw.
-  bool branchSurface = (uMode == 4) && vUv.x < 0.0;
-  float barkU = branchSurface ? (-vUv.x - 1.0) : vUv.x;
   // Texture rows start at the top of the image here, three.js flips them: undo that so maps and normals line up.
-  vec2 tuv = vec2(barkU * uUvScale.x, (1.0 - vUv.y) * uUvScale.y);
+  vec2 tuv = vec2(vUv.x * uUvScale.x, (1.0 - vUv.y) * uUvScale.y);
   if (uMaps > 0.5) {
     // The colour maps are SRGB8_ALPHA8 textures: the sampler already returns filtered linear light.
     albedo *= texture(uTex, tuv, uLodBias).rgb;
@@ -253,14 +249,8 @@ void main() {
   float outA = uAlpha;
   if (uMode == 3) {
     // Mossy patches, darker damp earth and leaf litter baked into the ground colour.
-#ifdef Q_GROUND_FAST
-    // The ground is a dedicated program: retain the broad moss/damp pattern with fewer transcendental ops.
-    float mossN = sin(vW.x * .21 + vW.z * .17) * sin(vW.z * .19 - vW.x * .13);
-    float litN = sin(vW.x * 1.3 + vW.z * .7);
-#else
     float mossN = sin(vW.x * .21 + sin(vW.z * .17) * 2.) * sin(vW.z * .19 - sin(vW.x * .13) * 1.7);
     float litN = sin(vW.x * 1.3 + vW.z * .7) * sin(vW.z * 1.1 - vW.x * .5);
-#endif
     float moss = smoothstep(.25, .75, mossN);
     // smoothstep requires edge0 < edge1; invert the result for the damp-area mask.
     float damp = 1.0 - smoothstep(-.6, .2, mossN);
@@ -278,7 +268,7 @@ void main() {
     rough = mix(rough, max(.055, rough * .30), wet);
     n = normalize(mix(n, vec3(0., 1., 0.), pud * .92));
 #endif
-  } else if (uMode == 4 && !branchSurface) {
+  } else if (uMode == 4) {
     // Contact darkening and moss at the trunk foot, plus a soft wet-bark rim glint near the runner.
     float foot = 1. - smoothstep(.72, 2.8, vLY);
     float rootCrease = foot * (0.5 + 0.5 * sin(vW.x * 3.7 + vW.z * 2.9));
@@ -326,14 +316,9 @@ void main() {
   else if (uMode != 5) sh *= mix(1.0, sunGap(vW, keyL, 0.30), 0.35 * uShadowK * step(0.5, uShadowOn));
 #endif
   // Dappled, drifting light: patches of sun / moonlight wander over trunks, ground, bushes and leaves.
-#ifdef Q_GROUND_FAST
-  // A broad world-space dapple is enough on the ground; the full two-axis field remains on objects.
-  float dap = smoothstep(-0.55, 0.65, sin(vW.x * 0.9 + vW.z * 0.8));
-#else
   float dapA = sin(vW.x * 0.9 + sin(vW.z * 0.7) * 1.6);   // static dapple: the light pools stay fixed in the world
   float dapB = sin(vW.z * 0.8 + sin(vW.x * 0.6) * 1.4);
   float dap = smoothstep(-0.55, 0.65, dapA * dapB);
-#endif
   // Ground receives a stronger, broader dapple so the incoming key light reads as soft pools
   // between the trees. Keep foliage contrast unchanged to avoid washing out the canopy.
   if (uMode == 3) sh *= mix(0.90, 1.10, dap);
