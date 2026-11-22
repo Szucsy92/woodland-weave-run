@@ -6,6 +6,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.exp
@@ -396,6 +397,63 @@ object Geo {
         return finishTube(pos, uv, rows, radial, centers)
     }
 
+    /**
+     * Builds a tapered, gently irregular tube along a 3D centreline. Used for roots, primary limbs
+     * and secondary forks. Every limb starts inside its parent surface, so no detached/floating ends
+     * are exposed when the tree is rendered translucently by the ghost power-up.
+     */
+    private fun sweptTube(points: List<FloatArray>, radii: FloatArray, radial: Int): MeshData {
+        require(points.size >= 2 && points.size == radii.size && radial >= 3)
+        val rows = points.size
+        val pos = FloatArray(rows * (radial + 1) * 3)
+        val uv = FloatArray(rows * (radial + 1) * 2)
+        val centers = FloatArray(rows * 3)
+        var n = 0
+        for (row in 0 until rows) {
+            val p = points[row]
+            val before = points[if (row == 0) 0 else row - 1]
+            val after = points[if (row == rows - 1) rows - 1 else row + 1]
+            var tx = after[0] - before[0]
+            var ty = after[1] - before[1]
+            var tz = after[2] - before[2]
+            val tl = sqrt(tx * tx + ty * ty + tz * tz).coerceAtLeast(1e-6f)
+            tx /= tl; ty /= tl; tz /= tl
+            // Pick a stable reference axis so the tube frame cannot flip on near-vertical limbs.
+            val refX = 0f
+            val refY = if (abs(ty) > .88f) 0f else 1f
+            val refZ = if (abs(ty) > .88f) 1f else 0f
+            var ux = ty * refZ - tz * refY
+            var uy = tz * refX - tx * refZ
+            var uz = tx * refY - ty * refX
+            val ul = sqrt(ux * ux + uy * uy + uz * uz).coerceAtLeast(1e-6f)
+            ux /= ul; uy /= ul; uz /= ul
+            val vx = ty * uz - tz * uy
+            val vy = tz * ux - tx * uz
+            val vz = tx * uy - ty * ux
+            centers[row * 3] = p[0]; centers[row * 3 + 1] = p[1]; centers[row * 3 + 2] = p[2]
+            for (side in 0..radial) {
+                val a = side.toFloat() / radial * 2f * PI.toFloat()
+                val wobble = 1f + sin(a * 3f + row * .73f) * .035f + sin(a * 5f - row * .41f) * .018f
+                val r = radii[row] * wobble
+                val ca = cos(a); val sa = sin(a)
+                pos[n * 3] = p[0] + (ux * ca + vx * sa) * r
+                pos[n * 3 + 1] = p[1] + (uy * ca + vy * sa) * r
+                pos[n * 3 + 2] = p[2] + (uz * ca + vz * sa) * r
+                uv[n * 2] = side.toFloat() / radial
+                uv[n * 2 + 1] = row.toFloat() / (rows - 1)
+                n++
+            }
+        }
+        return finishTube(pos, uv, rows, radial, centers)
+    }
+
+    /** Branch UV marker lets the shared bark shader avoid applying trunk-foot darkening to limbs. */
+    private fun markAsBranch(data: MeshData): MeshData {
+        val uv = data.uv.copyOf()
+        for (v in 0 until data.vertexCount) uv[v * 2] = -(uv[v * 2] + 1f)
+        return MeshData(data.pos.copyOf(), uv, data.idx).also { it.nor = data.nor.copyOf() }
+    }
+
     /** The plain branch, with enough sides to be round up close. */
     fun branchRound(radial: Int = 10, heightSegs: Int = 10): MeshData {
         val g = cylinder(.03f, .07f, 2.2f, radial, heightSegs)
@@ -451,9 +509,13 @@ object Geo {
         return MeshData(pos, uv, idx).also { it.nor = mergedNormals }
     }
 
-    /** One reusable trunk+roots+branches mesh. Per-tree placement, scale and sway are one instance transform. */
+    /**
+     * One reusable, low-cost tree-body mesh. Roots grow out of the buttress flare and sink into
+     * the soil; limbs begin inside the trunk and taper continuously into smaller forks. All pieces
+     * are merged once per quality tier, then each tree is submitted as one instanced draw.
+     */
     fun treeBody(lifelike: Boolean, shadow: Boolean = false): MeshData {
-        val parts = ArrayList<Pair<MeshData, FloatArray>>(11)
+        val parts = ArrayList<Pair<MeshData, FloatArray>>(20)
         fun add(data: MeshData, x: Double = 0.0, y: Double = 0.0, z: Double = 0.0,
                 rx: Double = 0.0, ry: Double = 0.0, rz: Double = 0.0,
                 sx: Double = 1.0, sy: Double = 1.0, sz: Double = 1.0, order: Int = Mat.XYZ) {
@@ -461,60 +523,77 @@ object Geo {
             Mat.compose(m, 0, x, y, z, rx, ry, rz, order, sx, sy, sz)
             parts += data to m
         }
-        val trunk = when {
-            shadow -> trunkLifelike(12, listOf(22f, 18f, 14f, 10f, 6.5f, 4.2f, 3.2f, 2.4f, 1.6f, .9f, .4f, 0f))
-            lifelike -> trunkLifelike(20)
-            else -> trunk()
-        }
+        val trunkRadial = if (shadow) 10 else if (lifelike) 20 else 12
+        val trunk = if (shadow) {
+            trunkLifelike(trunkRadial, listOf(22f, 18f, 14f, 10f, 6.5f, 4.2f, 3.2f, 2.4f, 1.6f, .9f, .4f, 0f))
+        } else trunkLifelike(trunkRadial)
         add(trunk)
 
-        val seedX = 0; val seedZ = 0
-        fun h(salt: Int) = hash(seedX, seedZ, salt)
-        val root = when {
-            shadow -> rootLifelike(6, 5)
-            lifelike -> rootLifelike(12, 8)
-            else -> root()
-        }
-        // Preserve the original five-root radial layout. The merged mesh keeps the same
-        // root count and angular spread as the pre-merge renderer.
+        fun h(salt: Int) = hash(0, 0, salt)
+        // The trunk's small centre-line wander, repeated here so roots and limbs enter the actual
+        // trunk surface rather than appearing beside it.
+        fun trunkX(y: Double) = sin(y * .3) * .09 + sin(y * .71 + 1.3) * .05
+        fun trunkZ(y: Double) = cos(y * .26 + .7) * .08
+
+        // Five broad radial roots retain the original five-way layout. Their proximal ends overlap
+        // the trunk flare; the first section is just above grade and the distal sections descend
+        // below grade, avoiding the old hovering-root appearance.
+        val rootRadial = if (shadow) 4 else if (lifelike) 8 else 5
+        val rootRadii = floatArrayOf(.17f, .18f, .14f, .07f, .012f)
+        val root = sweptTube(
+            listOf(
+                floatArrayOf(-.20f, 0f, 0f),
+                floatArrayOf(.18f, .08f, .012f),
+                floatArrayOf(.88f, .06f, .055f),
+                floatArrayOf(1.72f, -.08f, .10f),
+                floatArrayOf(2.55f, -.34f, .14f)
+            ), rootRadii, rootRadial
+        )
         for (r in 0 until 5) {
-            val ang = (r / 5.0) * PI * 2 + h(210 + r) * .9
-            val rx = cos(ang) * .2
-            val rz = -sin(ang) * .2
-            val rl = (.7 + h(230 + r) * .7)
-            add(root, rx, 1.2, rz, 0.0, ang, -.12 - h(220 + r) * .15,
-                rl * 1.2, 1.3, 1.3)
+            val ang = (r / 5.0) * PI * 2 + (h(210 + r) - .5) * .34
+            val rootScale = .88 + h(230 + r) * .24
+            add(root, cos(ang) * .20, 1.0, -sin(ang) * .20, 0.0, ang, 0.0,
+                rootScale * 1.05, .8, 1.0, Mat.XYZ)
         }
 
-        val branchRaw = when {
-            shadow -> branchRound(5, 4)
-            lifelike -> branchRound(8, 6)
-            else -> branch()
-        }
-        // Encode a per-vertex branch material marker in U (negative U). The shader decodes it,
-        // preserving the old mode-0 branch shading inside the single merged body draw.
-        val branch = MeshData(branchRaw.pos.copyOf(), branchRaw.uv.copyOf(), branchRaw.idx).also { merged ->
-            merged.nor = branchRaw.nor.copyOf()
-            for (v in 0 until branchRaw.vertexCount) merged.uv[v * 2] = -(branchRaw.uv[v * 2] + 1f)
-        }
-        // A small fixed lean is baked into the shared model. Individual trees receive an additional
-        // deterministic lean/yaw in their instance matrix, so the forest does not look grid-cloned.
-        val leanDir = .73
-        val leanAmt = .018
-        val lx = cos(leanDir) * leanAmt
-        val lz = sin(leanDir) * leanAmt
-        fun ox(hh: Double) = -hh * lz
-        fun oz(hh: Double) = hh * lx
-        for (b in 0 until 7) {
-            val seed = h(20 + b)
-            val upper = b < 3
-            val top = if (upper) 14.5 + h(60 + b) * 2.5 else 8.0 + h(60 + b) * 6.5
-            val tilt = if (upper) .55 + h(40 + b) * .75 else 1.05 + h(40 + b) * .5
-            val thick = if (upper) 1.0 else 2.2 + h(90 + b) * 1.4
-            val len = if (upper) .7 + seed * .6 else 1.1 + h(95 + b) * 1.1
-            val yaw = seed * PI * 2
-            add(branch, ox(top), top, oz(top), tilt, yaw, (h(80 + b) - .5) * .4,
-                thick, len, thick, Mat.YXZ)
+        // Main limbs are swept from points embedded in the trunk. Their bases are deliberately
+        // thicker than the visible trunk intersection; the branch only emerges after it crosses
+        // the bark silhouette, which prevents detached-looking starts in the translucent ghost pass.
+        val branchCount = if (shadow || !lifelike) 6 else 7
+        val branchRadial = if (shadow) 4 else if (lifelike) 8 else 5
+        for (b in 0 until branchCount) {
+            val angle = b / branchCount.toDouble() * PI * 2 + (h(202 + b) - .5) * .48
+            val dx = cos(angle); val dz = sin(angle)
+            val sideX = -dz; val sideZ = dx
+            val y = 8.0 + b * (if (branchCount == 7) 1.30 else 1.48) + h(60 + b) * .45
+            val length = 2.65 + h(95 + b) * 1.25
+            val bend = (h(80 + b) - .5) * .34
+            val cx = trunkX(y); val cz = trunkZ(y)
+            val points = listOf(
+                floatArrayOf((cx + dx * .13).toFloat(), y.toFloat(), (cz + dz * .13).toFloat()),
+                floatArrayOf((cx + dx * (length * .22) + sideX * bend * .18).toFloat(), (y + .14).toFloat(), (cz + dz * (length * .22) + sideZ * bend * .18).toFloat()),
+                floatArrayOf((cx + dx * (length * .48) + sideX * bend * .52).toFloat(), (y + .40).toFloat(), (cz + dz * (length * .48) + sideZ * bend * .52).toFloat()),
+                floatArrayOf((cx + dx * (length * .76) + sideX * bend).toFloat(), (y + .78).toFloat(), (cz + dz * (length * .76) + sideZ * bend).toFloat()),
+                floatArrayOf((cx + dx * length + sideX * bend * 1.15).toFloat(), (y + 1.16).toFloat(), (cz + dz * length + sideZ * bend * 1.15).toFloat())
+            )
+            val thickness = (.9 + h(90 + b) * .22).toFloat()
+            val radii = floatArrayOf(.215f, .17f, .125f, .075f, .022f).map { it * thickness }.toFloatArray()
+            add(markAsBranch(sweptTube(points, radii, branchRadial)))
+
+            // A small number of secondary forks add a natural silhouette without adding per-tree
+            // objects or draw calls. Their bases overlap the main limb instead of starting in air.
+            if (lifelike && !shadow && b % 2 == 0) {
+                val forkBase = points[2]
+                val forkDir = if (b % 4 == 0) 1.0 else -1.0
+                val fx = forkBase[0].toDouble(); val fy = forkBase[1].toDouble(); val fz = forkBase[2].toDouble()
+                val forkPoints = listOf(
+                    forkBase.copyOf(),
+                    floatArrayOf((fx + dx * .22 + sideX * .28 * forkDir).toFloat(), (fy + .13).toFloat(), (fz + dz * .22 + sideZ * .28 * forkDir).toFloat()),
+                    floatArrayOf((fx + dx * .50 + sideX * .66 * forkDir).toFloat(), (fy + .36).toFloat(), (fz + dz * .50 + sideZ * .66 * forkDir).toFloat()),
+                    floatArrayOf((fx + dx * .72 + sideX * .95 * forkDir).toFloat(), (fy + .62).toFloat(), (fz + dz * .72 + sideZ * .95 * forkDir).toFloat())
+                )
+                add(markAsBranch(sweptTube(forkPoints, floatArrayOf(.115f, .078f, .043f, .012f), max(5, branchRadial - 1))))
+            }
         }
         return mergeTreeParts(parts)
     }

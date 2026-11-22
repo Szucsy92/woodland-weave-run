@@ -324,9 +324,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val m = FloatArray(TREE_PARTS * 16)
         val seedX = floor(tree.x).toInt(); val seedZ = floor(tree.z).toInt()
         fun h(salt: Int) = hash(seedX, seedZ, salt)
-        // The body mesh stores each root at local Y=1.2 above its origin. Keep that
-        // anchor at ground+0.1 for every tree scale, instead of letting the Y scale
-        // lift large-tree roots above the terrain (or bury small-tree roots).
+        // The revised root mesh anchors at local Y=1.0. The body origin remains 1.2
+        // scaled units below grade so the buttress flare is buried and the roots emerge
+        // through the soil instead of hovering above it.
         val base = groundHeight(tree.x, tree.z) + 0.1 - 1.2 * tree.scale
         val species = floor(h(200) * 4).toInt()
         val girth = doubleArrayOf(.8, .9, 1.15, .68)[min(3, species)] * tree.scale
@@ -557,6 +557,10 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val g = e.ghostK.toFloat()
         bindMaps(barkTex, barkN, barkR)
         if (feat.wind) setSway(litProg, TREE_SWAY, 0f, 0f)
+        // The merged trunk/roots/limbs are closed outward-facing tubes. Cull their back faces in
+        // both normal and ghost rendering so translucent power-ups cannot reveal hidden limb backs.
+        GL.glEnable(GL.GL_CULL_FACE)
+        GL.glCullFace(GL.GL_BACK)
         if (g > 0f) {
             // Pass 1: establish the nearest merged tree-body surface before the ghost fade.
             GL.glColorMask(false, false, false, false)
