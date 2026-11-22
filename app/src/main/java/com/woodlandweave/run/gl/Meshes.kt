@@ -475,8 +475,10 @@ object Geo {
             lifelike -> rootLifelike(12, 8)
             else -> root()
         }
-        for (r in 0 until 3) {
-            val ang = (r / 3.0) * PI * 2 + h(210 + r) * .9
+        // Preserve the original five-root radial layout. The merged mesh keeps the same
+        // root count and angular spread as the pre-merge renderer.
+        for (r in 0 until 5) {
+            val ang = (r / 5.0) * PI * 2 + h(210 + r) * .9
             val rx = cos(ang) * .2
             val rz = -sin(ang) * .2
             val rl = (.7 + h(230 + r) * .7)

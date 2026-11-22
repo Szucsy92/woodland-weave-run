@@ -324,7 +324,10 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val m = FloatArray(TREE_PARTS * 16)
         val seedX = floor(tree.x).toInt(); val seedZ = floor(tree.z).toInt()
         fun h(salt: Int) = hash(seedX, seedZ, salt)
-        val base = groundHeight(tree.x, tree.z) - 1.1
+        // The body mesh stores each root at local Y=1.2 above its origin. Keep that
+        // anchor at ground+0.1 for every tree scale, instead of letting the Y scale
+        // lift large-tree roots above the terrain (or bury small-tree roots).
+        val base = groundHeight(tree.x, tree.z) + 0.1 - 1.2 * tree.scale
         val species = floor(h(200) * 4).toInt()
         val girth = doubleArrayOf(.8, .9, 1.15, .68)[min(3, species)] * tree.scale
         val leanAmt = if (species == 3) .07 else if (species == 2) .03 else .015
