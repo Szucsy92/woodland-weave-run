@@ -42,7 +42,7 @@ class Features(val quality: Quality, val depthOk: Boolean = true) {
     val smoothMeshes = r >= 1
     val crownNearDetail = 2
     /** Crowns beyond CROWN_LOD_DISTANCE: the near crown's vertices and normals on a quarter of the triangles, mostly inside the fog. */
-    val crownFarDetail = 1
+    val crownFarDetail = 2
     val rockDetail = 3
     val lifelikeTrees = r >= 1
 

@@ -71,6 +71,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         const val MIN_DENSITY = 1.0f
         const val START_DENSITY = 1.5f
         const val TREE_SWAY = .15f
+        /** The shadow map is redrawn every N frames (1 = every frame). 2 halves the shadow pass; set back to 1 if the shadows ever jump. */
+        const val SHADOW_EVERY = 1
     }
 
     // ---- GL objects ----
@@ -141,7 +143,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private val bHole = Sprites(1600, { holeGlowTex }, true, false)
     // One array for the whole run: the per-frame arrayOf() it replaces was a small allocation every frame.
     private val spriteBatches = arrayOf(bMist, bGlow, bGlowFog, bSpore, bHole)
-    // The key-light shadow map is re-rendered every second frame (the light is fixed and the map snaps to whole texels, so a
+    // The key-light shadow map is re-rendered every SHADOW_EVERY-th frame (the light is fixed and the map snaps to whole texels, so a
     // one-frame-old map is still exactly consistent with itself); the first frame after it (re)appears is always rendered.
     private var shadowTick = 0
     private var shadowValid = false
@@ -575,7 +577,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
 
         // Forest.
         if (!shadowActive) shadowValid = false
-        val shadowDue = shadowActive && (!shadowValid || (++shadowTick and 1) == 0)
+        val shadowDue = shadowActive && (!shadowValid || (++shadowTick % SHADOW_EVERY) == 0)
         fillInstances(s, cam, shadowDue)
         val smap = shadow
         if (smap != null && shadowActive) {
