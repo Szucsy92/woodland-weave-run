@@ -41,7 +41,13 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         const val GROUND_STEP = 200f / 112f
         const val K_TRUNK = 0; const val K_SHADOW = 1; const val K_ROOT = 2; const val K_BRANCH = 3
         const val K_CROWN = 4; const val K_ROCK = 5; const val K_PLANT = 6; const val K_CROWN_FAR = 7
-        const val KINDS = 8
+        const val K_TRUNK_1 = 8; const val K_TRUNK_2 = 9; const val K_TRUNK_3 = 10
+        const val K_CROWN_1 = 11; const val K_CROWN_2 = 12; const val K_CROWN_3 = 13
+        const val K_CROWN_FAR_1 = 14; const val K_CROWN_FAR_2 = 15; const val K_CROWN_FAR_3 = 16
+        const val KINDS = 17
+        val TRUNK_KINDS = intArrayOf(K_TRUNK, K_TRUNK_1, K_TRUNK_2, K_TRUNK_3)
+        val CROWN_KINDS = intArrayOf(K_CROWN, K_CROWN_1, K_CROWN_2, K_CROWN_3)
+        val CROWN_FAR_KINDS = intArrayOf(K_CROWN_FAR, K_CROWN_FAR_1, K_CROWN_FAR_2, K_CROWN_FAR_3)
         const val TREE_PARTS = 3
         const val HOLE_SLOTS = 6
         const val SWARM = 48
@@ -142,7 +148,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     // (fog, about 45 m) PLUS the longest shadow (a crown 22 m up at 23 degrees throws it about 50 m), so that every visible
     // patch of ground has all the trees that can shade it. Then a pool of light is a fact of the forest, not of the loaded part.
     private val SHADOW_FADE_START = 100f
-    private var shadowTreeBody: Mesh? = null
+    private var shadowTreeBodies: Array<Mesh?> = arrayOfNulls(4)
     private val SHADOW_FADE_END = 118f
     private val one: FloatBuffer = GlUtil.floatBuffer(16)
 
@@ -181,10 +187,19 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         spriteProg = GlUtil.program(Shaders.SPRITE_VS, Shaders.SPRITE_FS)
         locs.clear()
         meshes = arrayOf(
-            Mesh(Geo.treeBody(false), MAX_PROPS), Mesh(Geo.flatQuad(), MAX_PROPS * 2), Mesh(Geo.flatQuad(), 1),
-            Mesh(Geo.flatQuad(), 1), Mesh(Geo.treeCanopy(CROWN_NEAR_SUBDIVISIONS), MAX_PROPS),
+            Mesh(Geo.treeBody(false, variant = 0), MAX_PROPS), Mesh(Geo.flatQuad(), MAX_PROPS * 2),
+            Mesh(Geo.flatQuad(), 1), Mesh(Geo.flatQuad(), 1),
+            Mesh(Geo.treeCanopy(CROWN_NEAR_SUBDIVISIONS, variant = 0), MAX_PROPS),
             Mesh(Geo.icosphere(0), 1), Mesh(Geo.jittered(1, .35f, .4f, 47, FLAT_FACETS), MAX_PROPS),
-            Mesh(Geo.treeCanopy(CROWN_NEAR_SUBDIVISIONS, CROWN_FAR_SUBDIVISIONS), MAX_PROPS),
+            Mesh(Geo.treeCanopy(CROWN_NEAR_SUBDIVISIONS, CROWN_FAR_SUBDIVISIONS, 0), MAX_PROPS),
+            Mesh(Geo.treeBody(false, variant = 1), MAX_PROPS), Mesh(Geo.treeBody(false, variant = 2), MAX_PROPS),
+            Mesh(Geo.treeBody(false, variant = 3), MAX_PROPS),
+            Mesh(Geo.treeCanopy(CROWN_NEAR_SUBDIVISIONS, variant = 1), MAX_PROPS),
+            Mesh(Geo.treeCanopy(CROWN_NEAR_SUBDIVISIONS, variant = 2), MAX_PROPS),
+            Mesh(Geo.treeCanopy(CROWN_NEAR_SUBDIVISIONS, variant = 3), MAX_PROPS),
+            Mesh(Geo.treeCanopy(CROWN_NEAR_SUBDIVISIONS, CROWN_FAR_SUBDIVISIONS, 1), MAX_PROPS),
+            Mesh(Geo.treeCanopy(CROWN_NEAR_SUBDIVISIONS, CROWN_FAR_SUBDIVISIONS, 2), MAX_PROPS),
+            Mesh(Geo.treeCanopy(CROWN_NEAR_SUBDIVISIONS, CROWN_FAR_SUBDIVISIONS, 3), MAX_PROPS),
         )
         box = Mesh(Geo.box(1f, 1f, 1f), 4); orb = Mesh(Geo.icosphere(3), 4); holeBody = Mesh(Geo.icosphere(3), 4)
         cyl = Mesh(Geo.cylinder(.5f, .5f, 1f, 8, 1), 4); cone = Mesh(Geo.cylinder(0f, .5f, 1f, 5, 1), 4)
@@ -319,27 +334,28 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     }
 
     private fun treeProp(tree: Tree): Prop {
-        // One body instance (trunk + all roots + all branches), one canopy instance, one contact-shadow instance.
-        // Geometry is shared across the forest; only three per-tree transforms are streamed to GLES.
+        // One body instance (trunk + roots + branches), one canopy instance and one contact-shadow instance.
+        // Four deterministic species batches share geometry; only these three transforms are streamed per tree.
         val m = FloatArray(TREE_PARTS * 16)
         val seedX = floor(tree.x).toInt(); val seedZ = floor(tree.z).toInt()
         fun h(salt: Int) = hash(seedX, seedZ, salt)
-        // The revised root mesh anchors at local Y=1.0. The body origin remains 1.2
-        // scaled units below grade so the buttress flare is buried and the roots emerge
-        // through the soil instead of hovering above it.
-        val base = groundHeight(tree.x, tree.z) + 0.1 - 1.2 * tree.scale
-        val species = floor(h(200) * 4).toInt()
+        // The unified body keeps the original -1.1 m trunk anchor and unscaled height;
+        // its local root flare starts just above grade and sinks naturally into the soil.
+        // Keep the original species-independent trunk height: tree.scale changes girth and crown size only.
+        // The unified body's root flare starts at local Y~1.2, so the original -1.1 ground anchor keeps it seated.
+        val base = groundHeight(tree.x, tree.z) - 1.1
+        val species = floor(h(200) * 4).toInt().coerceIn(0, 3)
         val girth = doubleArrayOf(.8, .9, 1.15, .68)[min(3, species)] * tree.scale
         val leanAmt = if (species == 3) .07 else if (species == 2) .03 else .015
         val leanDir = h(201) * PI * 2
         val lx = cos(leanDir) * leanAmt
         val lz = sin(leanDir) * leanAmt
         val yaw = h(5) * 6
-        Mat.compose(m, 0, tree.x, base, tree.z, lx, yaw, lz, Mat.XYZ, girth, tree.scale, girth)
+        Mat.compose(m, 0, tree.x, base, tree.z, lx, yaw, lz, Mat.XYZ, girth, 1.0, girth)
         Mat.compose(m, 16, tree.x, groundHeight(tree.x, tree.z) + .05, tree.z,
             0.0, 0.0, 0.0, Mat.XYZ, 3.4 * tree.scale, 1.0, 3.4 * tree.scale)
         Mat.compose(m, 32, tree.x, base, tree.z, lx, yaw, lz, Mat.XYZ, tree.scale, tree.scale, tree.scale)
-        return Prop(tree.id, tree.x, tree.z, intArrayOf(K_TRUNK, K_SHADOW, K_CROWN), m)
+        return Prop(tree.id, tree.x, tree.z, intArrayOf(TRUNK_KINDS[species], K_SHADOW, CROWN_KINDS[species]), m)
     }
 
     private fun obstacleProp(o: Obstacle): Prop {
@@ -567,7 +583,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             GL.glDepthMask(true)
             GL.glDisable(GL.GL_BLEND)
             material(litProg, Palette.trunk, mode = 4, rough = .8f, maps = true, ns = .75f, uvx = 1.5f, uvy = 7f)
-            meshes[K_TRUNK].draw(bufs[K_TRUNK], counts[K_TRUNK])
+            TRUNK_KINDS.forEach { kind -> meshes[kind].draw(bufs[kind], counts[kind]) }
             GL.glColorMask(true, true, true, true)
 
             // Pass 2: shade only the nearest surfaces. Keep depth testing enabled but
@@ -577,19 +593,19 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             GL.glDepthFunc(GL.GL_LEQUAL)
             GL.glDepthMask(false)
             material(litProg, Palette.trunk, Palette.ghostGlow, g * .55f, 1f - g * .34f, mode = 4, rough = .8f, maps = true, ns = .75f, uvx = 1.5f, uvy = 7f)
-            meshes[K_TRUNK].draw(bufs[K_TRUNK], counts[K_TRUNK])
+            TRUNK_KINDS.forEach { kind -> meshes[kind].draw(bufs[kind], counts[kind]) }
             GL.glDepthMask(true)
             GL.glDepthFunc(GL.GL_LESS)
             GL.glDisable(GL.GL_BLEND)
         } else {
             material(litProg, Palette.trunk, mode = 4, rough = .8f, maps = true, ns = .75f, uvx = 1.5f, uvy = 7f)
-            meshes[K_TRUNK].draw(bufs[K_TRUNK], counts[K_TRUNK])
+            TRUNK_KINDS.forEach { kind -> meshes[kind].draw(bufs[kind], counts[kind]) }
         }
         // Joined canopy lobes are closed surfaces; back-face culling avoids drawing their hidden sides.
         GL.glEnable(GL.GL_CULL_FACE); GL.glCullFace(GL.GL_BACK)
         material(litProg, Palette.crown, mode = 5, rough = .9f)
-        meshes[K_CROWN].draw(bufs[K_CROWN], counts[K_CROWN])
-        meshes[K_CROWN_FAR].draw(bufs[K_CROWN_FAR], counts[K_CROWN_FAR])
+        CROWN_KINDS.forEach { kind -> meshes[kind].draw(bufs[kind], counts[kind]) }
+        CROWN_FAR_KINDS.forEach { kind -> meshes[kind].draw(bufs[kind], counts[kind]) }
         if (feat.wind) setSway(litProg, 0f, 0f, 0f)    // rocks and bushes stay put
         material(litProg, Palette.plant, mode = 6, rough = .9f)
         meshes[K_PLANT].draw(bufs[K_PLANT], counts[K_PLANT])
@@ -729,7 +745,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         while (true) {
             val defs = f.litDefines()
             val lp = GlUtil.programOrNull(Shaders.LIT_VS, Shaders.litFs(defs))
-            val gp = if (lp != 0) GlUtil.programOrNull(Shaders.GROUND_VS, Shaders.litFs(defs + "#define Q_GROUND_FAST\n")) else 0
+            val gp = if (lp != 0) GlUtil.programOrNull(Shaders.GROUND_VS, Shaders.litFs(defs)) else 0
             var sm: ShadowMap? = null; var sp = 0
             var ok = lp != 0 && gp != 0
             if (ok && f.shadows) {
@@ -762,20 +778,19 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     /** Low keeps the faceted web look; Medium and up get smooth, finely tessellated round shapes and shapely trees. */
     private fun rebuildTierMeshes(f: Features) {
         val flat = !f.smoothMeshes
-        val old = arrayListOf(meshes[K_CROWN], meshes[K_PLANT], meshes[K_CROWN_FAR], meshes[K_TRUNK], meshes[K_ROOT], meshes[K_BRANCH])
+        val old = (TRUNK_KINDS + CROWN_KINDS + CROWN_FAR_KINDS + intArrayOf(K_PLANT, K_ROOT, K_BRANCH)).distinct().map { meshes[it] }
         val nearDetail = if (flat) CROWN_NEAR_SUBDIVISIONS else f.crownNearDetail
         val farDetail = if (flat) CROWN_FAR_SUBDIVISIONS else f.crownFarDetail
-        meshes[K_CROWN] = Mesh(Geo.treeCanopy(nearDetail), MAX_PROPS)
+        for (variant in 0..3) {
+            meshes[TRUNK_KINDS[variant]] = Mesh(Geo.treeBody(f.lifelikeTrees, variant = variant), MAX_PROPS)
+            meshes[CROWN_KINDS[variant]] = Mesh(Geo.treeCanopy(nearDetail, variant = variant), MAX_PROPS)
+            meshes[CROWN_FAR_KINDS[variant]] = Mesh(Geo.treeCanopy(nearDetail, farDetail, variant), MAX_PROPS)
+        }
         meshes[K_PLANT] = Mesh(Geo.jittered(1, .35f, .4f, 47, flat), MAX_PROPS)
-        // Seven joined foliage lobes use the same anchors in the near and far LODs; far LOD drops only surface tessellation.
-        meshes[K_CROWN_FAR] = Mesh(Geo.treeCanopy(nearDetail, farDetail), MAX_PROPS)
-        meshes[K_TRUNK] = Mesh(Geo.treeBody(f.lifelikeTrees), MAX_PROPS)
-        // Legacy slots are no longer submitted; keep valid tiny meshes so the established kind indices remain stable.
         meshes[K_ROOT] = Mesh(Geo.flatQuad(), 1)
         meshes[K_BRANCH] = Mesh(Geo.flatQuad(), 1)
-        // Separate low-poly body silhouette keeps trunk, roots and branch shadows even when visible LOD changes.
-        shadowTreeBody?.release()
-        shadowTreeBody = if (f.shadows) Mesh(Geo.treeBody(true, shadow = true), MAX_PROPS) else null
+        shadowTreeBodies.forEach { it?.release() }
+        shadowTreeBodies = Array(4) { variant -> if (f.shadows) Mesh(Geo.treeBody(true, shadow = true, variant = variant), MAX_PROPS) else null }
         for (m in old) m.release()
         // Rings and posts: round on Medium and up.
         val oldRound = arrayListOf(cyl, torusA, torusB, torusC)
@@ -808,7 +823,10 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         // Crowns are NOT drawn into the shadow map: how much light the foliage lets through is the world-fixed sun-gap field
         // (SUN_GAP_FN in Shaders.kt), the same for ground, trunks, bushes and the beams. The map only holds the solid parts.
         GL.glUniform3f(loc(shadowProg, "uSway"), 0f, 0f, 0f)
-        shadowTreeBody?.draw(bufs[K_TRUNK], shadowCounts[K_TRUNK])
+        for (variant in 0..3) {
+            val kind = TRUNK_KINDS[variant]
+            shadowTreeBodies[variant]?.draw(bufs[kind], shadowCounts[kind])
+        }
         draw(K_PLANT, 0f)
         sm.end()
     }
@@ -1122,6 +1140,12 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     }
 
     // ---- per-frame instance assembly (culling, crown LOD, shockwave dissolve) ----
+    private fun isCrownKind(kind: Int): Boolean = kind in CROWN_KINDS || kind in CROWN_FAR_KINDS
+    private fun farCrownKind(kind: Int): Int {
+        val variant = CROWN_KINDS.indexOf(kind)
+        return if (variant >= 0) CROWN_FAR_KINDS[variant] else kind
+    }
+
     private fun emit(kind: Int, src: FloatArray, off: Int) {
         val b = bufs[kind]
         b.position(counts[kind] * 16); b.put(src, off, 16); counts[kind]++
@@ -1147,7 +1171,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             if (!dissolving) {
                 for (i in p.kinds.indices) {
                     val kind = p.kinds[i]
-                    emit(if (far && kind == K_CROWN) K_CROWN_FAR else kind, p.m, i * 16)
+                    emit(if (far) farCrownKind(kind) else kind, p.m, i * 16)
                 }
                 continue
             }
@@ -1168,7 +1192,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             Matrix.translateM(tg, 0, (-bx).toFloat(), (-by).toFloat(), (-bz).toFloat())
             for (i in p.kinds.indices) {
                 Matrix.multiplyMM(tmp2, 0, tg, 0, p.m, i * 16)
-                emit(if (far && p.kinds[i] == K_CROWN) K_CROWN_FAR else p.kinds[i], tmp2, 0)
+                emit(if (far) farCrownKind(p.kinds[i]) else p.kinds[i], tmp2, 0)
             }
         }
         // Shadow casters beyond the view. The light shines from ahead, so a tree 60 m away still throws its shadow (and a
@@ -1190,7 +1214,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 if (abs(-dx * lz + dz * lx) / ll > sideMax) continue
                 for (i in p.kinds.indices) {
                     val kd = p.kinds[i]
-                    if (kd == K_SHADOW || kd == K_PLANT || kd == K_ROCK || kd == K_CROWN || kd == K_CROWN_FAR) continue   // foliage: see the world-fixed sun-gap field
+                    if (kd == K_SHADOW || kd == K_PLANT || kd == K_ROCK || isCrownKind(kd)) continue   // foliage: see the world-fixed sun-gap field
                     emit(kd, p.m, i * 16)
                 }
             }
@@ -1339,7 +1363,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         private var slowFor = 0.0
         private var fastFor = 0.0
         private var cooldown = 6.0
-        private var ceiling = surfaceDensity
+        private val maxDensity = minOf(START_DENSITY, surfaceDensity)
+        private var ceiling = maxDensity
         private var ceilingHold = 0.0
 
         /** @return true when [density] changed. */
@@ -1347,7 +1372,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val d = dt.coerceIn(0.002, 0.25)
             avg += (d - avg) * 0.05
             cooldown = max(0.0, cooldown - d)
-            if (ceilingHold > 0) { ceilingHold -= d; if (ceilingHold <= 0) ceiling = surfaceDensity }
+            if (ceilingHold > 0) { ceilingHold -= d; if (ceilingHold <= 0) ceiling = maxDensity }
             val budget = 1.0 / 60
             if (avg > budget * 1.38) { slowFor += d; fastFor = 0.0 }
             else if (avg < budget * 1.12) { fastFor += d; slowFor = 0.0 }
@@ -1358,7 +1383,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 slowFor = 0.0; cooldown = 10.0; avg = budget
                 return true
             }
-            val cap = minOf(surfaceDensity, ceiling)
+            val cap = minOf(maxDensity, ceiling)
             if (fastFor > 5.0 && cooldown <= 0.0 && density < cap - 0.01f) {
                 density = minOf(cap, density + 0.125f)
                 fastFor = 0.0; cooldown = 3.0

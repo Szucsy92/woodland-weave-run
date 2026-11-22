@@ -512,9 +512,9 @@ object Geo {
     /**
      * One reusable, low-cost tree-body mesh. Roots grow out of the buttress flare and sink into
      * the soil; limbs begin inside the trunk and taper continuously into smaller forks. All pieces
-     * are merged once per quality tier, then each tree is submitted as one instanced draw.
+     * are merged once per species variant and submitted through a shared instanced batch.
      */
-    fun treeBody(lifelike: Boolean, shadow: Boolean = false): MeshData {
+    fun treeBody(lifelike: Boolean, shadow: Boolean = false, variant: Int = 0): MeshData {
         val parts = ArrayList<Pair<MeshData, FloatArray>>(20)
         fun add(data: MeshData, x: Double = 0.0, y: Double = 0.0, z: Double = 0.0,
                 rx: Double = 0.0, ry: Double = 0.0, rz: Double = 0.0,
@@ -529,7 +529,7 @@ object Geo {
         } else trunkLifelike(trunkRadial)
         add(trunk)
 
-        fun h(salt: Int) = hash(0, 0, salt)
+        fun h(salt: Int) = hash(variant, 0, salt)
         // The trunk's small centre-line wander, repeated here so roots and limbs enter the actual
         // trunk surface rather than appearing beside it.
         fun trunkX(y: Double) = sin(y * .3) * .09 + sin(y * .71 + 1.3) * .05
@@ -560,14 +560,14 @@ object Geo {
         // Primary limbs grow from broad collars buried in the stem. Their centre lines arc
         // outward and upward; a long radius falloff makes the joint organic instead of a pipe
         // inserted into the trunk. Secondary forks begin inside the parent limb for ghost safety.
-        val branchCount = if (shadow || !lifelike) 6 else 7
+        val branchCount = if (lifelike) 7 else 6
         val branchRadial = if (shadow) 4 else if (lifelike) 8 else 5
         for (b in 0 until branchCount) {
             val angle = b / branchCount.toDouble() * PI * 2 + (h(202 + b) - .5) * .42
             val dx = cos(angle); val dz = sin(angle)
             val sideX = -dz; val sideZ = dx
             val y = 8.1 + b * (if (branchCount == 7) 1.28 else 1.48) + h(60 + b) * .38
-            val length = 2.55 + h(95 + b) * 1.05
+            val length = (2.35 + h(95 + b) * 1.25) * doubleArrayOf(1.0, .88, 1.12, .96)[variant.coerceIn(0, 3)]
             val bend = (h(80 + b) - .5) * .48
             val cx = trunkX(y); val cz = trunkZ(y)
             val points = listOf(
@@ -602,13 +602,13 @@ object Geo {
     }
 
     /** Seven larger, overlapping foliage lobes joined into one low-overdraw canopy mesh. */
-    fun treeCanopy(nearSubdivisions: Int, farSubdivisions: Int? = null): MeshData {
+    fun treeCanopy(nearSubdivisions: Int, farSubdivisions: Int? = null, variant: Int = 0): MeshData {
         val parts = ArrayList<Pair<MeshData, FloatArray>>(7)
         val crownMesh = if (farSubdivisions == null) crown(nearSubdivisions, false)
             else crownLod(nearSubdivisions, farSubdivisions)
-        fun h(salt: Int) = hash(0, 0, salt)
+        fun h(salt: Int) = hash(variant, 0, salt)
         val leanDir = .73
-        val leanAmt = .018
+        val leanAmt = doubleArrayOf(.018, .045, .012, .030)[variant.coerceIn(0, 3)]
         val lx = cos(leanDir) * leanAmt
         val lz = sin(leanDir) * leanAmt
         fun ox(hh: Double) = -hh * lz
@@ -623,8 +623,8 @@ object Geo {
         add(ox(18.0), 18.0 + h(71) * 1.2, oz(18.0), .12, h(83) * PI * 2, -.08,
             3.35, 3.0, 3.45)
         for (c in 0 until 6) {
-            val angle = c / 6.0 * PI * 2 + h(74 + c) * .38
-            val spread = 2.65 + h(81 + c) * 1.25
+            val angle = c / 6.0 * PI * 2 + h(74 + c) * .48
+            val spread = (2.45 + h(81 + c) * 1.45) * doubleArrayOf(1.0, .90, 1.14, .96)[variant.coerceIn(0, 3)]
             val y = 11.5 + h(71 + c * 3) * 2.4
             val r = 2.65 + h(73 + c) * 1.0
             add(ox(y) + cos(angle) * spread, y, oz(y) + sin(angle) * spread,

@@ -81,7 +81,8 @@ class Features(val quality: Quality) {
     val ssaoStrength = 0.78f
     val shafts = r >= 2
     // Samples every 1.2 m, anchored in the world: thin beams between the trunks stay put while the runner moves.
-    val shaftSteps = 20
+    // The DOF/shaft pre-pass runs at scene resolution, so 28 steps cost less than the old 20-step full-screen march.
+    val shaftSteps = 28
     val shaftMax = 34f
     val fogDensity = 0.015f
     val dof = r >= 2
