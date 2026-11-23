@@ -214,7 +214,7 @@ class GameEngine(
         val level = levelOf(s.difficulty)
         var trees = treesAround(cx, cz, level.treeGap, s.universe)
         // Undergrowth bushes are disabled: keep the forest floor clear and avoid extra collision/draw work.
-        val obstacles = emptyList<Obstacle>()
+        var obstacles = emptyList<Obstacle>()
         if (s.mode == GameMode.FREEROAM) {
             secrets = secretsAround(s.x, s.z)
             gates = gatesAround(s.x, s.z)
