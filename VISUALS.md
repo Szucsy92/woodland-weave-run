@@ -152,16 +152,16 @@ only work that does not show is removed.
 The tree body is no longer a pile of separate tubes. `Geo.treeBody()` builds trunk, root flare and limbs as **one connected
 surface** (a single ring grid; each limb is stitched into a hole of the grid and shares the loop around it), so there are no
 buried collars, no overlapping tubes, no normal seams, and the normals are computed once. Roots are lobes of the flare's
-radius, not tubes. `Geo.treeCanopy()` drops the crown triangles that lie inside neighbouring lobes (never visible).
+radius, not tubes, and low (at most about a metre above the soil). `Geo.treeCanopy()` drops the crown triangles that lie
+inside neighbouring lobes (never visible).
 
-| Triangles per tree | before | after |
-|---|---|---|
-| Body, Low (oak / pine / ancient / birch) | 1456 / 1386 / 1566 / 1236 | 656 / 690 / 782 / 564 |
-| Body, Medium and High | 1960 / 1906 / 2242 / 1756 | 912 / 690 / 1092 / 612 |
-| Shadow-map body (High) | 512 | 144 / 96 / 168 / 96 |
-| Canopy (near) | 2240 / 1600 / 2560 / 1920 | 1911 / 1600 / 2034 / 1503 |
+No two trees are alike: every species has `SHAPES` = 4 different bodies (own batch each; sway, burl, taper, each root's
+place, reach, height and width, one to three limbs per level, each limb's place, length, thickness, rise or droop and curl),
+and every tree gets its own oval scale (trunk and roots), height and crown proportions from its position.
 
-Visual differences: limbs are slimmer (they used to be as thick as the trunk), limbs share the trunk's bark shading (the
-negative-U branch marker is gone: it cannot cross a shared join), and the shadow-map body has no limbs.
-`Geo.treeBodyLegacy()` is the old generator, kept only so `TreeMeshTest` can measure against it. Not compiled or run on a
-device where this was written: build with CI, check on hardware, and measure frame time before calling it cheaper.
+Triangles of a body are about 560-1150 (before: 1236-2242); the shadow-map body 100-170 (before: 512). The canopy loses about
+15-22% (oak, ancient, birch). Exact numbers vary with the shape; `TreeMeshTest` checks them against `treeBodyLegacy()`.
+
+Visual differences: limbs share the trunk's bark shading (the negative-U branch marker is gone: it cannot cross a shared join)
+and the shadow-map body has no limbs. Not compiled or run on a device where this was written: build with CI, check on
+hardware, and measure frame time before calling it cheaper.

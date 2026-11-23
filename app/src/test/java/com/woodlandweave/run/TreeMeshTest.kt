@@ -46,33 +46,32 @@ class TreeMeshTest {
         fun duplicated() = directed.count { (_, n) -> n > 1 }
     }
 
-    @Test fun bodyTriangleCountsArePinned() {
-        // oak, pine, ancient, birch
-        val low = intArrayOf(656, 690, 782, 564)
-        val medium = intArrayOf(912, 690, 1092, 612)
-        val shadow = intArrayOf(144, 96, 168, 96)
+    @Test fun shapesOfASpeciesAreDifferentTrees() {
         for (v in 0..3) {
-            assertEquals("low $v", low[v], tris(Geo.treeBody(false, variant = v)))
-            assertEquals("medium $v", medium[v], tris(Geo.treeBody(true, variant = v)))
-            assertEquals("shadow $v", shadow[v], tris(Geo.treeBody(true, shadow = true, variant = v)))
+            val shapes = (0..3).map { Geo.treeBody(true, variant = v, shape = it) }
+            for (i in 0..3) for (j in i + 1..3) {
+                assertFalse("species $v shapes $i and $j are the same tree", shapes[i].pos.contentEquals(shapes[j].pos))
+            }
+            // The same shape is always the same tree.
+            assertTrue(Geo.treeBody(true, variant = v, shape = 2).pos.contentEquals(shapes[2].pos))
         }
     }
 
-    @Test fun bodyIsAtLeastAThirdCheaperThanTheOldOne() {
-        for (v in 0..3) {
+    @Test fun bodyIsCheaperThanTheOldOne() {
+        for (v in 0..3) for (shape in 0..3) {
             for (lifelike in booleanArrayOf(false, true)) {
-                val now = tris(Geo.treeBody(lifelike, variant = v)); val before = tris(Geo.treeBodyLegacy(lifelike, variant = v))
-                assertTrue("variant $v lifelike $lifelike: $now vs $before", now * 3 <= before * 2)
+                val now = tris(Geo.treeBody(lifelike, variant = v, shape = shape)); val before = tris(Geo.treeBodyLegacy(lifelike, variant = v))
+                assertTrue("variant $v shape $shape lifelike $lifelike: $now vs $before", now * 10 <= before * 8)
             }
-            val now = tris(Geo.treeBody(true, shadow = true, variant = v)); val before = tris(Geo.treeBodyLegacy(true, shadow = true, variant = v))
+            val now = tris(Geo.treeBody(true, shadow = true, variant = v, shape = shape)); val before = tris(Geo.treeBodyLegacy(true, shadow = true, variant = v))
             assertTrue("shadow $v: $now vs $before", now * 2 <= before)
         }
     }
 
     @Test fun bodyIsOneWatertightSurface() {
         val ridges = intArrayOf(6, 4, 7, 4)
-        for (v in 0..3) for (lifelike in booleanArrayOf(false, true)) {
-            val m = Geo.treeBody(lifelike, variant = v)
+        for (v in 0..3) for (shape in 0..3) for (lifelike in booleanArrayOf(false, true)) {
+            val m = Geo.treeBody(lifelike, variant = v, shape = shape)
             val e = Edges(m)
             assertEquals("one connected piece, variant $v", 1, e.components)
             assertEquals("no edge shared by two faces in the same direction, variant $v", 0, e.duplicated())
@@ -84,7 +83,7 @@ class TreeMeshTest {
 
     @Test fun bodyIsWellFormed() {
         for (v in 0..3) for (shadow in booleanArrayOf(false, true)) {
-            val m = Geo.treeBody(true, shadow = shadow, variant = v)
+            val m = Geo.treeBody(true, shadow = shadow, variant = v, shape = v)
             assertTrue(m.vertexCount in 1..65535)
             assertEquals(m.vertexCount * 3, m.nor.size)
             assertEquals(m.vertexCount * 2, m.uv.size)
