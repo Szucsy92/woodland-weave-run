@@ -245,24 +245,34 @@ void main() {
   bool branchSurface = barkSurface && vUv.x < 0.0;
   // Ground and other mapped surfaces use their own full texture UVs.
   // Only tree bodies decode the three species tiles packed into the bark atlas.
-  vec2 tuv = vec2(vUv.x * uUvScale.x, (1.0 - vUv.y) * uUvScale.y);
+  vec2 tuv = vec2(vUv.x * uUvScale.x, (1.0 - vUv.y) * uUvScale.y);   // where the maps are sampled
+  vec2 cuv = tuv;                                                     // continuous coordinate (no fract): gradients, tangent frame
+  vec2 puv = tuv;
   if (barkSurface) {
     float barkU = branchSurface ? (-vUv.x - 1.0) : vUv.x;
-    // Decode the species before repeating U, then stay inside its padded tile
-    // to avoid cross-species bleed at mip levels.
     float barkTile = clamp(floor(barkU * 3.0), 0.0, 2.0);
     float barkLocalU = clamp(barkU * 3.0 - barkTile, 0.0, 1.0);
-    float barkRepeatU = fract(barkLocalU * uUvScale.x);
-    float barkAtlasU = (barkTile + mix(0.017, 0.983, barkRepeatU)) / 3.0;
-    tuv.x = barkAtlasU;
+    // Whole repeats around the stem (oak 2, pine 1, ancient 2; keep in sync with TREE_BARK_REPEAT in Meshes): the bark closes
+    // without a seam, at about the same texel density across and along the stem. (1.5 left a seam down the back of every trunk.)
+    float barkRep = barkTile < 0.5 ? 2.0 : (barkTile < 1.5 ? 1.0 : 2.0);
+    cuv = vec2(barkLocalU * barkRep, tuv.y);
+    // The sample stays inside the species' padded tile (no cross-species bleed in the mips).
+    tuv.x = (barkTile + mix(0.017, 0.983, fract(cuv.x))) / 3.0;
+    puv = vec2((barkTile + 0.017 + 0.966 * cuv.x) / 3.0, tuv.y);
   }
   if (uMaps > 0.5) {
+    // fract() jumps at every repeat; with plain texture() the hardware then picks a tiny mip along that line (a thin blurred
+    // streak) and the tangent frame flips there. Sample with gradients from the continuous coordinate instead.
+    vec2 gx = dFdx(cuv), gy = dFdy(cuv);
+    if (barkSurface) { gx.x *= 0.322; gy.x *= 0.322; }   // 0.966 / 3: atlas width covered by one repeat
+    float lodK = exp2(uLodBias);
+    gx *= lodK; gy *= lodK;
     // The colour maps are SRGB8_ALPHA8 textures: the sampler already returns filtered linear light.
-    albedo *= texture(uTex, tuv, uLodBias).rgb;
-    rough *= texture(uRoughTex, tuv, uLodBias).g;
-    vec3 mn = texture(uNorm, tuv, uLodBias).xyz * 2.0 - 1.0;
+    albedo *= textureGrad(uTex, tuv, gx, gy).rgb;
+    rough *= textureGrad(uRoughTex, tuv, gx, gy).g;
+    vec3 mn = textureGrad(uNorm, tuv, gx, gy).xyz * 2.0 - 1.0;
     mn.xy *= uNormalScale;
-    n = perturb(n, vW, vec2(tuv.x, -tuv.y), mn);
+    n = perturb(n, vW, vec2(puv.x, -puv.y), mn);
   }
   vec3 emissive = uEmissive;
   float outA = uAlpha;

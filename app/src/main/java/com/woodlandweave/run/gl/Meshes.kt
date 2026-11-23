@@ -677,6 +677,8 @@ object Geo {
     private val TREE_FLUTE = doubleArrayOf(0.04,  0.04,  0.05)                     // Hosszanti barázdák
     private val TREE_SWELL = doubleArrayOf(1.0,  1.0,  0.9)                         // Kéreg duzzanata
     private val TREE_BURL = doubleArrayOf(1.0,  1.0,  0.8)                          // Göcs mérete
+    private val TREE_BARK_REPEAT = intArrayOf(2,  1,  2)                              // Kéreg-ismétlés a törzs körül (a Shaders.kt-ban lévő táblával egyezzen)
+    private const val TREE_BARK_PER_M = 0.65                                       // ismétlés / méter kerület: így az ágon is négyzetes a texel
     private val TREE_RADIAL = intArrayOf(3,  3,  4)                                   // Körbeosztás (gyökerenként)
     private val TREE_FLARE_TOP = doubleArrayOf(5.0,  5.0,  6.0)                     // Sűrű gyűrűk magassága
     private val TREE_ROOT_W = doubleArrayOf(1.40,  .85,  1.85)          // (megtartva a régi kód kompatibilitásáért)
@@ -702,6 +704,11 @@ object Geo {
         fun x(i: Int) = pos[i * 3].toDouble()
         fun y(i: Int) = pos[i * 3 + 1].toDouble()
         fun z(i: Int) = pos[i * 3 + 2].toDouble()
+    }
+
+    private fun dist3(a: DoubleArray, b: DoubleArray): Double {
+        val x = a[0] - b[0]; val y = a[1] - b[1]; val z = a[2] - b[2]
+        return sqrt(x * x + y * y + z * z)
     }
 
     private fun wrapAngle(x: Double) = (((x + PI) % (2 * PI)) + 2 * PI) % (2 * PI) - PI
@@ -966,9 +973,7 @@ object Geo {
                 holeR /= kb
                 val round = minOf(1.0, (sMax - sMin) * 1.15 / maxOf(1e-6, yMax - yMin))
                 val ring = Array(ringCount) { IntArray(kb) }
-                var meanU = 0.0
-                for (v in loop) meanU += sb.uv[v * 2]
-                meanU /= kb
+                val rp = Array(ringCount) { Array(kb) { DoubleArray(3) } }
                 for (j2 in 0 until ringCount) {
                     val vScale = if (j2 == 0) (1.0 + round) / 2 else round
                     val ringScale = (.8 - .76 * j2 / ringCount) * thick
@@ -977,11 +982,34 @@ object Geo {
                         val rv = rotateOnto(
                             doubleArrayOf((sb.x(lv) - px) * ringScale, (sb.y(lv) - py) * vScale * ringScale, (sb.z(lv) - pz) * ringScale),
                             n0, doubleArrayOf(tx[j2], ty[j2], tz[j2]))
-                        val u = sb.uv[lv * 2].toDouble(); val v = sb.uv[lv * 2 + 1].toDouble()
-                        ring[j2][i] = sb.vertex(cx[j2] + rv[0], cy[j2] + rv[1], cz[j2] + rv[2], u, v + along[j2] * len / 22.0)
+                        rp[j2][i][0] = cx[j2] + rv[0]; rp[j2][i][1] = cy[j2] + rv[1]; rp[j2][i][2] = cz[j2] + rv[2]
                     }
                 }
-                val tip = sb.vertex(cx[ringCount], cy[ringCount], cz[ringCount], meanU, sb.uv[loop[0] * 2 + 1] + len / 22.0)
+                // Bark UVs of the limb. The hole loop's own UVs only span a few trunk columns, which smeared the bark
+                // about 4-5x around the limb. The new rings get a wrap of their own instead: a whole number of tile
+                // repeats around the limb (so it closes), at the trunk's texel density, with the seam on the underside.
+                var meanU = 0.0
+                for (v in loop) meanU += sb.uv[v * 2]
+                meanU /= kb
+                val rep = TREE_BARK_REPEAT[sp]
+                val seam = we / 2
+                val arc = DoubleArray(kb)
+                var per = 0.0
+                for (t in 1 until kb) {
+                    per += dist3(rp[0][(seam + t - 1) % kb], rp[0][(seam + t) % kb])
+                    arc[(seam + t) % kb] = per
+                }
+                per = maxOf(1e-6, per + dist3(rp[0][(seam + kb - 1) % kb], rp[0][seam]))
+                val reps = minOf(rep, maxOf(1, Math.round(per * TREE_BARK_PER_M).toInt()))
+                val du = reps.toDouble() / rep
+                val u0 = (meanU - du / 2).coerceIn(0.0, 1.0 - du)
+                val vC = py / 22.0
+                for (j2 in 0 until ringCount) {
+                    for (i in 0 until kb) {
+                        ring[j2][i] = sb.vertex(rp[j2][i][0], rp[j2][i][1], rp[j2][i][2], u0 + arc[i] / per * du, vC + along[j2] * len / 22.0)
+                    }
+                }
+                val tip = sb.vertex(cx[ringCount], cy[ringCount], cz[ringCount], u0 + du / 2, vC + len / 22.0)
                 // The loop runs counter-clockwise seen from outside, so the faces built in loop order already face outward.
                 val rings = arrayOf(loop) + ring
                 for (j2 in 0 until ringCount) {
@@ -1031,7 +1059,15 @@ object Geo {
                                 (base[2] + ez * fl * k2 + dz * fl * .15 * k2 * k2).toFloat())
                         }
                         val fr = limbRadiusAt(s) * TREE_FORK_THICK[sp]
-                        forks += sweptTube(pts, floatArrayOf(fr.toFloat(), (fr * .72).toFloat(), (fr * .42).toFloat(), .012f), if (lifelike) 8 else 5)
+                        val fork = sweptTube(pts, floatArrayOf(fr.toFloat(), (fr * .72).toFloat(), (fr * .42).toFloat(), .012f), if (lifelike) 8 else 5)
+                        // The tube's own UVs run 0..1 over a fork that is only about a metre long (7 tiles along it, 14x too
+                        // dense): one tile around, and the tile height follows the fork's real length.
+                        val forkV0 = py / 22.0 + s * len / 22.0
+                        for (q in 0 until fork.vertexCount) {
+                            fork.uv[q * 2] = fork.uv[q * 2] / rep
+                            fork.uv[q * 2 + 1] = (forkV0 + fork.uv[q * 2 + 1] * fl / 22.0).toFloat()
+                        }
+                        forks += fork
                     }
                 }
             }
