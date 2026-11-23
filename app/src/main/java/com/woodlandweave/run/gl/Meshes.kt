@@ -1071,7 +1071,15 @@ object Geo {
             capMesh.nor = cn
             parts += capMesh to m
         }
-        return mergeTreeParts(parts)
+        val merged = mergeTreeParts(parts)
+        // Pack this species into its own horizontal atlas tile. Keep a tiny inset at both edges so
+        // bilinear filtering and mipmaps cannot bleed the neighbouring species into this bark.
+        // The shader decodes the tile and applies the existing 1.5x horizontal repeat inside it.
+        for (v in 0 until merged.vertexCount) {
+            val localU = merged.uv[v * 2].coerceIn(0f, 1f)
+            merged.uv[v * 2] = ((sp + 0.001f + localU * 0.998f) / 3f)
+        }
+        return merged
     }
 
     /** How far a crown lump bulges in the unit-sphere direction (x, y, z); the lumpiness [crown] applies to every vertex. */

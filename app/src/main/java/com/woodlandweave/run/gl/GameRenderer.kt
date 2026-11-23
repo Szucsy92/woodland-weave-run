@@ -236,7 +236,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, vb[1]); GL.glBufferData(GL.GL_ELEMENT_ARRAY_BUFFER, gi.size * 2, ib, GL.GL_STATIC_DRAW)
         GL.glBindVertexArray(0)
 
-        barkTex = GlUtil.assetTexture(context, "wet-bark.jpg", srgb = true); barkN = GlUtil.assetTexture(context, "bark-normal.jpg"); barkR = GlUtil.assetTexture(context, "bark-rough.jpg")
+        // One compact three-species atlas: the same three texture units and one material batch as before.
+        // Each species occupies a padded 256x512 tile; no per-tree texture binds or extra draw calls.
+        barkTex = GlUtil.assetTexture(context, "tree-bark-atlas.jpg", srgb = true)
+        barkN = GlUtil.assetTexture(context, "tree-bark-normal-atlas.jpg")
+        barkR = GlUtil.assetTexture(context, "tree-bark-rough-atlas.jpg")
         floorTex = GlUtil.assetTexture(context, "wet-ground.jpg", srgb = true); floorN = GlUtil.assetTexture(context, "ground-normal.jpg"); floorR = GlUtil.assetTexture(context, "ground-rough.jpg")
         glowLow = GlUtil.glowTexture(floatArrayOf(0f, .2f, 1f), intArrayOf(255, 153, 0))
         // Spores: a soft, peaked mote (no flat plateau, so no visible disc edge), identical on every tier.

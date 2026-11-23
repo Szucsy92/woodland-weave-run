@@ -243,8 +243,14 @@ void main() {
   // preserving their original bark UVs; this keeps the old branch shading in one draw.
   bool branchSurface = (uMode == 4) && vUv.x < 0.0;
   float barkU = branchSurface ? (-vUv.x - 1.0) : vUv.x;
+  // Three compact species tiles share one atlas. Decode the species before repeating U,
+  // then keep the sample inside its padded tile to avoid cross-species bleed at mip levels.
+  float barkTile = clamp(floor(barkU * 3.0), 0.0, 2.0);
+  float barkLocalU = clamp(barkU * 3.0 - barkTile, 0.0, 1.0);
+  float barkRepeatU = fract(barkLocalU * uUvScale.x);
+  float barkAtlasU = (barkTile + mix(0.017, 0.983, barkRepeatU)) / 3.0;
   // Texture rows start at the top of the image here, three.js flips them: undo that so maps and normals line up.
-  vec2 tuv = vec2(barkU * uUvScale.x, (1.0 - vUv.y) * uUvScale.y);
+  vec2 tuv = vec2(barkAtlasU, (1.0 - vUv.y) * uUvScale.y);
   if (uMaps > 0.5) {
     // The colour maps are SRGB8_ALPHA8 textures: the sampler already returns filtered linear light.
     albedo *= texture(uTex, tuv, uLodBias).rgb;
