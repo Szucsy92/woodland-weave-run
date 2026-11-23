@@ -625,8 +625,8 @@ object Geo {
     private val TREE_RIDGES = intArrayOf(6, 4, 6, 4)                      // root lobes per species (oak, pine, ancient, birch)
     private val TREE_TRUNK_SCALE = doubleArrayOf(1.0, .80, 1.30, .70)
     private val TREE_LEAN = doubleArrayOf(.006, .014, .032, .010)
-    private val TREE_ROOT_LEN = doubleArrayOf(.78, .66, .92, .64)
-    private val TREE_ROOT_W = doubleArrayOf(.78, .68, .88, .64)
+    private val TREE_ROOT_LEN = doubleArrayOf(.88, .74, 1.02, .72)
+    private val TREE_ROOT_W = doubleArrayOf(.84, .74, .94, .70)
     private val TREE_LIMB_THICK = doubleArrayOf(1.0, .82, 1.28, .72)
     private val TREE_LIMB_LEN = doubleArrayOf(1.0, .9, 1.16, .92)
     private val TREE_LIMB_COUNT = intArrayOf(8, 9, 9, 6)
@@ -681,17 +681,17 @@ object Geo {
         init {
             val used = BooleanArray(n)
             for (i in 0 until k) {
-                var c = Math.round((i + (r(210 + i) - .5) * .7) * n / k).toInt() % n
+                var c = Math.round((i + (r(210 + i) - .5) * 1.05) * n / k).toInt() % n
                 if (c < 0) c += n
                 while (used[c]) c = (c + 1) % n
                 used[c] = true
                 rootPhi[i] = c.toDouble() / n * 2 * PI
             }
         }
-        private val rootReach = DoubleArray(k) { .88 * TREE_ROOT_LEN[sp] * (.52 + r(230 + it) * .48) * (if (r(250 + it) < .18) .48 else 1.0) }
+        private val rootReach = DoubleArray(k) { .98 * TREE_ROOT_LEN[sp] * (.52 + r(230 + it) * .48) * (if (r(250 + it) < .18) .48 else 1.0) }
         private val rootHeight = DoubleArray(k) { .5 + r(260 + it) * .4 }
         private val rootSteep = DoubleArray(k) { 1.5 + r(270 + it) * .7 }
-        private val rootSigma = (2 * PI / n) * .82
+        private val rootSigma = (2 * PI / n) * .90
 
         fun cx(y: Double) = sin(y * .3 + ph[0]) * swayA + sin(y * .71 + ph[1]) * swayB
         fun cz(y: Double) = cos(y * .26 + ph[2]) * swayZ + sin(y * .5 + ph[3]) * .03
@@ -722,11 +722,12 @@ object Geo {
                 })
                 ext = maxOf(ext, rootReach[i] * f * exp(-(d / rootSigma) * (d / rootSigma)))
             }
-            // Close the underground end as a softly rounded root mass, not a flat cut.
-            // The final 0.55 m contracts the whole cross-section to a tiny rounded tip.
+            // Keep a broad, softly rounded underground heel. A tiny terminal radius
+            // made the whole root base converge into a cone; retain most of the
+            // trunk section at the lowest ring and close it with a shallow dome.
             val bottomT = ((y + 1.8) / .55).coerceIn(0.0, 1.0)
             val bottomSmooth = bottomT * bottomT * (3.0 - 2.0 * bottomT)
-            val bottomClosure = .035 + .965 * bottomSmooth
+            val bottomClosure = .62 + .38 * bottomSmooth
             return (trunk + ext) * bottomClosure
         }
     }
@@ -857,10 +858,11 @@ object Geo {
             }
         }
 
-        // Rounded underground closure: the bottom ring is tiny and a centre fan seals it.
-        // This keeps the root mass volumetric when the shockwave exposes it from below.
+        // Shallow domed underground heel: keep a broad bottom ring, then close it
+        // slightly below the ring centre. This avoids both an open stump and a sharp cone.
         if (!shadow) {
-            val bottomCenter = sb.vertex(ts.cx(ys[0]), ys[0], ts.cz(ys[0]), .5, ys[0] / 22.0)
+            val bottomCenterY = ys[0] - .18
+            val bottomCenter = sb.vertex(ts.cx(bottomCenterY), bottomCenterY, ts.cz(bottomCenterY), .5, bottomCenterY / 22.0)
             for (c in 0 until n) sb.tri(bottomCenter, c + 1, c)
         }
         val yTop = ys[rows - 1]
