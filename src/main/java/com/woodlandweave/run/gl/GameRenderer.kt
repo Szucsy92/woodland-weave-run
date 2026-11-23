@@ -92,8 +92,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var groundVao = 0; private var groundIndexCount = 0
     private var barkTex = 0; private var barkN = 0; private var barkR = 0
     private var floorTex = 0; private var floorN = 0; private var floorR = 0
-    private var glowLow = 0; private var sporeLow = 0; private var glowSmooth = 0; private var sporeSmooth = 0
-    private var glowTex = 0; private var sporeTex = 0; private var holeGlowTex = 0; private var ringTex = 0; private var whiteTex = 0
+    private var glowLow = 0; private var glowSmooth = 0
+    private var glowTex = 0; private var holeGlowTex = 0; private var ringTex = 0; private var whiteTex = 0
     private var spriteVao = 0; private var spriteVbo = 0
     private val post = PostFx()
     private val surfaceDensity = minOf(context.resources.displayMetrics.density, GameView.MAX_DENSITY)
@@ -140,15 +140,14 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             count++
         }
     }
-    // `fog` mirrors three.js's SpriteMaterial.fog of the web build: forest lights, spores and black-hole glow
+    // `fog` mirrors three.js's SpriteMaterial.fog of the web build: forest lights and black-hole glow
     // opt out, mist, orb auras and secret glows do not.
     private val bGlow = Sprites(256, { glowTex }, true, false)
     private val bGlowFog = Sprites(64, { glowTex }, true, true)
     private val bMist = Sprites(16, { glowTex }, false, true)
-    private val bSpore = Sprites(128, { sporeTex }, true, false)
     private val bHole = Sprites(1600, { holeGlowTex }, true, false)
     // One array for the whole run: the per-frame arrayOf() it replaces was a small allocation every frame.
-    private val spriteBatches = arrayOf(bMist, bGlow, bGlowFog, bSpore, bHole)
+    private val spriteBatches = arrayOf(bMist, bGlow, bGlowFog, bHole)
     // The key-light shadow map is re-rendered every SHADOW_EVERY-th frame (the light is fixed and the map snaps to whole texels, so a
     // one-frame-old map is still exactly consistent with itself); the first frame after it (re)appears is always rendered.
     private var shadowTick = 0
@@ -243,15 +242,12 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         barkR = GlUtil.assetTexture(context, "tree-bark-rough-atlas.jpg")
         floorTex = GlUtil.assetTexture(context, "wet-ground.jpg", srgb = true); floorN = GlUtil.assetTexture(context, "ground-normal.jpg"); floorR = GlUtil.assetTexture(context, "ground-rough.jpg")
         glowLow = GlUtil.glowTexture(floatArrayOf(0f, .2f, 1f), intArrayOf(255, 153, 0))
-        // Spores: a soft, peaked mote (no flat plateau, so no visible disc edge), identical on every tier.
-        sporeLow = GlUtil.smoothGlowTexture { r -> sporeProfile(r) }
         // Medium and High: the same glows with smooth profiles (no visible kink where the gradient changes slope).
         glowSmooth = GlUtil.smoothGlowTexture { r ->
             val s = r * r * (3f - 2f * r)
             .62f * (1f - s).toDouble().pow(.9).toFloat() + .38f * kotlin.math.exp(-(r / .12f) * (r / .12f))
         }
-        sporeSmooth = GlUtil.smoothGlowTexture { r -> sporeProfile(r) }
-        glowTex = glowLow; sporeTex = sporeLow
+        glowTex = glowLow
         holeGlowTex = GlUtil.glowTexture(floatArrayOf(0f, .35f, 1f), intArrayOf(255, 89, 0))
         ringTex = GlUtil.ringTexture(); whiteTex = GlUtil.whiteTexture()
 
@@ -346,13 +342,6 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val girth = doubleArrayOf(.8, .9, 1.15)[species] * t.scale
             treeX[i] = t.x.toFloat(); treeZ[i] = t.z.toFloat(); treeR[i] = (.42 * girth + .08).toFloat()
         }
-    }
-
-    /** Gaussian core with a smooth outer fade: peaks softly in the middle and reaches exactly 0 at the sprite edge. */
-    private fun sporeProfile(r: Float): Float {
-        val core = kotlin.math.exp(-(r / .33f) * (r / .33f))
-        val t = ((r - .6f) / .4f).coerceIn(0f, 1f)
-        return .75f * core * (1f - t * t * (3f - 2f * t))
     }
 
     private fun treeProp(tree: Tree): Prop {
@@ -821,8 +810,6 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         locs.clear()
         rebuildTierMeshes(feat)
         glowTex = if (feat.smoothMeshes) glowSmooth else glowLow
-        // Spores always use the smooth, broad-core profile, even on Low; mesh quality is unrelated to sprite filtering.
-        sporeTex = sporeSmooth
         appliedQuality = q
         // A tier the device could not reach must not be retried every frame.
         if (feat.quality.ordinal < q.ordinal) qualityCap = feat.quality
@@ -1289,7 +1276,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
 
     // ---- sprites ----
     private fun buildSprites(s: Simulation, e: GameEngine) {
-        for (b in arrayOf(bGlow, bGlowFog, bMist, bSpore, bHole)) if (b !== bHole) b.clear()
+        for (b in arrayOf(bGlow, bGlowFog, bMist, bHole)) if (b !== bHole) b.clear()
         // bHole also carries the relics' glow queued earlier in this frame, so it is cleared after drawing.
         val t = s.elapsed
         val ember = surviveStage(s) == SurviveStage.RED
@@ -1310,22 +1297,23 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 bGlow.add(px, py, lz, size, size, cols[i], (if (high) .14 else .66) * (1 - own) * flick * haloDay * far, py - groundHeight(px, lz))
             }
         }
-        // Spores.
-        for (i in 0 until GameEngine.SPORE_COUNT) {
-            val sp = e.spores.getOrNull(i) ?: break
-            val seed = i * 7.13
-            val mx = sp.x + sin(t * .23 + seed * 2) * .6; val mz = sp.z + cos(t * .19 + seed) * .6
-            val dist = hypot(mx - s.x, mz - s.z)
-            val tw = .5 + .5 * sin(t * (.35 + hash(i, 2, 8) * .35) + seed * 3)
-            val roll = hash(i, 3, 10)
-            val col = if (ember) Palette.ember else if (roll < .08) Palette.purple else if (roll < .16) Palette.green else Palette.lemon
-            // Only a slight growth with distance; the soft profile already keeps far motes visible.
-            val distanceScale = 1.0 + min(dist, 60.0) * .008
-            // Motes right at the camera would turn into large discs: let them fade out.
-            val nearFade = smoothRange(dist, 1.5, 5.0)
-            val size = (.14 + hash(i, 4, 9) * .12) * (if (ember) 1.25 else 1.0) * 3.0 * distanceScale
-            val atmosphericAlpha = sporeOpacity(dist, tw) * (if (ember) 1.25 else 1.0) * .42
-            bSpore.add(mx, groundHeight(mx, mz) + sp.h + sin(t * .5 + seed) * .25, mz, size, size, col, min(.42, atmosphericAlpha) * nearFade * (1.0 - dayLevel * .2))
+        // Sparse forest pollen shares the existing additive glow batch and texture: no extra
+        // texture, buffer, draw call or render pass. Ground height is cached at spawn time.
+        for (sp in e.spores) {
+            val dx = sp.x - s.x
+            val dz = sp.z - s.z
+            val distSq = dx * dx + dz * dz
+            if (distSq > 48.0 * 48.0) continue
+            val nearFade = min(1.0, distSq / 9.0)
+            val farFade = max(0.0, 1.0 - distSq / (48.0 * 48.0))
+            val flutter = sin(t * .38 + sp.phase)
+            val bob = flutter * .16
+            val pulse = .94 + .06 * flutter
+            val color = if (ember) Palette.ember
+                else if (sp.strength > .78) Palette.pollenWarm else Palette.pollen
+            val size = .16 + sp.strength * .12
+            val alpha = .16 * sp.strength * pulse * nearFade * farFade * (1.0 - dayLevel * .18)
+            bGlow.add(sp.x, sp.groundY + sp.h + bob, sp.z, size, size, color, alpha, sp.h + bob)
         }
         if (orbSeen.size > 24) orbSeen.keys.retainAll(e.orbs.map { it.p.id }.toSet())
         // Orb auras.

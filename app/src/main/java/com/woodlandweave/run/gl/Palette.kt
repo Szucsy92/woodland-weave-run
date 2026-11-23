@@ -22,6 +22,8 @@ object Palette {
     val green = lin(0x24d975); val purple = lin(0x883cdb); val lavender = lin(0xc8b8e0); val lemon = lin(0xf6ff4f)
     val trunk = lin(0xb8a58c); val ground = lin(0x9aa896); val crown = lin(0x17251c)
     val rock = lin(0x3a4048); val plant = lin(0x22301f)
+    // Muted forest-floor pollen: soft moss-sage and warm seed-head cream, never neon.
+    val pollen = lin(0xd3d5a0); val pollenWarm = lin(0xd9bd88)
     val ember = lin(0xff2a1a); val pursuer = lin(0xff1e10); val blood = lin(0x3a0605)
     val freezer = lin(0x2b6cff); val ghost = lin(0x2ee88a); val shock = lin(0xb04dff); val secret = lin(0x7fe8d8)
     // More saturated daytime atmosphere: emerald foliage haze and a clearer blue sky.

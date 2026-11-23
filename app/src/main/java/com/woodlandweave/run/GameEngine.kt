@@ -79,6 +79,7 @@ class GameEngine(
     var secrets: List<Secret> = emptyList(); private set
     var gates: List<Gate> = emptyList(); private set
     val orbs = ArrayList<Orb>()
+    val spores = ArrayList<Spore>(FOREST_POLLEN_COUNT)
     var redMix = 0.0; private set
     var dieRef = 0.0; private set
     var ghostK = 0.0; private set
@@ -93,6 +94,8 @@ class GameEngine(
     private var lastStumble = 0.0
     private var stage = SurviveStage.LIT
     private var lastOrbSpawn = 0.0
+    private var pollenGeneration = 0
+    private var pollenUniverse = Int.MIN_VALUE
     private var lastPowerUp: PowerUpType? = null
     private var lastRing = -1
     private var lastWarp = -1.0
@@ -226,7 +229,33 @@ class GameEngine(
         s.trees = trees
         s.obstacles = obstacles
         worldCx = cx; worldCz = cz
+        refreshForestPollen(cx, cz, s.universe)
         worldVersion++
+    }
+
+    /** Sparse, deterministic forest pollen. Only recycled when it leaves the visible area. */
+    private fun refreshForestPollen(cx: Int, cz: Int, universe: Int) {
+        if (pollenUniverse != universe) {
+            spores.clear()
+            pollenUniverse = universe
+        }
+        val wx = cx * CELL
+        val wz = cz * CELL
+        for (i in 0 until FOREST_POLLEN_COUNT) {
+            val old = spores.getOrNull(i)
+            val dx = old?.x?.minus(wx) ?: Double.POSITIVE_INFINITY
+            val dz = old?.z?.minus(wz) ?: Double.POSITIVE_INFINITY
+            if (old == null || dx * dx + dz * dz > 46.0 * 46.0) {
+                val generation = pollenGeneration++
+                val sx = wx + (hash(cx + i * 17, cz - i * 11, 701 + generation * 31) - .5) * 64.0
+                val sz = wz + (hash(cx - i * 13, cz + i * 19, 709 + generation * 31) - .22) * 68.0
+                val h = 1.25 + hash(cx + i * 23, cz - i * 7, 719 + generation * 31) * 2.9
+                val phase = hash(cx - i * 5, cz + i * 29, 727 + generation * 31) * (2.0 * PI)
+                val strength = .48 + hash(cx + i * 31, cz + i * 3, 733 + generation * 31) * .52
+                val spore = Spore(sx, sz, groundHeight(sx, sz), h, phase, strength)
+                if (old == null) spores += spore else spores[i] = spore
+            }
+        }
     }
 
     private fun handleEvents(raw: Double) {
@@ -426,5 +455,5 @@ class GameEngine(
         if (next != published || menuPhase) { published = next; _ui.value = next }
     }
 
-    companion object {}
+    companion object { const val FOREST_POLLEN_COUNT = 24 }
 }

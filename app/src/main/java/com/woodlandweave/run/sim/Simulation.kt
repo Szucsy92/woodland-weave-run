@@ -48,7 +48,14 @@ class PowerUp(var x: Double, var z: Double, val type: PowerUpType, val id: Strin
 class Secret(val x: Double, val z: Double, val type: SecretType, val id: String)
 class Gate(val x: Double, val z: Double, val angle: Double, val id: String)
 class BlackHole(val x: Double, val z: Double, val id: String)
-class Spore(var x: Double, var z: Double, var h: Double)
+class Spore(
+    val x: Double,
+    val z: Double,
+    val groundY: Double,
+    val h: Double,
+    val phase: Double,
+    val strength: Double,
+)
 class Point(val x: Double, val z: Double)
 
 const val POWERUP_START = 100.0
@@ -341,18 +348,6 @@ fun obstaclesAround(cx: Int, cz: Int, keep: Double = 0.84): List<Obstacle> {
         out += Obstacle(x, z, false, radius, "o$gx:$gz")
     }
     return out
-}
-
-fun placeSpore(x: Double, z: Double, index: Int, generation: Int = 0, initial: Boolean = false) = Spore(
-    x + (hash(index, generation, 6) - .5) * 48,
-    z - (if (initial) -12 + hash(index, generation, 5) * 70 else 8 + hash(index, generation, 5) * 50),
-    .7 + hash(index, generation, 7) * 3.5,
-)
-
-fun sporeOpacity(distance: Double, twinkle: Double): Double {
-    val depth = max(0.0, 1 - distance / 70)
-    val lamp = max(0.0, 1 - distance / 18)
-    return (.32 + twinkle * .1 + lamp * .12) * depth
 }
 
 // ---- the simulation state ---------------------------------------------------------------------

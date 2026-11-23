@@ -1297,6 +1297,24 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 bGlow.add(px, py, lz, size, size, cols[i], (if (high) .14 else .66) * (1 - own) * flick * haloDay * far, py - groundHeight(px, lz))
             }
         }
+        // Sparse forest pollen shares the existing additive glow batch and texture: no extra
+        // texture, buffer, draw call or render pass. Ground height is cached at spawn time.
+        for (sp in e.spores) {
+            val dx = sp.x - s.x
+            val dz = sp.z - s.z
+            val distSq = dx * dx + dz * dz
+            if (distSq > 48.0 * 48.0) continue
+            val nearFade = min(1.0, distSq / 9.0)
+            val farFade = max(0.0, 1.0 - distSq / (48.0 * 48.0))
+            val flutter = sin(t * .38 + sp.phase)
+            val bob = flutter * .16
+            val pulse = .94 + .06 * flutter
+            val color = if (ember) Palette.ember
+                else if (sp.strength > .78) Palette.pollenWarm else Palette.pollen
+            val size = .16 + sp.strength * .12
+            val alpha = .16 * sp.strength * pulse * nearFade * farFade * (1.0 - dayLevel * .18)
+            bGlow.add(sp.x, sp.groundY + sp.h + bob, sp.z, size, size, color, alpha, sp.h + bob)
+        }
         if (orbSeen.size > 24) orbSeen.keys.retainAll(e.orbs.map { it.p.id }.toSet())
         // Orb auras.
         for ((i, o) in e.orbs.withIndex()) {
