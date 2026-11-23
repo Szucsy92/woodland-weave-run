@@ -523,7 +523,7 @@ object Geo {
             parts += data to m
         }
         val trunkRadial = if (shadow) 10 else if (lifelike) 16 else 12
-        val species = variant.coerceIn(0, 3) // oak, pine, ancient, birch
+        val species = variant.coerceIn(0, 2) // oak, pine, ancient
         val trunk = if (shadow) {
             trunkLifelike(trunkRadial, listOf(22f, 16f, 10f, 5f, 2.2f, .7f, 0f))
         } else trunkLifelike(trunkRadial)
@@ -622,64 +622,64 @@ object Geo {
     // stitched into a hole of the trunk grid (the loop around the hole is shared with the limb's first ring). There are
     // no buried collars, no overlapping tubes and no normal seams between parts, and the normals are computed once.
     //
-    // Finomhangolva a Tree Mesh Studio-ban (2026-11-23 14:25). Minden érték fajonként: 0 = oak, 1 = pine, 2 = ancient, 3 = birch.
+    // Finomhangolva a Tree Mesh Studio-ban (2026-11-23 14:25). Minden érték fajonként: 0 = oak, 1 = pine, 2 = ancient.
     // A fa-paraméterek egy az egyben megegyeznek a 3D előnézetben látott beállításokkal (TreeTuning.json).
 
-    private val TREE_HEIGHT = doubleArrayOf(20.5, 20.5, 22.0, 20.5)                    // Magasság
-    private val TREE_HEIGHT_RAND = doubleArrayOf(3.0, 3.0, 0.0, 3.0)                   // Magasság szórása
-    private val TREE_TRUNK_SCALE = doubleArrayOf(1.45, 0.85, 1.30, 0.75)                // Törzs vastagsága
-    private val TREE_TRUNK_RADIUS = doubleArrayOf(0.27, 0.27, 0.28, 0.27)              // Csúcs sugara
-    private val TREE_TRUNK_TAPER = doubleArrayOf(0.13, 0.13, 0.12, 0.13)               // Elvékonyodás felfelé
-    private val TREE_FOOT_H = doubleArrayOf(1.7, 1.7, 3.2, 1.7)                        // Tő kiszélesedés magassága
-    private val TREE_FOOT_FLARE = doubleArrayOf(0.38, 0.38, 0.7, 0.38)                 // Tő kiszélesedés mértéke
-    private val TREE_LEAN = doubleArrayOf(0.008, 0.014, 0.012, 0.01)                   // Dőlés
-    private val TREE_SWAY_AMT = doubleArrayOf(1.0, 1.0, 0.45, 1.0)                     // Középvonal hullámzása
-    private val TREE_RIDGES = intArrayOf(7, 7, 7, 7)                                   // Gyökerek száma
-    private val TREE_ROOT_SIGMA = doubleArrayOf(0.20, 0.20, 0.19, 0.20)                 // Gyökerek vastagsága
-    private val TREE_ROOT_H = doubleArrayOf(1.5, 0.6, 2.2, 0.35)                       // Csatlakozás magassága
-    private val TREE_ROOT_ANGLE = doubleArrayOf(90.0, 90.0, 30.0, 90.0)                // Csatlakozási szög
-    private val TREE_ROOT_LEN = doubleArrayOf(1.09, 4.24, 0.49, 1.6)                   // Gyökerek hossza
-    private val TREE_ROOT_LEN_MIN = doubleArrayOf(0.4, 0.06, 2.0, 0.0)                 // Legrövidebb gyökér
-    private val TREE_ROOT_LEN_RAND = doubleArrayOf(0.0, 0.04, 0.31, 0.37)              // Hossz szórása
-    private val TREE_ROOT_STUB = doubleArrayOf(0.0, 0.0, 0.0, 0.0)                     // Csonka gyökerek esélye
-    private val TREE_ROOT_STUB_SCALE = doubleArrayOf(0.71, 0.0, 0.45, 0.0)             // Csonka gyökér hossza
-    private val TREE_ROOT_H_RAND = doubleArrayOf(0.6, 0.0, 0.0, 0.0)                   // Csatlakozási magasság szórása
-    private val TREE_ROOT_STEEP = doubleArrayOf(6.0, 0.95, 5.5, 1.35)                  // Csúcsosság
-    private val TREE_ROOT_STEEP_RAND = doubleArrayOf(3.0, 3.0, 0.6, 0.8)               // Csúcsosság szórása
-    private val TREE_ROOT_SPREAD = doubleArrayOf(0.7, 0.22, 0.4, 0.0)                  // Elhelyezés szabálytalansága
-    private val TREE_ROOT_DEPTH = doubleArrayOf(0.0, 0.0, 0.0, 0.0)                    // Talaj alatti kiszélesedés
-    private val TREE_CUT_DEPTH = doubleArrayOf(0.05, 0.05, 0.1, 0.1)                   // Vágás mélysége a talaj alatt
-    private val TREE_BOTTOM_CAP = intArrayOf(1, 1, 1, 1)                               // Zárt alj
-    private val TREE_LIMB_COUNT = intArrayOf(9, 9, 7, 6)                               // Ágak száma
-    private val TREE_LIMBS_PER_LEVEL = intArrayOf(2, 3, 2, 2)                          // Ágak szintenként
-    private val TREE_LIMB_START = doubleArrayOf(7.2, 5.0, 12.0, 10.0)                  // Első ág magassága
-    private val TREE_LIMB_SPACING = doubleArrayOf(1.42, 1.4, 1.5, 1.55)                // Ágak távolsága
-    private val TREE_LIMB_JITTER = doubleArrayOf(0.45, 0.42, 0.5, 0.45)                // Ágmagasság szórása
-    private val TREE_LEVEL_JITTER = doubleArrayOf(1.4, 1.4, 1.0, 1.4)                  // Szintek szórása
-    private val TREE_LIMB_LEN = doubleArrayOf(1.2, 0.95, 1.16, 0.95)                   // Ágak hossza
-    private val TREE_LIMB_LEN_BASE = doubleArrayOf(3.0, 4.1, 3.4, 2.0)                 // Alap ághossz
-    private val TREE_LIMB_LEN_SLOPE = doubleArrayOf(0.0, -0.26, -0.08, 0.0)            // Hossz változása felfelé
-    private val TREE_LIMB_LEN_RAND = doubleArrayOf(1.25, 0.0, 1.0, 0.9)                // Ághossz szórása
-    private val TREE_LIMB_THICK = doubleArrayOf(1.4, 0.85, 1.28, 0.75)                 // Ágak vastagsága
-    private val TREE_LIMB_RISE = doubleArrayOf(-0.6, -0.6, 0.2, -0.6)                  // Emelkedés (legkisebb)
-    private val TREE_LIMB_RISE_RAND = doubleArrayOf(2.4, 2.4, 2.2, 2.4)                // Emelkedés szórása
-    private val TREE_LIMB_BEND = doubleArrayOf(1.8, 1.8, 1.2, 1.8)                     // Oldalirányú hajlás
-    private val TREE_LIMB_CURL = doubleArrayOf(1.1, 1.1, 0.8, 1.1)                     // Kanyargás
-    private val TREE_LIMB_HOLE = doubleArrayOf(0.3, 0.3, 0.34, 0.3)                    // Ágtő magassága
-    private val TREE_LIMB_RINGS = intArrayOf(2, 2, 3, 2)                               // Ág gyűrűi (simaság)
-    private val TREE_FORK_COUNT = intArrayOf(0, 0, 2, 0)                               // Mellékágak ágonként
-    private val TREE_FORK_START = doubleArrayOf(0.5, 0.5, 0.5, 0.5)                    // Elágazás helye
-    private val TREE_FORK_SPREAD = doubleArrayOf(0.35, 0.35, 0.35, 0.35)               // Elágazások szórása
-    private val TREE_FORK_LEN = doubleArrayOf(0.45, 0.45, 0.5, 0.45)                   // Mellékág hossza
-    private val TREE_FORK_THICK = doubleArrayOf(0.6, 0.6, 0.6, 0.6)                    // Mellékág vastagsága
-    private val TREE_FORK_ANGLE = doubleArrayOf(0.9, 0.9, 0.9, 0.9)                    // Elágazási szög
-    private val TREE_FORK_RISE = doubleArrayOf(0.5, 0.5, 0.45, 0.5)                    // Mellékág emelkedése
-    private val TREE_FLUTE = doubleArrayOf(0.04, 0.04, 0.05, 0.04)                     // Hosszanti barázdák
-    private val TREE_SWELL = doubleArrayOf(1.0, 1.0, 0.9, 1.0)                         // Kéreg duzzanata
-    private val TREE_BURL = doubleArrayOf(1.0, 1.0, 0.8, 1.0)                          // Göcs mérete
-    private val TREE_RADIAL = intArrayOf(3, 3, 4, 3)                                   // Körbeosztás (gyökerenként)
-    private val TREE_FLARE_TOP = doubleArrayOf(5.0, 5.0, 6.0, 5.0)                     // Sűrű gyűrűk magassága
-    private val TREE_ROOT_W = doubleArrayOf(1.40, .85, 1.85, .80)          // (megtartva a régi kód kompatibilitásáért)
+    private val TREE_HEIGHT = doubleArrayOf(20.5,  20.5,  22.0)                    // Magasság
+    private val TREE_HEIGHT_RAND = doubleArrayOf(3.0,  3.0,  0.0)                   // Magasság szórása
+    private val TREE_TRUNK_SCALE = doubleArrayOf(1.5225,  0.8925,  1.365)                // Törzs vastagsága
+    private val TREE_TRUNK_RADIUS = doubleArrayOf(0.27,  0.27,  0.28)              // Csúcs sugara
+    private val TREE_TRUNK_TAPER = doubleArrayOf(0.13,  0.13,  0.12)               // Elvékonyodás felfelé
+    private val TREE_FOOT_H = doubleArrayOf(1.7,  1.7,  3.2)                        // Tő kiszélesedés magassága
+    private val TREE_FOOT_FLARE = doubleArrayOf(0.38,  0.38,  0.7)                 // Tő kiszélesedés mértéke
+    private val TREE_LEAN = doubleArrayOf(0.008,  0.014,  0.012)                   // Dőlés
+    private val TREE_SWAY_AMT = doubleArrayOf(1.0,  1.0,  0.45)                     // Középvonal hullámzása
+    private val TREE_RIDGES = intArrayOf(7,  7,  7)                                   // Gyökerek száma
+    private val TREE_ROOT_SIGMA = doubleArrayOf(0.21,  0.21,  0.1995)                 // Gyökerek vastagsága
+    private val TREE_ROOT_H = doubleArrayOf(1.5,  0.6,  2.2)                       // Csatlakozás magassága
+    private val TREE_ROOT_ANGLE = doubleArrayOf(90.0,  90.0,  30.0)                // Csatlakozási szög
+    private val TREE_ROOT_LEN = doubleArrayOf(1.09,  4.24,  0.49)                   // Gyökerek hossza
+    private val TREE_ROOT_LEN_MIN = doubleArrayOf(0.4,  0.06,  2.0)                 // Legrövidebb gyökér
+    private val TREE_ROOT_LEN_RAND = doubleArrayOf(0.0,  0.04,  0.31)              // Hossz szórása
+    private val TREE_ROOT_STUB = doubleArrayOf(0.0,  0.0,  0.0)                     // Csonka gyökerek esélye
+    private val TREE_ROOT_STUB_SCALE = doubleArrayOf(0.71,  0.0,  0.45)             // Csonka gyökér hossza
+    private val TREE_ROOT_H_RAND = doubleArrayOf(0.6,  0.0,  0.0)                   // Csatlakozási magasság szórása
+    private val TREE_ROOT_STEEP = doubleArrayOf(6.0,  0.95,  5.5)                  // Csúcsosság
+    private val TREE_ROOT_STEEP_RAND = doubleArrayOf(3.0,  3.0,  0.6)               // Csúcsosság szórása
+    private val TREE_ROOT_SPREAD = doubleArrayOf(0.7,  0.22,  0.4)                  // Elhelyezés szabálytalansága
+    private val TREE_ROOT_DEPTH = doubleArrayOf(0.0,  0.0,  0.0)                    // Talaj alatti kiszélesedés
+    private val TREE_CUT_DEPTH = doubleArrayOf(0.05,  0.05,  0.1)                   // Vágás mélysége a talaj alatt
+    private val TREE_BOTTOM_CAP = intArrayOf(1,  1,  1)                               // Zárt alj
+    private val TREE_LIMB_COUNT = intArrayOf(9,  9,  7)                               // Ágak száma
+    private val TREE_LIMBS_PER_LEVEL = intArrayOf(2,  3,  2)                          // Ágak szintenként
+    private val TREE_LIMB_START = doubleArrayOf(7.2,  5.0,  12.0)                  // Első ág magassága
+    private val TREE_LIMB_SPACING = doubleArrayOf(1.42,  1.4,  1.5)                // Ágak távolsága
+    private val TREE_LIMB_JITTER = doubleArrayOf(0.45,  0.42,  0.5)                // Ágmagasság szórása
+    private val TREE_LEVEL_JITTER = doubleArrayOf(1.4,  1.4,  1.0)                  // Szintek szórása
+    private val TREE_LIMB_LEN = doubleArrayOf(1.2,  0.95,  1.16)                   // Ágak hossza
+    private val TREE_LIMB_LEN_BASE = doubleArrayOf(3.0,  4.1,  3.4)                 // Alap ághossz
+    private val TREE_LIMB_LEN_SLOPE = doubleArrayOf(0.0,  -0.26,  -0.08)            // Hossz változása felfelé
+    private val TREE_LIMB_LEN_RAND = doubleArrayOf(1.25,  0.0,  1.0)                // Ághossz szórása
+    private val TREE_LIMB_THICK = doubleArrayOf(1.47,  0.8925,  1.344)                 // Ágak vastagsága
+    private val TREE_LIMB_RISE = doubleArrayOf(-0.6,  -0.6,  0.2)                  // Emelkedés (legkisebb)
+    private val TREE_LIMB_RISE_RAND = doubleArrayOf(2.4,  2.4,  2.2)                // Emelkedés szórása
+    private val TREE_LIMB_BEND = doubleArrayOf(1.8,  1.8,  1.2)                     // Oldalirányú hajlás
+    private val TREE_LIMB_CURL = doubleArrayOf(1.1,  1.1,  0.8)                     // Kanyargás
+    private val TREE_LIMB_HOLE = doubleArrayOf(0.3,  0.3,  0.34)                    // Ágtő magassága
+    private val TREE_LIMB_RINGS = intArrayOf(2,  2,  3)                               // Ág gyűrűi (simaság)
+    private val TREE_FORK_COUNT = intArrayOf(0,  0,  2)                               // Mellékágak ágonként
+    private val TREE_FORK_START = doubleArrayOf(0.5,  0.5,  0.5)                    // Elágazás helye
+    private val TREE_FORK_SPREAD = doubleArrayOf(0.35,  0.35,  0.35)               // Elágazások szórása
+    private val TREE_FORK_LEN = doubleArrayOf(0.45,  0.45,  0.5)                   // Mellékág hossza
+    private val TREE_FORK_THICK = doubleArrayOf(0.6,  0.6,  0.6)                    // Mellékág vastagsága
+    private val TREE_FORK_ANGLE = doubleArrayOf(0.9,  0.9,  0.9)                    // Elágazási szög
+    private val TREE_FORK_RISE = doubleArrayOf(0.5,  0.5,  0.45)                    // Mellékág emelkedése
+    private val TREE_FLUTE = doubleArrayOf(0.04,  0.04,  0.05)                     // Hosszanti barázdák
+    private val TREE_SWELL = doubleArrayOf(1.0,  1.0,  0.9)                         // Kéreg duzzanata
+    private val TREE_BURL = doubleArrayOf(1.0,  1.0,  0.8)                          // Göcs mérete
+    private val TREE_RADIAL = intArrayOf(3,  3,  4)                                   // Körbeosztás (gyökerenként)
+    private val TREE_FLARE_TOP = doubleArrayOf(5.0,  5.0,  6.0)                     // Sűrű gyűrűk magassága
+    private val TREE_ROOT_W = doubleArrayOf(1.40,  .85,  1.85)          // (megtartva a régi kód kompatibilitásáért)
     private const val TREE_GROUND = 1.1                                    // soil level in body space (the instance sits 1.1 m low)
 
     /** Growable vertex and index lists for a hand-built surface. */
@@ -833,7 +833,7 @@ object Geo {
      * The shadow variant has no limbs.
      */
     fun treeBody(lifelike: Boolean, shadow: Boolean = false, variant: Int = 0, shape: Int = 0): MeshData {
-        val sp = variant.coerceIn(0, 3) // oak, pine, ancient, birch
+        val sp = variant.coerceIn(0, 2) // oak, pine, ancient
         val ridges = TREE_RIDGES[sp]
         val n = if (shadow) 2 * ridges else if (lifelike) maxOf(12, TREE_RADIAL[sp] * ridges) else maxOf(12, 2 * ridges)
         val ts = TreeShape(sp, shape.coerceIn(0, 15), n)
@@ -1151,7 +1151,7 @@ object Geo {
             else crownLod(nearSubdivisions, farSubdivisions)
         fun h(salt: Int) = hash(variant, 0, salt)
         val leanDir = .73
-        val leanAmt = doubleArrayOf(.018, .045, .012, .030)[variant.coerceIn(0, 3)]
+        val leanAmt = doubleArrayOf(.018, .045, .012)[variant.coerceIn(0, 2)]
         val lx = cos(leanDir) * leanAmt
         val lz = sin(leanDir) * leanAmt
         fun ox(hh: Double) = -hh * lz
@@ -1168,17 +1168,6 @@ object Geo {
                 val radius = 4.45 - tier * .70
                 add((h(20 + tier) - .5) * .28, y, (h(30 + tier) - .5) * .28,
                     .025, h(40 + tier) * PI * 2, .025, radius, 1.55 - tier * .10, radius * .94)
-            }
-            return pruneBuriedCrowns(mergeTreeParts(parts), parts)
-        }
-        if (variant == 3) {
-            // Birch: tall, narrow crown with separated vertical lobes.
-            add(0.0, 18.1, 0.0, .02, h(83) * PI * 2, -.02, 2.45, 3.65, 2.55)
-            for (c in 0 until 5) {
-                val a = c / 5.0 * PI * 2 + h(74 + c) * .35
-                val spread = 1.35 + h(81 + c) * .75
-                add(cos(a) * spread, 12.0 + h(71 + c) * 2.0, sin(a) * spread,
-                    .12, a, -.10, 1.75, 2.65, 1.85)
             }
             return pruneBuriedCrowns(mergeTreeParts(parts), parts)
         }
