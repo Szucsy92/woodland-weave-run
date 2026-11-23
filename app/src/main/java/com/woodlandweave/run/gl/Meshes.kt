@@ -622,11 +622,11 @@ object Geo {
     // stitched into a hole of the trunk grid (the loop around the hole is shared with the limb's first ring). There are
     // no buried collars, no overlapping tubes and no normal seams between parts, and the normals are computed once.
 
-    private val TREE_RIDGES = intArrayOf(6, 4, 7, 4)                      // root lobes per species (oak, pine, ancient, birch)
+    private val TREE_RIDGES = intArrayOf(6, 4, 6, 4)                      // root lobes per species (oak, pine, ancient, birch)
     private val TREE_TRUNK_SCALE = doubleArrayOf(1.0, .80, 1.30, .70)
     private val TREE_LEAN = doubleArrayOf(.006, .014, .032, .010)
-    private val TREE_ROOT_LEN = doubleArrayOf(1.0, .76, 1.32, .78)
-    private val TREE_ROOT_W = doubleArrayOf(1.0, .76, 1.22, .74)
+    private val TREE_ROOT_LEN = doubleArrayOf(.78, .66, .92, .64)
+    private val TREE_ROOT_W = doubleArrayOf(.78, .68, .88, .64)
     private val TREE_LIMB_THICK = doubleArrayOf(1.0, .82, 1.28, .72)
     private val TREE_LIMB_LEN = doubleArrayOf(1.0, .9, 1.16, .92)
     private val TREE_LIMB_COUNT = intArrayOf(8, 9, 9, 6)
@@ -688,10 +688,10 @@ object Geo {
                 rootPhi[i] = c.toDouble() / n * 2 * PI
             }
         }
-        private val rootReach = DoubleArray(k) { 1.34 * TREE_ROOT_LEN[sp] * (.58 + r(230 + it) * .86) * (if (r(250 + it) < .12) .42 else 1.0) }
+        private val rootReach = DoubleArray(k) { .88 * TREE_ROOT_LEN[sp] * (.52 + r(230 + it) * .48) * (if (r(250 + it) < .18) .48 else 1.0) }
         private val rootHeight = DoubleArray(k) { .5 + r(260 + it) * .4 }
         private val rootSteep = DoubleArray(k) { 1.5 + r(270 + it) * .7 }
-        private val rootSigma = (2 * PI / n) * 1.02
+        private val rootSigma = (2 * PI / n) * .82
 
         fun cx(y: Double) = sin(y * .3 + ph[0]) * swayA + sin(y * .71 + ph[1]) * swayB
         fun cz(y: Double) = cos(y * .26 + ph[2]) * swayZ + sin(y * .5 + ph[3]) * .03
@@ -722,7 +722,12 @@ object Geo {
                 })
                 ext = maxOf(ext, rootReach[i] * f * exp(-(d / rootSigma) * (d / rootSigma)))
             }
-            return trunk + ext
+            // Close the underground end as a softly rounded root mass, not a flat cut.
+            // The final 0.55 m contracts the whole cross-section to a tiny rounded tip.
+            val bottomT = ((y + 1.8) / .55).coerceIn(0.0, 1.0)
+            val bottomSmooth = bottomT * bottomT * (3.0 - 2.0 * bottomT)
+            val bottomClosure = .035 + .965 * bottomSmooth
+            return (trunk + ext) * bottomClosure
         }
     }
 
@@ -821,7 +826,7 @@ object Geo {
         } else {
             // Closely spaced rings shape the buttress roots above and below grade. The mesh extends
             // 2.4 m below the soil so a shockwave can expose tapered underground roots, not a flat stump.
-            for (y in doubleArrayOf(-1.3, -.95, -.6, -.25, .15, .55, .82, 1.1, 1.25, 1.5, 1.8, 2.2, 2.8, 3.6, 4.8)) ys += y
+            for (y in doubleArrayOf(-1.8, -1.65, -1.45, -1.3, -1.05, -.75, -.4, -.05, .3, .62, .88, 1.1, 1.25, 1.5, 1.8, 2.2, 2.8, 3.6, 4.8)) ys += y
         }
         val gap = .30                       // half the height of a limb's hole
         val levelRow = IntArray(levels)
@@ -852,6 +857,12 @@ object Geo {
             }
         }
 
+        // Rounded underground closure: the bottom ring is tiny and a centre fan seals it.
+        // This keeps the root mass volumetric when the shockwave exposes it from below.
+        if (!shadow) {
+            val bottomCenter = sb.vertex(ts.cx(ys[0]), ys[0], ts.cz(ys[0]), .5, ys[0] / 22.0)
+            for (c in 0 until n) sb.tri(bottomCenter, c + 1, c)
+        }
         val yTop = ys[rows - 1]
         val cap = sb.vertex(ts.cx(yTop), yTop + .25, ts.cz(yTop), .5, yTop / 22.0)
         for (c in 0 until n) sb.tri((rows - 1) * stride + c, (rows - 1) * stride + c + 1, cap)
