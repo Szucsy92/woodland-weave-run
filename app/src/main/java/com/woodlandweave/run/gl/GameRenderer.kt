@@ -144,7 +144,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     // opt out, mist, orb auras and secret glows do not.
     private val bGlow = Sprites(256, { glowTex }, true, false)
     private val bGlowFog = Sprites(64, { glowTex }, true, true)
-    private val bMist = Sprites(16, { glowTex }, false, true)
+    private val bMist = Sprites(16 + 24, { glowTex }, false, true)
     private val bHole = Sprites(1600, { holeGlowTex }, true, false)
     // One array for the whole run: the per-frame arrayOf() it replaces was a small allocation every frame.
     private val spriteBatches = arrayOf(bMist, bGlow, bGlowFog, bHole)
@@ -1311,11 +1311,18 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val pulse = .94 + .06 * flutter
             val color = if (ember) Palette.ember
                 else if (sp.strength > .78) Palette.pollenWarm else Palette.pollen
-            val size = .18 + sp.strength * .12
-            // Keep the mote readable in daylight as well as at night; the existing glow
-            // sprite supplies the soft halo without another texture, batch or draw call.
-            val alpha = .26 * sp.strength * pulse * nearFade * farFade
-            bGlow.add(sp.x, sp.groundY + sp.h + bob, sp.z, size, size, color, alpha, sp.h + bob)
+            val fade = sp.strength * pulse * nearFade * farFade
+            val py = sp.groundY + sp.h + bob
+            // Night: a clearly glowing mote. The additive halo is large and bright, and it
+            // only dims slightly by day because additive light washes out on a bright sky.
+            val size = .34 + sp.strength * .22
+            val alpha = .7 * fade * (1.0 - dayLevel * .3)
+            bGlow.add(sp.x, py, sp.z, size, size, color, alpha, sp.h + bob)
+            // Day: additive light barely shows on a bright background, so each mote also gets a
+            // small alpha-blended amber core that is strongest by day and stays faintly lit at night.
+            val coreSize = .11 + sp.strength * .07
+            val coreColor = if (ember) Palette.ember else Palette.pollenDay
+            bMist.add(sp.x, py, sp.z, coreSize, coreSize, coreColor, fade * (.45 + .5 * dayLevel), sp.h + bob)
         }
         if (orbSeen.size > 24) orbSeen.keys.retainAll(e.orbs.map { it.p.id }.toSet())
         // Orb auras.
