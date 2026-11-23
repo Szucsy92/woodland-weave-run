@@ -691,14 +691,15 @@ object Geo {
         // Keep the legacy tree's curved, individually readable buttress roots, but blend
         // them into a compact rounded root crown instead of long star points.
         private val rootReach = DoubleArray(k) {
-            // More pronounced, gently swept star roots; keep each tip short enough to avoid a spiky silhouette.
-            .98 * TREE_ROOT_LEN[sp] * (.70 + r(230 + it) * .38) *
-                (if (r(250 + it) < .18) .76 else 1.0)
+            // Slightly broader radial reach, while keeping the individual roots low and grounded.
+            1.04 * TREE_ROOT_LEN[sp] * (.72 + r(230 + it) * .40) *
+                (if (r(250 + it) < .18) .78 else 1.0)
         }
-        private val rootHeight = DoubleArray(k) { .58 + r(260 + it) * .48 }
-        private val rootSteep = DoubleArray(k) { 1.65 + r(270 + it) * .8 }
-        // Narrower angular shoulders leave visibly deeper, rounded valleys between adjacent roots.
-        private val rootSigma = (2 * PI / n) * .62
+        // Lower buttress shoulders: the star points rise less vertically above the soil line.
+        private val rootHeight = DoubleArray(k) { .40 + r(260 + it) * .30 }
+        private val rootSteep = DoubleArray(k) { 1.85 + r(270 + it) * .85 }
+        // Narrower rounded ridges create deeper inward-curving valleys between neighbouring star roots.
+        private val rootSigma = (2 * PI / n) * .50
 
         fun cx(y: Double) = sin(y * .3 + ph[0]) * swayA + sin(y * .71 + ph[1]) * swayB
         fun cz(y: Double) = cos(y * .26 + ph[2]) * swayZ + sin(y * .5 + ph[3]) * .03
@@ -735,7 +736,9 @@ object Geo {
                 // A slightly sharper rounded ridge gives each buttress a curved star-like crest,
                 // while the narrower profile opens a deeper concave valley between neighbouring roots.
                 val angular = abs(d) / rootSigma
-                val ridge = exp(-(angular * angular))
+                // A slightly tighter super-Gaussian keeps each root tip distinct and pulls
+                // the two intervening arcs inward toward the trunk without sharp mesh corners.
+                val ridge = exp(-pow(angular, 2.25))
                 ext = maxOf(ext, rootReach[i] * f * ridge)
             }
             // Broad, softly rounded underground heel. Preserve a substantial core
