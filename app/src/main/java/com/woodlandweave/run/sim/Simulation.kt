@@ -392,12 +392,27 @@ fun runSpeed(s: Simulation): Double {
 
 // ---- collisions -------------------------------------------------------------------------------
 
+// Conservative ground-level trunk radii derived from the three rendered tree meshes
+// (oak, pine, ancient), including the current +5% thickness adjustment. These are
+// the outer trunk envelopes before the per-instance scale is applied; roots are
+// intentionally excluded so their unchanged radial reach does not become a solid wall.
+private val TREE_TRUNK_COLLISION_RADIUS = doubleArrayOf(1.244, 0.729, 1.399)
+private const val PLAYER_COLLISION_RADIUS = 0.22
+
+/** Matches the species and horizontal body scale used by GameRenderer.treeProp(). */
+internal fun treeCollisionRadius(tree: Tree): Double {
+    val x = fl(tree.x); val z = fl(tree.z)
+    val species = (hash(x, z, 200) * 3.0).toInt().coerceIn(0, 2)
+    val bodyScale = 0.88 + hash(x, z, 313) * 0.26
+    return TREE_TRUNK_COLLISION_RADIUS[species] * bodyScale * tree.scale + PLAYER_COLLISION_RADIUS
+}
+
 fun collide(s: Simulation, tree: Tree): Boolean {
     if (s.phase != Phase.RUNNING) return false
     if (s.powerUp == PowerUpType.GHOST || s.warp >= 0) return false
     if (s.cleared.contains(tree.id)) return false
     val dx = s.x - tree.x; val dz = s.z - tree.z
-    val radius = 0.45 * tree.scale + 0.22
+    val radius = treeCollisionRadius(tree)
     val distance = hypot(dx, dz)
     if (distance >= radius) return false
     val side = if (dx == 0.0) (if (hash(fl(tree.x), fl(tree.z), 7) > 0.5) 1.0 else -1.0) else sign(dx)
