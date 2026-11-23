@@ -338,7 +338,7 @@ object Geo {
             var h = 22f
             while (h > 4.2f) { hs += h; h -= 1.2f }
             h = 4.2f
-            while (h >= -0.001f) { hs += max(h, 0f); h -= 0.15f }
+            while (h >= -0.001f) { hs += max(h, 0f); h -= 0.3f }
         }
         val rows = hs.size
         val pos = FloatArray(rows * (radial + 1) * 3); val uv = FloatArray(rows * (radial + 1) * 2); val centers = FloatArray(rows * 3)
@@ -348,23 +348,18 @@ object Geo {
             val wx = sin(y * .3f) * .09f + sin(y * .71f + 1.3f) * .05f
             val wz = cos(y * .26f + .7f) * .08f
             centers[iy * 3] = wx; centers[iy * 3 + 1] = y; centers[iy * 3 + 2] = wz
-            val t = (y / 22f).coerceIn(0f, 1f)
-            // Hyperbolic-like taper: broad base, near-cylindrical middle, slimmer crown.
-            val r0 = .29f + .21f * (1f - t).pow(2.35f) + .035f * (1f - t)
+            val r0 = .27f + .13f * (1f - y / 22f)
             for (ix in 0..radial) {
                 val th = ix.toFloat() / radial * 2f * PI.toFloat()
                 val sx = sin(th); val cz = cos(th)
                 val a = atan2(cz, sx)
                 val knot = Math.pow(max(0.0, (sin(a * 3 + y * 1.7f) * sin(y * 2.3f + a)).toDouble()), 4.0).toFloat() * .15f
-                val swell = 1 + sin(a * 4 + y * .22f) * .035f + sin(a * 6 - y * .16f) * .025f + sin(a * 2 + y * .11f) * .018f +
-                    sin(a * 7 + sin(y * .18f) * 1.4f) * .012f + knot
+                val swell = 1 + sin(a * 5 + y * .9f) * .06f + sin(a * 7 - y * .4f) * .03f + sin(a * 2 + y * .23f) * .05f +
+                    sin(a * 7 + sin(y * .5f) * 1.4f) * .018f + knot
                 val ell = 1 + sin(2 * a + y * .15f) * .06f
-                // Integrated buttress flare: continuous with the trunk surface, with
-                // broad asymmetric ridges that fade smoothly upward (no separate root tubes).
-                val rootFade = exp(-y / 1.65f)
-                val ridgePhase = a * 6f + .32f + sin(a * 2f + .7f) * .22f
-                val ridge = .38f + .62f * cos(ridgePhase).pow(2f)
-                val flare = 1f + rootFade * (1.20f + ridge * 1.30f)
+                val foot = max(0f, 1 - y / 3.4f)
+                val ridge = Math.pow(max(0.0, cos(a * 5 + .4f).toDouble()), 2.2).toFloat()
+                val flare = 1 + foot * foot * (.55f + ridge * 1.6f)
                 val rr = r0 * swell * flare
                 pos[n * 3] = sx * rr * ell + wx; pos[n * 3 + 1] = y; pos[n * 3 + 2] = cz * rr / ell + wz
                 uv[n * 2] = ix.toFloat() / radial; uv[n * 2 + 1] = y / 22f
@@ -413,13 +408,6 @@ object Geo {
         val pos = FloatArray(rows * (radial + 1) * 3)
         val uv = FloatArray(rows * (radial + 1) * 2)
         val centers = FloatArray(rows * 3)
-        val cumulative = FloatArray(rows)
-        for (row in 1 until rows) {
-            val p0 = points[row - 1]; val p1 = points[row]
-            val dx = p1[0] - p0[0]; val dy = p1[1] - p0[1]; val dz = p1[2] - p0[2]
-            cumulative[row] = cumulative[row - 1] + sqrt(dx * dx + dy * dy + dz * dz)
-        }
-        val totalLength = cumulative[rows - 1].coerceAtLeast(1e-6f)
         var n = 0
         for (row in 0 until rows) {
             val p = points[row]
@@ -452,7 +440,7 @@ object Geo {
                 pos[n * 3 + 1] = p[1] + (uy * ca + vy * sa) * r * verticalScale
                 pos[n * 3 + 2] = p[2] + (uz * ca + vz * sa) * r
                 uv[n * 2] = side.toFloat() / radial
-                uv[n * 2 + 1] = cumulative[row] / totalLength
+                uv[n * 2 + 1] = row.toFloat() / (rows - 1)
                 n++
             }
         }
@@ -551,13 +539,32 @@ object Geo {
         fun trunkX(y: Double) = sin(y * .3) * .09 + sin(y * .71 + 1.3) * .05
         fun trunkZ(y: Double) = cos(y * .26 + .7) * .08
 
-        // Buttress roots are integrated into the trunk mesh's lower radial profile.
-        // Separate root tubes are intentionally omitted to avoid visible seams and ring-like edges.
+        // Six broad, curved buttress roots radiate from inside the trunk flare. Their wide
+        // proximal collars blend into the buried trunk; the flattened profile and descending
+        // centreline make them read as roots rather than pipes laid on the ground.
+        val rootRadial = if (shadow) 4 else if (lifelike) 6 else 5
+        val rootCount = if (shadow) 4 else intArrayOf(6, 4, 7, 4)[species]
+        val rootLength = doubleArrayOf(1.0, .76, 1.32, .78)[species]
+        val rootWidth = doubleArrayOf(1.0, .76, 1.22, .74)[species]
+        val rootPoints = listOf(
+            floatArrayOf(-.38f, 1.34f, 0f), floatArrayOf(.02f, 1.32f, .015f),
+            floatArrayOf(.48f, 1.27f, .045f), floatArrayOf(.98f, 1.19f, .09f),
+            floatArrayOf(1.52f, 1.08f, .15f), floatArrayOf(2.10f, .91f, .22f),
+            floatArrayOf(2.62f, .66f, .29f)
+        )
+        val rootRadii = floatArrayOf(.46f, .43f, .37f, .29f, .20f, .095f, .009f).map { it * rootWidth.toFloat() }.toFloatArray()
+        val root = sweptTube(rootPoints, rootRadii, rootRadial, verticalScale = .78f)
+        for (r in 0 until rootCount) {
+            val ang = (r / rootCount.toDouble()) * PI * 2 + (h(210 + r) - .5) * .28
+            val rootScale = (.88 + h(230 + r) * .24) * rootLength
+            add(root, cos(ang) * .12, 0.0, -sin(ang) * .12, 0.0, ang, 0.0,
+                rootScale, .92, rootScale, Mat.XYZ)
+        }
 
         // Primary limbs grow from broad collars buried in the stem. Their centre lines arc
         // outward and upward; a long radius falloff makes the joint organic instead of a pipe
         // inserted into the trunk. Secondary forks begin inside the parent limb for ghost safety.
-        val branchCount = if (shadow) 4 else intArrayOf(4, 5, 5, 4)[species]
+        val branchCount = if (shadow) 5 else intArrayOf(8, 9, 9, 6)[species]
         val branchRadial = if (shadow) 4 else if (lifelike) 6 else 5
         for (b in 0 until branchCount) {
             val angle = b / branchCount.toDouble() * PI * 2 + (h(202 + b) - .5) * .42
@@ -565,31 +572,31 @@ object Geo {
             val sideX = -dz; val sideZ = dx
             val level = b / (if (species == 1) 3.0 else 2.0)
             val y = when (species) {
-                1 -> 15.8 + level * 1.15 + h(60 + b) * .42
-                2 -> 16.0 + b * .82 + h(60 + b) * .5
-                3 -> 16.2 + b * .92 + h(60 + b) * .45
-                else -> 15.7 + b * .88 + h(60 + b) * .45
+                1 -> 5.0 + level * 4.2 + h(60 + b) * .42
+                2 -> 6.8 + b * 1.32 + h(60 + b) * .5
+                3 -> 10.0 + b * 1.55 + h(60 + b) * .45
+                else -> 7.2 + b * 1.42 + h(60 + b) * .45
             }
             val rawLength = when (species) {
-                1 -> 4.6 - level * .42
-                2 -> 4.0 + h(95 + b) * 1.15
-                3 -> 3.2 + h(95 + b) * .9
-                else -> 3.8 + h(95 + b) * 1.25
+                1 -> 4.1 - level * .78
+                2 -> 3.1 + h(95 + b) * 1.15
+                3 -> 2.0 + h(95 + b) * .9
+                else -> 3.0 + h(95 + b) * 1.25
             }
             val length = rawLength.coerceAtLeast(1.0) * doubleArrayOf(1.0, .9, 1.16, .92)[species]
             val bend = (h(80 + b) - .5) * if (species == 2) .82 else .58
             val cx = trunkX(y); val cz = trunkZ(y)
             val points = listOf(
                 floatArrayOf((cx + dx * .015).toFloat(), (y - .34).toFloat(), (cz + dz * .015).toFloat()),
-                floatArrayOf((cx + dx * (length * .13) + sideX * bend * .08).toFloat(), (y + length * .10).toFloat(), (cz + dz * (length * .13) + sideZ * bend * .08).toFloat()),
-                floatArrayOf((cx + dx * (length * .31) + sideX * bend * .28).toFloat(), (y + length * .23).toFloat(), (cz + dz * (length * .31) + sideZ * bend * .28).toFloat()),
-                floatArrayOf((cx + dx * (length * .55) + sideX * bend * .62).toFloat(), (y + length * .40).toFloat(), (cz + dz * (length * .55) + sideZ * bend * .62).toFloat()),
-                floatArrayOf((cx + dx * (length * .80) + sideX * bend).toFloat(), (y + length * .58).toFloat(), (cz + dz * (length * .80) + sideZ * bend).toFloat()),
-                floatArrayOf((cx + dx * length + sideX * bend * 1.12).toFloat(), (y + length * .72).toFloat(), (cz + dz * length + sideZ * bend * 1.12).toFloat())
+                floatArrayOf((cx + dx * (length * .13) + sideX * bend * .08).toFloat(), (y - .19).toFloat(), (cz + dz * (length * .13) + sideZ * bend * .08).toFloat()),
+                floatArrayOf((cx + dx * (length * .31) + sideX * bend * .28).toFloat(), (y + .015).toFloat(), (cz + dz * (length * .31) + sideZ * bend * .28).toFloat()),
+                floatArrayOf((cx + dx * (length * .55) + sideX * bend * .62).toFloat(), (y + .30).toFloat(), (cz + dz * (length * .55) + sideZ * bend * .62).toFloat()),
+                floatArrayOf((cx + dx * (length * .80) + sideX * bend).toFloat(), (y + .72).toFloat(), (cz + dz * (length * .80) + sideZ * bend).toFloat()),
+                floatArrayOf((cx + dx * length + sideX * bend * 1.12).toFloat(), (y + 1.28).toFloat(), (cz + dz * length + sideZ * bend * 1.12).toFloat())
             )
             val speciesThickness = doubleArrayOf(1.0, .82, 1.28, .72)[species]
             val thickness = ((.90 + h(90 + b) * .20) * speciesThickness).toFloat()
-            val radii = floatArrayOf(.48f, .43f, .34f, .25f, .14f, .018f).map { it * thickness }.toFloatArray()
+            val radii = floatArrayOf(.36f, .325f, .265f, .195f, .112f, .022f).map { it * thickness }.toFloatArray()
             add(markAsBranch(sweptTube(points, radii, branchRadial)))
 
             // A few small forks are also curved and tapered; their first ring is embedded in
