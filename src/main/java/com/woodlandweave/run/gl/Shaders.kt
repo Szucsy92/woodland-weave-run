@@ -239,18 +239,24 @@ void main() {
   float geometryRoughness = max(max(dxy.x, dxy.y), dxy.z);
   vec3 albedo = uColor;
   float rough = uRough;
-  // Negative U marks branch vertices in the merged tree-body mesh. Decode the marker while
-  // preserving their original bark UVs; this keeps the old branch shading in one draw.
+  // Negative U marks branch vertices in the merged tree-body mesh. This marker and the
+  // three-species atlas decoder belong ONLY to tree trunks/branches (uMode 4).
+  // Ground UVs are world-space coordinates and must never be interpreted as atlas tiles.
   bool branchSurface = (uMode == 4) && vUv.x < 0.0;
-  float barkU = branchSurface ? (-vUv.x - 1.0) : vUv.x;
-  // Three compact species tiles share one atlas. Decode the species before repeating U,
-  // then keep the sample inside its padded tile to avoid cross-species bleed at mip levels.
-  float barkTile = clamp(floor(barkU * 3.0), 0.0, 2.0);
-  float barkLocalU = clamp(barkU * 3.0 - barkTile, 0.0, 1.0);
-  float barkRepeatU = fract(barkLocalU * uUvScale.x);
-  float barkAtlasU = (barkTile + mix(0.017, 0.983, barkRepeatU)) / 3.0;
-  // Texture rows start at the top of the image here, three.js flips them: undo that so maps and normals line up.
-  vec2 tuv = vec2(barkAtlasU, (1.0 - vUv.y) * uUvScale.y);
+  vec2 tuv;
+  if (uMode == 4) {
+    float barkU = branchSurface ? (-vUv.x - 1.0) : vUv.x;
+    // Decode the species before repeating U, keeping samples inside the padded atlas tile.
+    float barkTile = clamp(floor(barkU * 3.0), 0.0, 2.0);
+    float barkLocalU = clamp(barkU * 3.0 - barkTile, 0.0, 1.0);
+    float barkRepeatU = fract(barkLocalU * uUvScale.x);
+    float barkAtlasU = (barkTile + mix(0.017, 0.983, barkRepeatU)) / 3.0;
+    tuv = vec2(barkAtlasU, (1.0 - vUv.y) * uUvScale.y);
+  } else {
+    // Ground (and any future mapped non-atlas surface) uses its own repeating UV space.
+    // GL_REPEAT handles the integer part; do not clamp or decode it as a bark species.
+    tuv = vec2(vUv.x * uUvScale.x, (1.0 - vUv.y) * uUvScale.y);
+  }
   if (uMaps > 0.5) {
     // The colour maps are SRGB8_ALPHA8 textures: the sampler already returns filtered linear light.
     albedo *= texture(uTex, tuv, uLodBias).rgb;

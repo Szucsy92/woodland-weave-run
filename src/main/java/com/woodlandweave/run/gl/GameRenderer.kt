@@ -241,7 +241,10 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         barkTex = GlUtil.assetTexture(context, "tree-bark-atlas.jpg", srgb = true)
         barkN = GlUtil.assetTexture(context, "tree-bark-normal-atlas.jpg")
         barkR = GlUtil.assetTexture(context, "tree-bark-rough-atlas.jpg")
-        floorTex = GlUtil.assetTexture(context, "wet-ground.jpg", srgb = true); floorN = GlUtil.assetTexture(context, "ground-normal.jpg"); floorR = GlUtil.assetTexture(context, "ground-rough.jpg")
+        // Dedicated woodland leaf-litter material; never shares the tree-bark atlas.
+        floorTex = GlUtil.assetTexture(context, "forest-ground.jpg", srgb = true)
+        floorN = GlUtil.assetTexture(context, "forest-ground-normal.jpg")
+        floorR = GlUtil.assetTexture(context, "forest-ground-rough.jpg")
         glowLow = GlUtil.glowTexture(floatArrayOf(0f, .2f, 1f), intArrayOf(255, 153, 0))
         // Spores: a soft, peaked mote (no flat plateau, so no visible disc edge), identical on every tier.
         sporeLow = GlUtil.smoothGlowTexture { r -> sporeProfile(r) }
