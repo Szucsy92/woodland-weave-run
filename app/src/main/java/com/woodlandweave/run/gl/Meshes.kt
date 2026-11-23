@@ -359,7 +359,12 @@ object Geo {
                 val ell = 1 + sin(2 * a + y * .15f) * .06f
                 val foot = max(0f, 1 - y / 3.4f)
                 val ridge = Math.pow(max(0.0, cos(a * 5 + .4f).toDouble()), 2.2).toFloat()
-                val flare = 1 + foot * foot * (.55f + ridge * 1.6f)
+                // Buttress flare fades out below the ground surface.
+                // The separate radial roots retain their star-shaped silhouette.
+                val groundT = ((y - 1.05f) / 1.15f).coerceIn(0f, 1f)
+                val groundFade = groundT * groundT * (3f - 2f * groundT)
+                val flare = 1 + foot * foot * groundFade *
+                    (.55f + ridge * 1.6f)
                 val rr = r0 * swell * flare
                 pos[n * 3] = sx * rr * ell + wx; pos[n * 3 + 1] = y; pos[n * 3 + 2] = cz * rr / ell + wz
                 uv[n * 2] = ix.toFloat() / radial; uv[n * 2 + 1] = y / 22f
