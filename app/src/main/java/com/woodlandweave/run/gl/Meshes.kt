@@ -696,10 +696,10 @@ object Geo {
                 (if (r(250 + it) < .18) .78 else 1.0)
         }
         // Lower buttress shoulders: the star points rise less vertically above the soil line.
-        private val rootHeight = DoubleArray(k) { .40 + r(260 + it) * .30 }
+        private val rootHeight = DoubleArray(k) { .30 + r(260 + it) * .22 }
         private val rootSteep = DoubleArray(k) { 1.85 + r(270 + it) * .85 }
         // Narrower rounded ridges create deeper inward-curving valleys between neighbouring star roots.
-        private val rootSigma = (2 * PI / n) * .50
+        private val rootSigma = (2 * PI / n) * .43
 
         fun cx(y: Double) = sin(y * .3 + ph[0]) * swayA + sin(y * .71 + ph[1]) * swayB
         fun cz(y: Double) = cos(y * .26 + ph[2]) * swayZ + sin(y * .5 + ph[3]) * .03
@@ -738,7 +738,7 @@ object Geo {
                 val angular = abs(d) / rootSigma
                 // A slightly tighter super-Gaussian keeps each root tip distinct and pulls
                 // the two intervening arcs inward toward the trunk without sharp mesh corners.
-                val ridge = exp(-pow(angular, 2.25))
+                val ridge = exp(-pow(angular, 2.8))
                 ext = maxOf(ext, rootReach[i] * f * ridge)
             }
             // Broad, softly rounded underground heel. Preserve a substantial core
