@@ -323,7 +323,7 @@ fun exitWarp(s: Simulation) {
     s.warp = -1.0
     s.warpOut = 0.0
     s.stumble = 0.0; s.speedMul = 1.0
-    s.pushX = 0.0
+    s.pushX = 0.0; s.pushZ = 0.0
     s.universe += 1
     s.universeAt = s.elapsed
     s.cleared.clear(); s.clearedAt.clear()
@@ -372,7 +372,7 @@ fun obstaclesAround(cx: Int, cz: Int, keep: Double = 0.84): List<Obstacle> {
 class Simulation {
     var x = 0.0; var z = 0.0; var heading = 0.0; var distance = 0.0; var elapsed = 0.0; var phaseTime = 0.0
     var phase = Phase.MENU; var hits = 0; var cooldown = 0.0; var impact = 0.0; var impactSide = 1
-    var pushX = 0.0; var lastTree = ""; var cell = ""
+    var pushX = 0.0; var pushZ = 0.0; var lastTree = ""; var cell = ""
     var trees: List<Tree> = emptyList(); var obstacles: List<Obstacle> = emptyList()
     var difficulty = Difficulty.EASY; var stumble = 0.0; var speedMul = 1.0; var lastObstacle = ""; var stride = 0.0
     var pause = PauseState.NONE; var pauseTime = 0.0
@@ -387,7 +387,7 @@ class Simulation {
     fun reset(difficulty: Difficulty = this.difficulty, mode: GameMode = this.mode, phase: Phase = Phase.MENU, elapsed: Double = 0.0) {
         x = 0.0; z = 0.0; heading = 0.0; distance = 0.0; this.elapsed = elapsed; phaseTime = 0.0
         this.phase = phase; hits = 0; cooldown = 0.0; impact = 0.0; impactSide = 1
-        pushX = 0.0; lastTree = ""; cell = ""; trees = emptyList(); obstacles = emptyList()
+        pushX = 0.0; pushZ = 0.0; lastTree = ""; cell = ""; trees = emptyList(); obstacles = emptyList()
         this.difficulty = difficulty; stumble = 0.0; speedMul = 1.0; lastObstacle = ""; stride = 0.0
         pause = PauseState.NONE; pauseTime = 0.0
         this.mode = mode; powerUp = null; powerUpTime = 0.0; waveSpeed = BASE_SPEED
@@ -434,23 +434,26 @@ fun collide(s: Simulation, tree: Tree): Boolean {
     val ellipseDist2 = nx * nx + nz * nz
     if (ellipseDist2 >= 1.0) return false
 
-    val side = if (dx == 0.0) (if (hash(fl(tree.x), fl(tree.z), 7) > 0.5) 1.0 else -1.0) else sign(dx)
-    if (ellipseDist2 < 1e-8) {
-        s.x = tree.x + side * (radiusX + 0.012)
-    } else if (dz > 0.0) {
-        // While approaching from the front, slide sideways along the true trunk silhouette.
-        val zRatio = (dz / radiusZ).coerceIn(-0.999, 0.999)
-        val clearX = radiusX * sqrt(1.0 - zRatio * zRatio)
-        s.x = tree.x + side * (clearX + 0.012)
-    } else {
-        // If already beside/behind the trunk, project out along the ellipse normal.
-        val invLen = 1.0 / sqrt(ellipseDist2.coerceAtLeast(1e-8))
-        s.x = tree.x + dx * invLen * 1.012
-        s.z = tree.z + dz * invLen * 1.012
-    }
-    s.pushX = side * 2.6
-    s.heading = if (s.mode == GameMode.FREEROAM) s.heading - side * 0.10
-    else max(-MAX_HEADING, min(MAX_HEADING, s.heading - side * 0.10))
+    // Resolve only the small overlap accumulated during this 120 Hz substep.
+    // Keep the heading untouched: a trunk hit should make the player lean/slide,
+    // not spin the camera or snap the player to a distant position.
+    val dist = hypot(dx, dz)
+    val ux = if (dist > 0.001) dx / dist
+             else if (hash(fl(tree.x), fl(tree.z), 7) > 0.5) 1.0 else -1.0
+    val uz = if (dist > 0.001) dz / dist else 0.0
+    val penetration = if (dist > 0.001) (dist / sqrt(ellipseDist2) - dist).coerceAtMost(0.07) else 0.07
+    s.x += ux * penetration
+    s.z += uz * penetration
+
+    // Push toward the contacted side in world space. The damped impulse is
+    // intentionally gentle and decays in step(), producing a visible slide
+    // instead of the old abrupt lateral kick.
+    val rightX = cos(s.heading)
+    val rightZ = -sin(s.heading)
+    val side = if (ux * rightX + uz * rightZ >= 0.0) 1.0 else -1.0
+    val impulse = 1.25
+    s.pushX += rightX * side * impulse
+    s.pushZ += rightZ * side * impulse
     if (s.cooldown > 0 || s.lastTree == tree.id) return false
     s.hits++
     s.cooldown = 0.9
@@ -607,8 +610,9 @@ fun stepSimulation(s: Simulation, steering: Double, delta: Double) {
         s.heading = if (free) s.heading - steering * FREEROAM_TURN * sub
         else max(-MAX_HEADING, min(MAX_HEADING, s.heading - steering * 1.7 * sub))
         s.pushX *= exp(-7 * sub)
+        s.pushZ *= exp(-7 * sub)
         s.x += (-sin(s.heading) * speed + s.pushX) * sub
-        s.z -= cos(s.heading) * speed * sub
+        s.z += (-cos(s.heading) * speed + s.pushZ) * sub
         s.distance += speed * sub
         s.stride += strideMultiplier(speed) * STRIDE_RATE * sub
         for (tree in s.trees) collide(s, tree)
