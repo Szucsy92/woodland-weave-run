@@ -738,7 +738,7 @@ object Geo {
                 val angular = abs(d) / rootSigma
                 // A slightly tighter super-Gaussian keeps each root tip distinct and pulls
                 // the two intervening arcs inward toward the trunk without sharp mesh corners.
-                val ridge = exp(-pow(angular, 2.8))
+                val ridge = exp(-angular.pow(2.8))
                 ext = maxOf(ext, rootReach[i] * f * ridge)
             }
             // Broad, softly rounded underground heel. Preserve a substantial core
