@@ -625,9 +625,9 @@ object Geo {
     // Finomhangolva a Tree Mesh Studio-ban (2026-11-23 14:25). Minden érték fajonként: 0 = oak, 1 = pine, 2 = ancient, 3 = birch.
     // A fa-paraméterek egy az egyben megegyeznek a 3D előnézetben látott beállításokkal (TreeTuning.json).
 
-    private val TREE_HEIGHT = doubleArrayOf(20.5, 20.5, 24.0, 20.5)                    // Magasság
-    private val TREE_HEIGHT_RAND = doubleArrayOf(3.0, 3.0, 2.0, 3.0)                   // Magasság szórása
-    private val TREE_TRUNK_SCALE = doubleArrayOf(1.45, 0.85, 2.1, 0.75)                // Törzs vastagsága
+    private val TREE_HEIGHT = doubleArrayOf(20.5, 20.5, 22.0, 20.5)                    // Magasság
+    private val TREE_HEIGHT_RAND = doubleArrayOf(3.0, 3.0, 0.0, 3.0)                   // Magasság szórása
+    private val TREE_TRUNK_SCALE = doubleArrayOf(1.45, 0.85, 1.30, 0.75)                // Törzs vastagsága
     private val TREE_TRUNK_RADIUS = doubleArrayOf(0.27, 0.27, 0.28, 0.27)              // Csúcs sugara
     private val TREE_TRUNK_TAPER = doubleArrayOf(0.13, 0.13, 0.12, 0.13)               // Elvékonyodás felfelé
     private val TREE_FOOT_H = doubleArrayOf(1.7, 1.7, 3.2, 1.7)                        // Tő kiszélesedés magassága
@@ -656,11 +656,11 @@ object Geo {
     private val TREE_LIMB_SPACING = doubleArrayOf(1.42, 1.4, 1.5, 1.55)                // Ágak távolsága
     private val TREE_LIMB_JITTER = doubleArrayOf(0.45, 0.42, 0.5, 0.45)                // Ágmagasság szórása
     private val TREE_LEVEL_JITTER = doubleArrayOf(1.4, 1.4, 1.0, 1.4)                  // Szintek szórása
-    private val TREE_LIMB_LEN = doubleArrayOf(1.2, 0.95, 1.35, 0.95)                   // Ágak hossza
+    private val TREE_LIMB_LEN = doubleArrayOf(1.2, 0.95, 1.16, 0.95)                   // Ágak hossza
     private val TREE_LIMB_LEN_BASE = doubleArrayOf(3.0, 4.1, 3.4, 2.0)                 // Alap ághossz
     private val TREE_LIMB_LEN_SLOPE = doubleArrayOf(0.0, -0.26, -0.08, 0.0)            // Hossz változása felfelé
     private val TREE_LIMB_LEN_RAND = doubleArrayOf(1.25, 0.0, 1.0, 0.9)                // Ághossz szórása
-    private val TREE_LIMB_THICK = doubleArrayOf(1.4, 0.85, 1.75, 0.75)                 // Ágak vastagsága
+    private val TREE_LIMB_THICK = doubleArrayOf(1.4, 0.85, 1.28, 0.75)                 // Ágak vastagsága
     private val TREE_LIMB_RISE = doubleArrayOf(-0.6, -0.6, 0.2, -0.6)                  // Emelkedés (legkisebb)
     private val TREE_LIMB_RISE_RAND = doubleArrayOf(2.4, 2.4, 2.2, 2.4)                // Emelkedés szórása
     private val TREE_LIMB_BEND = doubleArrayOf(1.8, 1.8, 1.2, 1.8)                     // Oldalirányú hajlás
