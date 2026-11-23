@@ -691,13 +691,14 @@ object Geo {
         // Keep the legacy tree's curved, individually readable buttress roots, but blend
         // them into a compact rounded root crown instead of long star points.
         private val rootReach = DoubleArray(k) {
-            // Slightly more visible radial buttresses, like the reference, without long star spikes.
-            .82 * TREE_ROOT_LEN[sp] * (.62 + r(230 + it) * .36) *
-                (if (r(250 + it) < .22) .72 else 1.0)
+            // More pronounced, gently swept star roots; keep each tip short enough to avoid a spiky silhouette.
+            .98 * TREE_ROOT_LEN[sp] * (.70 + r(230 + it) * .38) *
+                (if (r(250 + it) < .18) .76 else 1.0)
         }
-        private val rootHeight = DoubleArray(k) { .5 + r(260 + it) * .4 }
-        private val rootSteep = DoubleArray(k) { 1.5 + r(270 + it) * .7 }
-        private val rootSigma = (2 * PI / n) * 1.48
+        private val rootHeight = DoubleArray(k) { .58 + r(260 + it) * .48 }
+        private val rootSteep = DoubleArray(k) { 1.65 + r(270 + it) * .8 }
+        // Narrower angular shoulders leave visibly deeper, rounded valleys between adjacent roots.
+        private val rootSigma = (2 * PI / n) * .62
 
         fun cx(y: Double) = sin(y * .3 + ph[0]) * swayA + sin(y * .71 + ph[1]) * swayB
         fun cz(y: Double) = cos(y * .26 + ph[2]) * swayZ + sin(y * .5 + ph[3]) * .03
@@ -715,7 +716,7 @@ object Geo {
                 val depth = maxOf(0.0, TREE_GROUND - y)
                 // The root ridge wanders slightly as it descends instead of forming a perfectly straight vertical fin.
                 // The angular drift is deterministic per tree, so no per-frame work or random state is needed.
-                val drift = sin(depth * (.48 + r(280 + i) * .22) + ph[i % ph.size]) * (.035 + r(285 + i) * .055)
+                val drift = sin(depth * (.62 + r(280 + i) * .26) + ph[i % ph.size]) * (.055 + r(285 + i) * .085)
                 val d = wrapAngle(a - (rootPhi[i] + drift))
                 // A broad buttress rises out of the soil, reaches its widest section just below grade, then
                 // tapers over ~2.4 m into a buried root tip. The extra depth is what the shockwave reveals.
@@ -731,7 +732,11 @@ object Geo {
                     val smooth = t * t * (3.0 - 2.0 * t)
                     if (depth <= .18) .68 + .10 * depth / .18 else .78 * (1.0 - smooth)
                 })
-                ext = maxOf(ext, rootReach[i] * f * exp(-(d / rootSigma) * (d / rootSigma)))
+                // A slightly sharper rounded ridge gives each buttress a curved star-like crest,
+                // while the narrower profile opens a deeper concave valley between neighbouring roots.
+                val angular = abs(d) / rootSigma
+                val ridge = exp(-(angular * angular))
+                ext = maxOf(ext, rootReach[i] * f * ridge)
             }
             // Broad, softly rounded underground heel. Preserve a substantial core
             // below the root tips; close it with a shallow dome rather than a cone.
