@@ -39,7 +39,10 @@ enum class ForestMood { MANUAL, AUTO }
 enum class SecretType { MONOLITH, RING, LANTERN }
 enum class SurviveStage { LIT, DYING, DARK, RED }
 
-class Tree(val x: Double, val z: Double, val scale: Double, val id: String)
+class Tree(val x: Double, val z: Double, val scale: Double, val id: String) {
+    // Calculated once when the deterministic tree is created; collision checks do no per-frame hashing.
+    val collisionRadii: Pair<Double, Double> = treeCollisionRadii(this)
+}
 class Obstacle(val x: Double, val z: Double, val big: Boolean, val radius: Double, val id: String)
 class PowerUp(var x: Double, var z: Double, val type: PowerUpType, val id: String)
 class Secret(val x: Double, val z: Double, val type: SecretType, val id: String)
@@ -392,19 +395,21 @@ fun runSpeed(s: Simulation): Double {
 
 // ---- collisions -------------------------------------------------------------------------------
 
-// Conservative ground-level trunk radii derived from the three rendered tree meshes
-// (oak, pine, ancient), including the current +5% thickness adjustment. These are
-// the outer trunk envelopes before the per-instance scale is applied; roots are
-// intentionally excluded so their unchanged radial reach does not become a solid wall.
-private val TREE_TRUNK_COLLISION_RADIUS = doubleArrayOf(1.244, 0.729, 1.399)
-private const val PLAYER_COLLISION_RADIUS = 0.22
+// Ground-level trunk radii reconstructed from Meshes.treeBody() and GameRenderer.treeProp().
+// Root fins are deliberately excluded: they remain visible but do not form an invisible collision wall.
+private val TREE_TRUNK_RADIUS_AT_GRADE = doubleArrayOf(0.827, 0.485, 0.914)
+private val TREE_GIRTH = doubleArrayOf(0.8, 0.9, 1.15)
+private const val PLAYER_COLLISION_RADIUS = 0.16
 
-/** Matches the species and horizontal body scale used by GameRenderer.treeProp(). */
-internal fun treeCollisionRadius(tree: Tree): Double {
+/** Elliptical trunk footprint using the same per-tree width/depth scales as the rendered body. */
+private fun treeCollisionRadii(tree: Tree): Pair<Double, Double> {
     val x = fl(tree.x); val z = fl(tree.z)
     val species = (hash(x, z, 200) * 3.0).toInt().coerceIn(0, 2)
-    val bodyScale = 0.88 + hash(x, z, 313) * 0.26
-    return TREE_TRUNK_COLLISION_RADIUS[species] * bodyScale * tree.scale + PLAYER_COLLISION_RADIUS
+    val trunkX = TREE_TRUNK_RADIUS_AT_GRADE[species] * TREE_GIRTH[species] * tree.scale *
+        (0.86 + hash(x, z, 310) * 0.30)
+    val trunkZ = TREE_TRUNK_RADIUS_AT_GRADE[species] * TREE_GIRTH[species] * tree.scale *
+        (0.86 + hash(x, z, 311) * 0.30)
+    return (trunkX + PLAYER_COLLISION_RADIUS) to (trunkZ + PLAYER_COLLISION_RADIUS)
 }
 
 fun collide(s: Simulation, tree: Tree): Boolean {
@@ -412,23 +417,30 @@ fun collide(s: Simulation, tree: Tree): Boolean {
     if (s.powerUp == PowerUpType.GHOST || s.warp >= 0) return false
     if (s.cleared.contains(tree.id)) return false
     val dx = s.x - tree.x; val dz = s.z - tree.z
-    val radius = treeCollisionRadius(tree)
-    val distance = hypot(dx, dz)
-    if (distance >= radius) return false
+    val (radiusX, radiusZ) = tree.collisionRadii
+    val nx = dx / radiusX; val nz = dz / radiusZ
+    val ellipseDist2 = nx * nx + nz * nz
+    if (ellipseDist2 >= 1.0) return false
+
     val side = if (dx == 0.0) (if (hash(fl(tree.x), fl(tree.z), 7) > 0.5) 1.0 else -1.0) else sign(dx)
-    val nz = if (distance > 0.001) dz / distance else 0.0
-    if (nz > 0) {
-        s.x = tree.x + side * (sqrt(max(0.0, radius * radius - dz * dz)) + 0.01)
+    if (ellipseDist2 < 1e-8) {
+        s.x = tree.x + side * (radiusX + 0.012)
+    } else if (dz > 0.0) {
+        // While approaching from the front, slide sideways along the true trunk silhouette.
+        val zRatio = (dz / radiusZ).coerceIn(-0.999, 0.999)
+        val clearX = radiusX * sqrt(1.0 - zRatio * zRatio)
+        s.x = tree.x + side * (clearX + 0.012)
     } else {
-        val nx = if (distance > 0.001) dx / distance else side
-        s.x += nx * (radius - distance + 0.01)
-        s.z += nz * (radius - distance + 0.01)
+        // If already beside/behind the trunk, project out along the ellipse normal.
+        val invLen = 1.0 / sqrt(ellipseDist2.coerceAtLeast(1e-8))
+        s.x = tree.x + dx * invLen * 1.012
+        s.z = tree.z + dz * invLen * 1.012
     }
-    s.pushX = side * 3.5
-    s.heading = if (s.mode == GameMode.FREEROAM) s.heading - side * 0.14
-    else max(-MAX_HEADING, min(MAX_HEADING, s.heading - side * 0.14))
+    s.pushX = side * 2.6
+    s.heading = if (s.mode == GameMode.FREEROAM) s.heading - side * 0.10
+    else max(-MAX_HEADING, min(MAX_HEADING, s.heading - side * 0.10))
     if (s.cooldown > 0 || s.lastTree == tree.id) return false
-    s.hits += 1
+    s.hits++
     s.cooldown = 0.9
     s.lastTree = tree.id
     s.impact = IMPACT_DURATION

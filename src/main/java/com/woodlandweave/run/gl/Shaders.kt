@@ -99,7 +99,7 @@ void main() {
   float hz = gh(w.x, w.y + e) - gh(w.x, w.y - e);
   vN = normalize(vec3(-hx / (2.0 * e), 1.0, -hz / (2.0 * e)));
   vW = vec3(w.x, h, w.y);
-  vUv = w / 3.125;
+  vUv = w / 4.5;
   gl_Position = uVP * vec4(vW, 1.0);
 }
 """
