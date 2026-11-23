@@ -147,3 +147,21 @@ only work that does not show is removed.
   (the one change that is about motion, not stills: remove `setFrameRate` in `GameView` to get the high refresh rate back).
 - Not measured here (no device, no compiler): check frame time on a weak phone and compare far crowns and thin shadows with
   the previous build.
+
+## One-surface trees (all tiers)
+The tree body is no longer a pile of separate tubes. `Geo.treeBody()` builds trunk, root flare and limbs as **one connected
+surface** (a single ring grid; each limb is stitched into a hole of the grid and shares the loop around it), so there are no
+buried collars, no overlapping tubes, no normal seams, and the normals are computed once. Roots are lobes of the flare's
+radius, not tubes: rounded, low roots that curve down into the soil (nothing open beneath them) on a columnar stem with a foot flare; the top of the stem is closed. `Geo.treeCanopy()` drops the crown triangles that lie
+inside neighbouring lobes (never visible).
+
+No two trees are alike: every species has `SHAPES` = 4 different bodies (own batch each; sway, burl, taper, each root's
+place, reach, height and width, one to three limbs per level, each limb's place, length, thickness, rise or droop and curl),
+and every tree gets its own oval scale (trunk and roots), height and crown proportions from its position.
+
+Triangles of a body are about 560-1150 (before: 1236-2242); the shadow-map body 100-170 (before: 512). The canopy loses about
+15-22% (oak, ancient, birch). Exact numbers vary with the shape; `TreeMeshTest` checks them against `treeBodyLegacy()`.
+
+Visual differences: limbs share the trunk's bark shading (the negative-U branch marker is gone: it cannot cross a shared join)
+and the shadow-map body has no limbs. Not compiled or run on a device where this was written: build with CI, check on
+hardware, and measure frame time before calling it cheaper.
