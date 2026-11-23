@@ -316,7 +316,9 @@ fun treesAround(cx: Int, cz: Int, keep: Double = 0.57, universe: Int = 0, radius
         val x = gx * CELL + hash(hx, hz, 1) * CELL
         val z = gz * CELL + hash(hx, hz, 2) * CELL
         if (x * x + z * z < 12 * 12) continue
-        trees += Tree(x, z, (0.75 + hash(hx, hz, 3) * 0.9) * size, "$gx:$gz" + (if (salt != 0) "~$salt" else ""))
+        val sizeTier = minOf(2, (hash(hx, hz, 3) * 3.0).toInt())
+        val treeScale = doubleArrayOf(0.78, 1.12, 1.48)[sizeTier] * size
+        trees += Tree(x, z, treeScale, "$gx:$gz" + (if (salt != 0) "~$salt" else ""))
     }
     return trees
 }

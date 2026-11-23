@@ -524,13 +524,13 @@ object Geo {
             parts += data to m
         }
         val trunkRadial = if (shadow) 10 else if (lifelike) 16 else 12
-        val species = variant.coerceIn(0, 3) // oak, pine, ancient, birch
+        val species = variant.coerceIn(0, 2) // oak, pine, ancient
         val trunk = if (shadow) {
             trunkLifelike(trunkRadial, listOf(22f, 16f, 10f, 5f, 2.2f, .7f, 0f))
         } else trunkLifelike(trunkRadial)
         // Species silhouette comes from the trunk profile, not additional geometry.
-        val trunkScale = doubleArrayOf(1.0, .80, 1.30, .70)[species]
-        val lean = doubleArrayOf(.006, .014, .032, .010)[species]
+        val trunkScale = doubleArrayOf(1.0, .80, 1.30)[species]
+        val lean = doubleArrayOf(.006, .014, .032)[species]
         add(trunk, rx = lean, rz = -lean * .55, sx = trunkScale, sz = trunkScale)
 
         fun h(salt: Int) = hash(species, 0, salt)
@@ -543,9 +543,9 @@ object Geo {
         // proximal collars blend into the buried trunk; the flattened profile and descending
         // centreline make them read as roots rather than pipes laid on the ground.
         val rootRadial = if (shadow) 4 else if (lifelike) 6 else 5
-        val rootCount = if (shadow) 4 else intArrayOf(6, 4, 7, 4)[species]
-        val rootLength = doubleArrayOf(1.0, .76, 1.32, .78)[species]
-        val rootWidth = doubleArrayOf(1.0, .76, 1.22, .74)[species]
+        val rootCount = if (shadow) 4 else intArrayOf(6, 4, 7)[species]
+        val rootLength = doubleArrayOf(1.0, .76, 1.32)[species]
+        val rootWidth = doubleArrayOf(1.0, .76, 1.22)[species]
         val rootPoints = listOf(
             floatArrayOf(-.38f, 1.34f, 0f), floatArrayOf(.02f, 1.32f, .015f),
             floatArrayOf(.48f, 1.27f, .045f), floatArrayOf(.98f, 1.19f, .09f),
@@ -564,7 +564,7 @@ object Geo {
         // Primary limbs grow from broad collars buried in the stem. Their centre lines arc
         // outward and upward; a long radius falloff makes the joint organic instead of a pipe
         // inserted into the trunk. Secondary forks begin inside the parent limb for ghost safety.
-        val branchCount = if (shadow) 5 else intArrayOf(8, 9, 9, 6)[species]
+        val branchCount = if (shadow) 5 else intArrayOf(8, 9, 9)[species]
         val branchRadial = if (shadow) 4 else if (lifelike) 6 else 5
         for (b in 0 until branchCount) {
             val angle = b / branchCount.toDouble() * PI * 2 + (h(202 + b) - .5) * .42
@@ -574,16 +574,14 @@ object Geo {
             val y = when (species) {
                 1 -> 5.0 + level * 4.2 + h(60 + b) * .42
                 2 -> 6.8 + b * 1.32 + h(60 + b) * .5
-                3 -> 10.0 + b * 1.55 + h(60 + b) * .45
                 else -> 7.2 + b * 1.42 + h(60 + b) * .45
             }
             val rawLength = when (species) {
                 1 -> 4.1 - level * .78
                 2 -> 3.1 + h(95 + b) * 1.15
-                3 -> 2.0 + h(95 + b) * .9
                 else -> 3.0 + h(95 + b) * 1.25
             }
-            val length = rawLength.coerceAtLeast(1.0) * doubleArrayOf(1.0, .9, 1.16, .92)[species]
+            val length = rawLength.coerceAtLeast(1.0) * doubleArrayOf(1.0, .9, 1.16)[species]
             val bend = (h(80 + b) - .5) * if (species == 2) .82 else .58
             val cx = trunkX(y); val cz = trunkZ(y)
             val points = listOf(
@@ -594,7 +592,7 @@ object Geo {
                 floatArrayOf((cx + dx * (length * .80) + sideX * bend).toFloat(), (y + .72).toFloat(), (cz + dz * (length * .80) + sideZ * bend).toFloat()),
                 floatArrayOf((cx + dx * length + sideX * bend * 1.12).toFloat(), (y + 1.28).toFloat(), (cz + dz * length + sideZ * bend * 1.12).toFloat())
             )
-            val speciesThickness = doubleArrayOf(1.0, .82, 1.28, .72)[species]
+            val speciesThickness = doubleArrayOf(1.0, .82, 1.28)[species]
             val thickness = ((.90 + h(90 + b) * .20) * speciesThickness).toFloat()
             val radii = floatArrayOf(.36f, .325f, .265f, .195f, .112f, .022f).map { it * thickness }.toFloatArray()
             add(markAsBranch(sweptTube(points, radii, branchRadial)))
@@ -625,7 +623,7 @@ object Geo {
             else crownLod(nearSubdivisions, farSubdivisions)
         fun h(salt: Int) = hash(variant, 0, salt)
         val leanDir = .73
-        val leanAmt = doubleArrayOf(.018, .045, .012, .030)[variant.coerceIn(0, 3)]
+        val leanAmt = doubleArrayOf(.018, .045, .012)[variant.coerceIn(0, 2)]
         val lx = cos(leanDir) * leanAmt
         val lz = sin(leanDir) * leanAmt
         fun ox(hh: Double) = -hh * lz
@@ -642,17 +640,6 @@ object Geo {
                 val radius = 4.45 - tier * .70
                 add((h(20 + tier) - .5) * .28, y, (h(30 + tier) - .5) * .28,
                     .025, h(40 + tier) * PI * 2, .025, radius, 1.55 - tier * .10, radius * .94)
-            }
-            return mergeTreeParts(parts)
-        }
-        if (variant == 3) {
-            // Birch: tall, narrow crown with separated vertical lobes.
-            add(0.0, 18.1, 0.0, .02, h(83) * PI * 2, -.02, 2.45, 3.65, 2.55)
-            for (c in 0 until 5) {
-                val a = c / 5.0 * PI * 2 + h(74 + c) * .35
-                val spread = 1.35 + h(81 + c) * .75
-                add(cos(a) * spread, 12.0 + h(71 + c) * 2.0, sin(a) * spread,
-                    .12, a, -.10, 1.75, 2.65, 1.85)
             }
             return mergeTreeParts(parts)
         }
