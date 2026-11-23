@@ -79,7 +79,6 @@ class GameEngine(
     var secrets: List<Secret> = emptyList(); private set
     var gates: List<Gate> = emptyList(); private set
     val orbs = ArrayList<Orb>()
-    val spores = ArrayList<Spore>()
     var redMix = 0.0; private set
     var dieRef = 0.0; private set
     var ghostK = 0.0; private set
@@ -200,7 +199,6 @@ class GameEngine(
         stepSimulation(s, steeringNow, raw)
         handleEvents(raw)
         updateCamera(raw)
-        updateSpores()
         publish(force = false)
     }
 
@@ -212,7 +210,8 @@ class GameEngine(
         s.cell = key
         val level = levelOf(s.difficulty)
         var trees = treesAround(cx, cz, level.treeGap, s.universe)
-        var obstacles = obstaclesAround(cx, cz, level.obstacleGap)
+        // Undergrowth bushes are disabled: keep the forest floor clear and avoid extra collision/draw work.
+        val obstacles = emptyList<Obstacle>()
         if (s.mode == GameMode.FREEROAM) {
             secrets = secretsAround(s.x, s.z)
             gates = gatesAround(s.x, s.z)
@@ -234,7 +233,7 @@ class GameEngine(
         val s = sim
         if (s.phase != previousPhase) {
             if (s.phase == Phase.AWAKENING || s.phase == Phase.MENU) {
-                orbs.clear(); lastOrbSpawn = 0.0; spores.clear(); lastRing = -1
+                orbs.clear(); lastOrbSpawn = 0.0; lastRing = -1
             }
             if (s.phase == Phase.AWAKENING) { dieRef = 0.0; ghostK = 0.0 }
             previousPhase = s.phase
@@ -347,7 +346,7 @@ class GameEngine(
         scope.launch { repo.setSecrets(snapshot) }
     }
 
-    // ---- camera, lamp, spores ---------------------------------------------------------------
+    // ---- camera and lamp -------------------------------------------------------------------
 
     private fun updateCamera(raw: Double) {
         val s = sim
@@ -397,24 +396,6 @@ class GameEngine(
         lampIntensity = 65 * flicker
     }
 
-    private fun updateSpores() {
-        val s = sim
-        if (spores.isEmpty()) for (i in 0 until SPORE_COUNT) spores += placeSpore(s.x, s.z, i, 0, true)
-        val sh = sin(s.heading); val ch = cos(s.heading)
-        for (i in 0 until SPORE_COUNT) {
-            val sp = spores[i]
-            val wx = sp.x - s.x; val wz = sp.z - s.z
-            val side = wx * ch - wz * sh; val back = wx * sh + wz * ch
-            if (back > 18 || kotlin.math.abs(side) > 55) {
-                val fresh = placeSpore(s.x, s.z, i, floor(s.distance).toInt())
-                val dx = fresh.x - s.x; val dz = fresh.z - s.z
-                sp.x = s.x + dx * ch + dz * sh
-                sp.z = s.z - dx * sh + dz * ch
-                sp.h = fresh.h
-            }
-        }
-    }
-
     // ---- publishing to Compose --------------------------------------------------------------
 
     private fun publish(force: Boolean) {
@@ -445,5 +426,5 @@ class GameEngine(
         if (next != published || menuPhase) { published = next; _ui.value = next }
     }
 
-    companion object { const val SPORE_COUNT = 72 }
+    companion object {}
 }
