@@ -691,12 +691,13 @@ object Geo {
         // Keep the legacy tree's curved, individually readable buttress roots, but blend
         // them into a compact rounded root crown instead of long star points.
         private val rootReach = DoubleArray(k) {
-            .70 * TREE_ROOT_LEN[sp] * (.58 + r(230 + it) * .34) *
-                (if (r(250 + it) < .22) .62 else 1.0)
+            // Slightly more visible radial buttresses, like the reference, without long star spikes.
+            .82 * TREE_ROOT_LEN[sp] * (.62 + r(230 + it) * .36) *
+                (if (r(250 + it) < .22) .72 else 1.0)
         }
         private val rootHeight = DoubleArray(k) { .5 + r(260 + it) * .4 }
         private val rootSteep = DoubleArray(k) { 1.5 + r(270 + it) * .7 }
-        private val rootSigma = (2 * PI / n) * 1.32
+        private val rootSigma = (2 * PI / n) * 1.48
 
         fun cx(y: Double) = sin(y * .3 + ph[0]) * swayA + sin(y * .71 + ph[1]) * swayB
         fun cz(y: Double) = cos(y * .26 + ph[2]) * swayZ + sin(y * .5 + ph[3]) * .03
