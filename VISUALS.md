@@ -152,7 +152,7 @@ only work that does not show is removed.
 The tree body is no longer a pile of separate tubes. `Geo.treeBody()` builds trunk, root flare and limbs as **one connected
 surface** (a single ring grid; each limb is stitched into a hole of the grid and shares the loop around it), so there are no
 buried collars, no overlapping tubes, no normal seams, and the normals are computed once. Roots are lobes of the flare's
-radius, not tubes: thin, low fins (like the original trunks' flat root flanges) on a columnar stem with a small foot flare; the top of the stem is closed. `Geo.treeCanopy()` drops the crown triangles that lie
+radius, not tubes: rounded, low roots that curve down into the soil (nothing open beneath them) on a columnar stem with a foot flare; the top of the stem is closed. `Geo.treeCanopy()` drops the crown triangles that lie
 inside neighbouring lobes (never visible).
 
 No two trees are alike: every species has `SHAPES` = 4 different bodies (own batch each; sway, burl, taper, each root's

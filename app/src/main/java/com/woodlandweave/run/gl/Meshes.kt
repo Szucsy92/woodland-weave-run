@@ -676,7 +676,7 @@ object Geo {
         private val burlH = .10 + r(310) * .15
         private val taper = .9 + r(311) * .25
         val topY = 20.5 + r(312) * 3.0
-        // Roots are thin fins: each one sits on exactly one column of the ring grid (so it is a sharp ridge, not a blob).
+        // Each root sits on exactly one column of the ring grid, with a rounded hump of about three columns around it.
         private val rootPhi = DoubleArray(k)
         init {
             val used = BooleanArray(n)
@@ -688,29 +688,31 @@ object Geo {
                 rootPhi[i] = c.toDouble() / n * 2 * PI
             }
         }
-        private val rootReach = DoubleArray(k) { 1.6 * TREE_ROOT_LEN[sp] * (.55 + r(230 + it) * 1.0) * (if (r(250 + it) < .15) .3 else 1.0) }
-        private val rootHeight = DoubleArray(k) { .22 + r(260 + it) * .30 }
-        private val rootSteep = DoubleArray(k) { 1.0 + r(270 + it) * .5 }
-        private val rootSigma = (2 * PI / n) * .42
+        private val rootReach = DoubleArray(k) { 1.0 * TREE_ROOT_LEN[sp] * (.6 + r(230 + it) * .8) * (if (r(250 + it) < .12) .4 else 1.0) }
+        private val rootHeight = DoubleArray(k) { .5 + r(260 + it) * .4 }
+        private val rootSteep = DoubleArray(k) { 1.5 + r(270 + it) * .7 }
+        private val rootSigma = (2 * PI / n) * .85
 
         fun cx(y: Double) = sin(y * .3 + ph[0]) * swayA + sin(y * .71 + ph[1]) * swayB
         fun cz(y: Double) = cos(y * .26 + ph[2]) * swayZ + sin(y * .5 + ph[3]) * .03
 
-        /** Radius of the trunk surface at angle [a] and height [y]: bark swell, a burl, a small foot flare and the thin root fins. */
+        /** Radius of the trunk surface at angle [a] and height [y]: bark swell, a burl, a foot flare and the rounded roots that dive into the soil. */
         fun radius(a: Double, y: Double): Double {
             val r0 = (.27 + .13 * (1.0 - y / 22.0)) * taper
             var sw = 1.0 + sin(a * 3 + y * .9 + ph[0]) * swell + sin(a * 2 + y * .23 + ph[1]) * swell
             val bd = wrapAngle(a - burlA)
             sw += burlH * exp(-(bd / .5) * (bd / .5) - ((y - burlY) / 1.6) * ((y - burlY) / 1.6))
-            val foot = minOf(1.0, maxOf(0.0, 1.0 - (y - TREE_GROUND) / 1.7))
-            val trunk = r0 * sw * (1.0 + foot * foot * .38) * TREE_TRUNK_SCALE[sp]
+            val foot = minOf(1.0, maxOf(0.0, 1.0 - (y - TREE_GROUND) / 2.0))
+            val trunk = r0 * sw * (1.0 + foot * foot * .5) * TREE_TRUNK_SCALE[sp]
             var ext = 0.0
             for (i in 0 until k) {
                 val d = wrapAngle(a - rootPhi[i])
-                // How far this root still reaches at height y: its crest falls from rootHeight above the soil to the soil.
+                // Each root's crest falls from rootHeight above the soil to the soil (85% of its reach there), dips under it
+                // to full reach and then narrows again deep down: the roots dive into the ground and nothing is left open beneath.
                 val f = maxOf(0.0, if (y >= TREE_GROUND) {
-                    if (y < TREE_GROUND + rootHeight[i]) 1.0 - ((y - TREE_GROUND) / rootHeight[i]).pow(1.0 / rootSteep[i]) else 0.0
-                } else 1.0 + (TREE_GROUND - y) * .06)
+                    if (y < TREE_GROUND + rootHeight[i]) .85 * (1.0 - ((y - TREE_GROUND) / rootHeight[i]).pow(1.0 / rootSteep[i])) else 0.0
+                } else if (y >= TREE_GROUND - .35) .85 + .15 * (TREE_GROUND - y) / .35
+                else 1.0 - (TREE_GROUND - .35 - y) * .4)
                 ext = maxOf(ext, rootReach[i] * f * exp(-(d / rootSigma) * (d / rootSigma)))
             }
             return trunk + ext
@@ -810,7 +812,7 @@ object Geo {
             for (y in doubleArrayOf(.5, 1.1, 1.9, 3.5, 7.5, 14.0)) ys += y
             ys += ts.topY
         } else {
-            for (y in doubleArrayOf(.5, 1.1, 1.2, 1.35, 1.55, 1.9, 2.6, 3.6, 4.8)) ys += y
+            for (y in doubleArrayOf(.5, .75, 1.1, 1.25, 1.5, 1.8, 2.2, 2.8, 3.6, 4.8)) ys += y
         }
         val gap = .30                       // half the height of a limb's hole
         val levelRow = IntArray(levels)
