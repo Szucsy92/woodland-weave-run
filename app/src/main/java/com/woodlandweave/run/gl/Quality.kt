@@ -64,8 +64,8 @@ class Features(val quality: Quality, val depthOk: Boolean = true) {
     val bloomStrength = if (r >= 2) 0.20f else 0.23f
     val tonemap = r >= 2
     val exposure = 0.92f
-    val grain = if (r >= 2) 0.006f else 0f
-    val chroma = if (r >= 2) 0.0015f else 0f
+    val grain = 0f
+    val chroma = 0f
 
     // Lighting and atmosphere (High)
     val env = r >= 2
