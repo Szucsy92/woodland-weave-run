@@ -359,12 +359,7 @@ object Geo {
                 val ell = 1 + sin(2 * a + y * .15f) * .06f
                 val foot = max(0f, 1 - y / 3.4f)
                 val ridge = Math.pow(max(0.0, cos(a * 5 + .4f).toDouble()), 2.2).toFloat()
-                // Buttress flare fades out below the ground surface.
-                // The separate radial roots retain their star-shaped silhouette.
-                val groundT = ((y - 1.05f) / 1.15f).coerceIn(0f, 1f)
-                val groundFade = groundT * groundT * (3f - 2f * groundT)
-                val flare = 1 + foot * foot * groundFade *
-                    (.55f + ridge * 1.6f)
+                val flare = 1 + foot * foot * (.55f + ridge * 1.6f)
                 val rr = r0 * swell * flare
                 pos[n * 3] = sx * rr * ell + wx; pos[n * 3 + 1] = y; pos[n * 3 + 2] = cz * rr / ell + wz
                 uv[n * 2] = ix.toFloat() / radial; uv[n * 2 + 1] = y / 22f
@@ -547,22 +542,27 @@ object Geo {
         // Six broad, curved buttress roots radiate from inside the trunk flare. Their wide
         // proximal collars blend into the buried trunk; the flattened profile and descending
         // centreline make them read as roots rather than pipes laid on the ground.
-        val rootRadial = if (shadow) 4 else if (lifelike) 6 else 5
+        val rootRadial = if (shadow) 4 else if (lifelike) 8 else 6
         val rootCount = if (shadow) 4 else intArrayOf(6, 4, 7, 4)[species]
         val rootLength = doubleArrayOf(1.0, .76, 1.32, .78)[species]
         val rootWidth = doubleArrayOf(1.0, .76, 1.22, .74)[species]
         val rootPoints = listOf(
-            // The proximal end begins well inside the trunk and rises into the flare,
-            // so the root reads as a continuous buttress instead of a tube attached to the bark.
-            floatArrayOf(-.72f, 1.58f, 0f), floatArrayOf(-.38f, 1.53f, .015f),
-            floatArrayOf(-.08f, 1.44f, .03f), floatArrayOf(.34f, 1.34f, .055f),
-            floatArrayOf(.82f, 1.19f, .09f), floatArrayOf(1.36f, .96f, .14f),
-            floatArrayOf(1.94f, .68f, .20f), floatArrayOf(2.52f, .40f, .26f),
-            floatArrayOf(3.08f, .19f, .32f)
+            // Start well inside the lower stem, then roll outward into a broad,
+            // low buttress instead of forming a short raised stump.
+            floatArrayOf(-.72f, 1.48f, 0f),
+            floatArrayOf(-.36f, 1.43f, .012f),
+            floatArrayOf(.08f, 1.34f, .025f),
+            floatArrayOf(.52f, 1.20f, .045f),
+            floatArrayOf(1.02f, 1.00f, .075f),
+            floatArrayOf(1.62f, .73f, .12f),
+            floatArrayOf(2.32f, .46f, .18f),
+            floatArrayOf(3.08f, .23f, .25f),
+            floatArrayOf(3.78f, .08f, .32f)
         )
-        // Broad, flattened collars that soften into a long rounded taper at the soil.
-        val rootRadii = floatArrayOf(.60f, .57f, .53f, .46f, .36f, .26f, .17f, .085f, .012f).map { it * rootWidth.toFloat() }.toFloatArray()
-        val root = sweptTube(rootPoints, rootRadii, rootRadial, verticalScale = .62f)
+        // A broad collar fades into the trunk; the root flattens and narrows
+        // over a longer distance so its end settles into the ground naturally.
+        val rootRadii = floatArrayOf(.60f, .59f, .55f, .48f, .39f, .29f, .19f, .085f, .008f).map { it * rootWidth.toFloat() }.toFloatArray()
+        val root = sweptTube(rootPoints, rootRadii, rootRadial, verticalScale = .42f)
         for (r in 0 until rootCount) {
             val ang = (r / rootCount.toDouble()) * PI * 2 + (h(210 + r) - .5) * .28
             val rootScale = (.88 + h(230 + r) * .24) * rootLength

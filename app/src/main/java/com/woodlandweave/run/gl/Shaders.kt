@@ -558,20 +558,8 @@ vec3 sampleBlur(vec2 uv) {
   vec2 d = vec2(blur * 8.0) / resolution;
   return (tap(uv) * 4.0 + tap(uv + d) + tap(uv - d) + tap(uv + vec2(d.x, -d.y)) + tap(uv + vec2(-d.x, d.y))) / 8.0;
 }
-// Integer avalanche hash for screen-space sampling. The former interleaved-gradient
-// expression formed a visible diagonal lattice on large, smooth surfaces and in the
-// final 8-bit dither. Hash integer pixel coordinates instead: no preferred direction,
-// no repeating diagonal bands, and no extra texture fetches.
-float ign(vec2 p) {
-  uvec2 q = uvec2(ivec2(floor(p)));
-  uint h = q.x * 0x8DA6B343u + q.y * 0xD8163841u;
-  h ^= h >> 16;
-  h *= 0x7FEB352Du;
-  h ^= h >> 15;
-  h *= 0x846CA68Bu;
-  h ^= h >> 16;
-  return float(h & 0x00FFFFFFu) * (1.0 / 16777216.0);
-}
+// Interleaved gradient noise: cheap, blue-ish, no visible pattern.
+float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
 #ifdef Q_FULL
 vec3 acesFit(vec3 x) { return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
 // Gentle highlight roll-off: bright lights bend towards white instead of clipping into flat blobs.
@@ -869,13 +857,11 @@ void main() {
       }
     }
   }
-  // Static triangular-PDF dither, one 8-bit step. A decorrelated integer hash
-  // avoids the old diagonal IGN lattice and prevents temporal crawling/flicker.
-  vec2 fc = floor(gl_FragCoord.xy);
-  float dn = (ign(fc) + ign(fc + vec2(17.0, 59.0)) - 1.0) / 255.0;
+  // Triangular-PDF dither, one 8-bit step: removes banding in the dark gradients.
+  vec2 fc = gl_FragCoord.xy + vec2(fract(time * 7.13) * 31.0, fract(time * 3.77) * 17.0);
+  float dn = (ign(fc) + ign(fc + vec2(5.3, 11.7)) - 1.0) / 255.0;
 #ifdef Q_FULL
-  // Film grain is intentionally not added here: it amplified the sampling pattern
-  // on dark fog and foliage without contributing useful scene detail.
+  dn += (ign(fc * 1.37 + vec2(time * 61.0, 0.0)) - 0.5) * uGrain;
 #endif
   o = vec4(clamp(outS + dn, 0.0, 1.0), 1.0);
 #endif
