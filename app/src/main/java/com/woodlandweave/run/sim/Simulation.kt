@@ -56,6 +56,23 @@ class Spore(
     val phase: Double,
     val strength: Double,
 )
+
+// Kept as a deterministic compatibility helper for the original simulation parity tests.
+// Runtime forest pollen is spawned in GameEngine.refreshForestPollen instead.
+fun placeSpore(
+    x: Double,
+    z: Double,
+    index: Int,
+    generation: Int = 0,
+    initial: Boolean = false,
+): Spore {
+    val sx = x + (hash(index, generation, 6) - .5) * 48
+    val sz = z - (if (initial) -12 + hash(index, generation, 5) * 70 else 8 + hash(index, generation, 5) * 50)
+    val height = .7 + hash(index, generation, 7) * 3.5
+    val phase = hash(index, generation, 8) * (2.0 * PI)
+    val strength = .48 + hash(index, generation, 9) * .52
+    return Spore(sx, sz, groundHeight(sx, sz), height, phase, strength)
+}
 class Point(val x: Double, val z: Double)
 
 const val POWERUP_START = 100.0

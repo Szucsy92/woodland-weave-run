@@ -1311,8 +1311,10 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val pulse = .94 + .06 * flutter
             val color = if (ember) Palette.ember
                 else if (sp.strength > .78) Palette.pollenWarm else Palette.pollen
-            val size = .16 + sp.strength * .12
-            val alpha = .16 * sp.strength * pulse * nearFade * farFade * (1.0 - dayLevel * .18)
+            val size = .18 + sp.strength * .12
+            // Keep the mote readable in daylight as well as at night; the existing glow
+            // sprite supplies the soft halo without another texture, batch or draw call.
+            val alpha = .26 * sp.strength * pulse * nearFade * farFade
             bGlow.add(sp.x, sp.groundY + sp.h + bob, sp.z, size, size, color, alpha, sp.h + bob)
         }
         if (orbSeen.size > 24) orbSeen.keys.retainAll(e.orbs.map { it.p.id }.toSet())
