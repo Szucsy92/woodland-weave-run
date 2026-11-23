@@ -46,7 +46,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         const val K_CROWN_FAR_1 = 14; const val K_CROWN_FAR_2 = 15; const val K_CROWN_FAR_3 = 16
         // Every species has SHAPES different tree bodies (sway, roots, limbs); shape 0 is the original batch of the species,
         // the others have their own batches after the base kinds. A tree picks its shape from its position.
-        const val SHAPES = 4
+        const val SHAPES = 1
         const val KINDS = 17 + 4 * (SHAPES - 1)
         val TRUNK_KINDS = intArrayOf(K_TRUNK, K_TRUNK_1, K_TRUNK_2, K_TRUNK_3)
         /** Batch of body shape [shape] of species [species]. */
@@ -363,7 +363,6 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         // The unified body's root flare starts at local Y~1.2, so the original -1.1 ground anchor keeps it seated.
         val base = groundHeight(tree.x, tree.z) - 1.1
         val species = floor(h(200) * 4).toInt().coerceIn(0, 3)
-        val shape = floor(h(300) * SHAPES).toInt().coerceIn(0, SHAPES - 1)
         val girth = doubleArrayOf(.8, .9, 1.15, .68)[min(3, species)] * tree.scale
         val leanAmt = if (species == 3) .07 else if (species == 2) .03 else .015
         val leanDir = h(201) * PI * 2
@@ -375,9 +374,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             girth * (.86 + h(310) * .30), .94 + h(312) * .14, girth * (.86 + h(311) * .30))
         Mat.compose(m, 16, tree.x, groundHeight(tree.x, tree.z) + .05, tree.z,
             0.0, 0.0, 0.0, Mat.XYZ, 3.4 * tree.scale, 1.0, 3.4 * tree.scale)
-        Mat.compose(m, 32, tree.x, base, tree.z, lx, yaw, lz, Mat.XYZ,
-            tree.scale * (.88 + h(313) * .26), tree.scale * (.86 + h(314) * .30), tree.scale * (.88 + h(315) * .26))
-        return Prop(tree.id, tree.x, tree.z, intArrayOf(bodyKind(species, shape), K_SHADOW, CROWN_KINDS[species]), m)
+        Mat.compose(m, 32, tree.x, base, tree.z, lx, yaw, lz, Mat.XYZ, tree.scale, tree.scale, tree.scale)
+        return Prop(tree.id, tree.x, tree.z, intArrayOf(bodyKind(species, 0), K_SHADOW, CROWN_KINDS[species]), m)
     }
 
     private fun obstacleProp(o: Obstacle): Prop {
