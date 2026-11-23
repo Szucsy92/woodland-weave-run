@@ -552,13 +552,17 @@ object Geo {
         val rootLength = doubleArrayOf(1.0, .76, 1.32, .78)[species]
         val rootWidth = doubleArrayOf(1.0, .76, 1.22, .74)[species]
         val rootPoints = listOf(
-            floatArrayOf(-.38f, 1.34f, 0f), floatArrayOf(.02f, 1.32f, .015f),
-            floatArrayOf(.48f, 1.27f, .045f), floatArrayOf(.98f, 1.19f, .09f),
-            floatArrayOf(1.52f, 1.08f, .15f), floatArrayOf(2.10f, .91f, .22f),
-            floatArrayOf(2.62f, .66f, .29f)
+            // The proximal end begins well inside the trunk and rises into the flare,
+            // so the root reads as a continuous buttress instead of a tube attached to the bark.
+            floatArrayOf(-.72f, 1.58f, 0f), floatArrayOf(-.38f, 1.53f, .015f),
+            floatArrayOf(-.08f, 1.44f, .03f), floatArrayOf(.34f, 1.34f, .055f),
+            floatArrayOf(.82f, 1.19f, .09f), floatArrayOf(1.36f, .96f, .14f),
+            floatArrayOf(1.94f, .68f, .20f), floatArrayOf(2.52f, .40f, .26f),
+            floatArrayOf(3.08f, .19f, .32f)
         )
-        val rootRadii = floatArrayOf(.46f, .43f, .37f, .29f, .20f, .095f, .009f).map { it * rootWidth.toFloat() }.toFloatArray()
-        val root = sweptTube(rootPoints, rootRadii, rootRadial, verticalScale = .78f)
+        // Broad, flattened collars that soften into a long rounded taper at the soil.
+        val rootRadii = floatArrayOf(.60f, .57f, .53f, .46f, .36f, .26f, .17f, .085f, .012f).map { it * rootWidth.toFloat() }.toFloatArray()
+        val root = sweptTube(rootPoints, rootRadii, rootRadial, verticalScale = .62f)
         for (r in 0 until rootCount) {
             val ang = (r / rootCount.toDouble()) * PI * 2 + (h(210 + r) - .5) * .28
             val rootScale = (.88 + h(230 + r) * .24) * rootLength
