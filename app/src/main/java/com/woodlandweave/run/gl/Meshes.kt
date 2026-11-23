@@ -612,7 +612,7 @@ object Geo {
             )
             val speciesThickness = doubleArrayOf(1.0, .82, 1.28, .72)[species]
             val thickness = ((.90 + h(90 + b) * .20) * speciesThickness).toFloat()
-            val radii = floatArrayOf(.48f, .43f, .34f, .25f, .14f, .018f).map { it * thickness }.toFloatArray
+            val radii = floatArrayOf(.48f, .43f, .34f, .25f, .14f, .018f).map { it * thickness }.toFloatArray()
             add(markAsBranch(sweptTube(points, radii, branchRadial)))
 
             // A few small forks are also curved and tapered; their first ring is embedded in
