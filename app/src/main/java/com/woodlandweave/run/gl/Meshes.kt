@@ -688,10 +688,10 @@ object Geo {
                 rootPhi[i] = c.toDouble() / n * 2 * PI
             }
         }
-        private val rootReach = DoubleArray(k) { 1.0 * TREE_ROOT_LEN[sp] * (.6 + r(230 + it) * .8) * (if (r(250 + it) < .12) .4 else 1.0) }
+        private val rootReach = DoubleArray(k) { 1.34 * TREE_ROOT_LEN[sp] * (.58 + r(230 + it) * .86) * (if (r(250 + it) < .12) .42 else 1.0) }
         private val rootHeight = DoubleArray(k) { .5 + r(260 + it) * .4 }
         private val rootSteep = DoubleArray(k) { 1.5 + r(270 + it) * .7 }
-        private val rootSigma = (2 * PI / n) * .85
+        private val rootSigma = (2 * PI / n) * 1.02
 
         fun cx(y: Double) = sin(y * .3 + ph[0]) * swayA + sin(y * .71 + ph[1]) * swayB
         fun cz(y: Double) = cos(y * .26 + ph[2]) * swayZ + sin(y * .5 + ph[3]) * .03
@@ -706,13 +706,20 @@ object Geo {
             val trunk = r0 * sw * (1.0 + foot * foot * .5) * TREE_TRUNK_SCALE[sp]
             var ext = 0.0
             for (i in 0 until k) {
-                val d = wrapAngle(a - rootPhi[i])
-                // Each root's crest falls from rootHeight above the soil to the soil (85% of its reach there), dips under it
-                // to full reach and then narrows again deep down: the roots dive into the ground and nothing is left open beneath.
+                val depth = maxOf(0.0, TREE_GROUND - y)
+                // The root ridge wanders slightly as it descends instead of forming a perfectly straight vertical fin.
+                // The angular drift is deterministic per tree, so no per-frame work or random state is needed.
+                val drift = sin(depth * (.48 + r(280 + i) * .22) + ph[i % ph.size]) * (.035 + r(285 + i) * .055)
+                val d = wrapAngle(a - (rootPhi[i] + drift))
+                // A broad buttress rises out of the soil, reaches its widest section just below grade, then
+                // tapers over ~2.4 m into a buried root tip. The extra depth is what the shockwave reveals.
                 val f = maxOf(0.0, if (y >= TREE_GROUND) {
-                    if (y < TREE_GROUND + rootHeight[i]) .85 * (1.0 - ((y - TREE_GROUND) / rootHeight[i]).pow(1.0 / rootSteep[i])) else 0.0
-                } else if (y >= TREE_GROUND - .35) .85 + .15 * (TREE_GROUND - y) / .35
-                else 1.0 - (TREE_GROUND - .35 - y) * .4)
+                    if (y < TREE_GROUND + rootHeight[i]) .82 * (1.0 - ((y - TREE_GROUND) / rootHeight[i]).pow(1.0 / rootSteep[i])) else 0.0
+                } else {
+                    val t = ((depth - .28) / 2.12).coerceIn(0.0, 1.0)
+                    val taper = t * t * (3.0 - 2.0 * t)
+                    if (depth <= .28) .82 + .18 * depth / .28 else 1.0 - taper
+                })
                 ext = maxOf(ext, rootReach[i] * f * exp(-(d / rootSigma) * (d / rootSigma)))
             }
             return trunk + ext
@@ -812,7 +819,9 @@ object Geo {
             for (y in doubleArrayOf(.5, 1.1, 1.9, 3.5, 7.5, 14.0)) ys += y
             ys += ts.topY
         } else {
-            for (y in doubleArrayOf(.5, .75, 1.1, 1.25, 1.5, 1.8, 2.2, 2.8, 3.6, 4.8)) ys += y
+            // Closely spaced rings shape the buttress roots above and below grade. The mesh extends
+            // 2.4 m below the soil so a shockwave can expose tapered underground roots, not a flat stump.
+            for (y in doubleArrayOf(-1.3, -.95, -.6, -.25, .15, .55, .82, 1.1, 1.25, 1.5, 1.8, 2.2, 2.8, 3.6, 4.8)) ys += y
         }
         val gap = .30                       // half the height of a limb's hole
         val levelRow = IntArray(levels)
