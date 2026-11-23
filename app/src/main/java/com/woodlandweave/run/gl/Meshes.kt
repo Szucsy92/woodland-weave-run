@@ -338,7 +338,8 @@ object Geo {
             var h = 22f
             while (h > 4.2f) { hs += h; h -= 1.2f }
             h = 4.2f
-            while (h >= -0.001f) { hs += max(h, 0f); h -= 0.3f }
+            while (h > 1.1f) { hs += h; h -= 0.3f }
+            hs += 1.1f
         }
         val rows = hs.size
         val pos = FloatArray(rows * (radial + 1) * 3); val uv = FloatArray(rows * (radial + 1) * 2); val centers = FloatArray(rows * 3)
@@ -525,7 +526,7 @@ object Geo {
         val trunkRadial = if (shadow) 10 else if (lifelike) 16 else 12
         val species = variant.coerceIn(0, 3) // oak, pine, ancient, birch
         val trunk = if (shadow) {
-            trunkLifelike(trunkRadial, listOf(22f, 16f, 10f, 5f, 2.2f, .7f, 0f))
+            trunkLifelike(trunkRadial, listOf(22f, 16f, 10f, 5f, 2.2f, 1.1f))
         } else trunkLifelike(trunkRadial)
         // Species silhouette comes from the trunk profile, not additional geometry.
         val trunkScale = doubleArrayOf(1.0, .80, 1.30, .70)[species]
@@ -551,8 +552,8 @@ object Geo {
             floatArrayOf(1.52f, 1.08f, .15f), floatArrayOf(2.10f, .91f, .22f),
             floatArrayOf(2.62f, .66f, .29f)
         )
-        val rootRadii = floatArrayOf(.46f, .43f, .37f, .29f, .20f, .095f, .009f).map { it * rootWidth.toFloat() }.toFloatArray()
-        val root = sweptTube(rootPoints, rootRadii, rootRadial, verticalScale = .78f)
+        val rootRadii = floatArrayOf(.25f, .23f, .195f, .15f, .105f, .050f, .006f).map { it * rootWidth.toFloat() }.toFloatArray()
+        val root = sweptTube(rootPoints, rootRadii, rootRadial, verticalScale = .62f)
         for (r in 0 until rootCount) {
             val ang = (r / rootCount.toDouble()) * PI * 2 + (h(210 + r) - .5) * .28
             val rootScale = (.88 + h(230 + r) * .24) * rootLength

@@ -2,11 +2,28 @@ package com.woodlandweave.run.gl
 
 object Shaders {
     private const val GROUND_FN = """
+// Smooth, non-periodic value noise. The former overlapping sine waves produced
+// broad repeating contour rings in grazing views; this hash lattice keeps the
+// same gentle terrain variation without a visible wavelength or expensive trig.
+float groundHash(vec2 p) {
+  vec3 q = fract(vec3(p.xyx) * 0.1031);
+  q += dot(q, q.yzx + 33.33);
+  return fract((q.x + q.y) * q.z);
+}
+float groundNoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = groundHash(i);
+  float b = groundHash(i + vec2(1.0, 0.0));
+  float c = groundHash(i + vec2(0.0, 1.0));
+  float d = groundHash(i + vec2(1.0, 1.0));
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y) * 2.0 - 1.0;
+}
 float gh(float x, float z) {
-  float w1 = sin(x * 0.11 + sin(z * 0.07) * 2.4) * cos(z * 0.09 + sin(x * 0.05) * 2.1);
-  float w2 = sin(z * 0.23 - sin(x * 0.16) * 1.8) * cos(x * 0.19 + sin(z * 0.12) * 1.4);
-  float w3 = sin((x + z) * 0.47 + sin(x * 0.3) * 1.2);
-  return (w1 * 1.15 + w2 * 0.55 + w3 * 0.35) * 0.3;
+  vec2 p = vec2(x, z);
+  float broad = groundNoise(p * 0.075);
+  float detail = groundNoise(p * 0.19 + vec2(17.3, 41.7));
+  return broad * 0.42 + detail * 0.10;
 }
 """
 
