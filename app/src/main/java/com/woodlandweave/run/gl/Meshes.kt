@@ -662,49 +662,56 @@ object Geo {
      * and for every root its place, reach, height, steepness and width. Drawn from a hash of (species, shape), so each of
      * the shapes of a species is a different tree, always the same one for the same pair.
      */
-    private class TreeShape(val sp: Int, shape: Int) {
+    private class TreeShape(val sp: Int, shape: Int, n: Int) {
         private val seed = sp * 16 + shape
         fun r(salt: Int) = hash(seed, 0, salt)
         val k = TREE_RIDGES[sp]
         private val ph = DoubleArray(4) { r(300 + it) * 2 * PI }
-        private val swayA = .05 + r(304) * .14
-        private val swayB = .03 + r(305) * .08
-        private val swayZ = .04 + r(306) * .12
+        private val swayA = .03 + r(304) * .09
+        private val swayB = .02 + r(305) * .05
+        private val swayZ = .03 + r(306) * .08
         private val swell = .04 + r(307) * .07
         private val burlA = r(308) * 2 * PI
         private val burlY = 5 + r(309) * 10
         private val burlH = .10 + r(310) * .15
         private val taper = .9 + r(311) * .25
         val topY = 20.5 + r(312) * 3.0
-        private val bias = r(290) * 2 * PI
-        private val rootPhi = DoubleArray(k) { (it + (r(210 + it) - .5) * .7) * 2 * PI / k }
-        private val rootReach = DoubleArray(k) { 2.2 * TREE_ROOT_LEN[sp] * (.45 + r(230 + it) * .95) * (if (r(250 + it) < .15) .3 else 1.0) }
-        private val rootHeight = DoubleArray(k) { .5 + r(260 + it) * .6 }
-        private val rootSteep = DoubleArray(k) { 1.3 + r(270 + it) * .9 }
-        private val rootWide = DoubleArray(k) { .8 + r(280 + it) * .6 }
+        // Roots are thin fins: each one sits on exactly one column of the ring grid (so it is a sharp ridge, not a blob).
+        private val rootPhi = DoubleArray(k)
+        init {
+            val used = BooleanArray(n)
+            for (i in 0 until k) {
+                var c = Math.round((i + (r(210 + i) - .5) * .7) * n / k).toInt() % n
+                if (c < 0) c += n
+                while (used[c]) c = (c + 1) % n
+                used[c] = true
+                rootPhi[i] = c.toDouble() / n * 2 * PI
+            }
+        }
+        private val rootReach = DoubleArray(k) { 1.6 * TREE_ROOT_LEN[sp] * (.55 + r(230 + it) * 1.0) * (if (r(250 + it) < .15) .3 else 1.0) }
+        private val rootHeight = DoubleArray(k) { .22 + r(260 + it) * .30 }
+        private val rootSteep = DoubleArray(k) { 1.0 + r(270 + it) * .5 }
+        private val rootSigma = (2 * PI / n) * .42
 
         fun cx(y: Double) = sin(y * .3 + ph[0]) * swayA + sin(y * .71 + ph[1]) * swayB
         fun cz(y: Double) = cos(y * .26 + ph[2]) * swayZ + sin(y * .5 + ph[3]) * .03
 
-        /** Radius of the trunk surface at angle [a] and height [y]: bark swell, a burl, a low buttress flare and the root lobes. */
+        /** Radius of the trunk surface at angle [a] and height [y]: bark swell, a burl, a small foot flare and the thin root fins. */
         fun radius(a: Double, y: Double): Double {
             val r0 = (.27 + .13 * (1.0 - y / 22.0)) * taper
             var sw = 1.0 + sin(a * 3 + y * .9 + ph[0]) * swell + sin(a * 2 + y * .23 + ph[1]) * swell
             val bd = wrapAngle(a - burlA)
             sw += burlH * exp(-(bd / .5) * (bd / .5) - ((y - burlY) / 1.6) * ((y - burlY) / 1.6))
-            val foot = maxOf(0.0, 1.0 - y / 2.4)
-            val trunk = r0 * sw * (1.0 + foot * foot * .6) * TREE_TRUNK_SCALE[sp]
-            val meander = if (y < 3.4) minOf(1.0, (3.4 - y) / 2.4) else 0.0
-            val width = sqrt(TREE_ROOT_W[sp])
+            val foot = minOf(1.0, maxOf(0.0, 1.0 - (y - TREE_GROUND) / 1.7))
+            val trunk = r0 * sw * (1.0 + foot * foot * .38) * TREE_TRUNK_SCALE[sp]
             var ext = 0.0
             for (i in 0 until k) {
-                val d = wrapAngle(a - (rootPhi[i] + .3 * sin(y * 1.7 + i * 2.1) * meander))
+                val d = wrapAngle(a - rootPhi[i])
                 // How far this root still reaches at height y: its crest falls from rootHeight above the soil to the soil.
                 val f = maxOf(0.0, if (y >= TREE_GROUND) {
                     if (y < TREE_GROUND + rootHeight[i]) 1.0 - ((y - TREE_GROUND) / rootHeight[i]).pow(1.0 / rootSteep[i]) else 0.0
                 } else 1.0 + (TREE_GROUND - y) * .06)
-                val sig = (2 * PI / k) * (.28 + .14 * (1.0 - f)) * rootWide[i] * width
-                ext = maxOf(ext, rootReach[i] * (1.0 + .3 * cos(a - bias)) * f * exp(-(d / sig) * (d / sig)))
+                ext = maxOf(ext, rootReach[i] * f * exp(-(d / rootSigma) * (d / rootSigma)))
             }
             return trunk + ext
         }
@@ -762,8 +769,9 @@ object Geo {
      */
     fun treeBody(lifelike: Boolean, shadow: Boolean = false, variant: Int = 0, shape: Int = 0): MeshData {
         val sp = variant.coerceIn(0, 3) // oak, pine, ancient, birch
-        val ts = TreeShape(sp, shape.coerceIn(0, 15))
-        val n = if (shadow) 2 * ts.k else if (lifelike) maxOf(12, 3 * ts.k) else maxOf(12, 2 * ts.k)
+        val ridges = TREE_RIDGES[sp]
+        val n = if (shadow) 2 * ridges else if (lifelike) maxOf(12, 3 * ridges) else maxOf(12, 2 * ridges)
+        val ts = TreeShape(sp, shape.coerceIn(0, 15), n)
         val loopW = if (lifelike) 4 else 3
 
         // Limbs: heights and lengths from the species formulas, then grouped into levels of one to three that share a pair of rows.
@@ -802,7 +810,7 @@ object Geo {
             for (y in doubleArrayOf(.5, 1.1, 1.9, 3.5, 7.5, 14.0)) ys += y
             ys += ts.topY
         } else {
-            for (y in doubleArrayOf(.5, 1.1, 1.25, 1.45, 1.7, 2.1, 2.7, 3.6, 4.8)) ys += y
+            for (y in doubleArrayOf(.5, 1.1, 1.2, 1.35, 1.55, 1.9, 2.6, 3.6, 4.8)) ys += y
         }
         val gap = .30                       // half the height of a limb's hole
         val levelRow = IntArray(levels)
@@ -818,6 +826,7 @@ object Geo {
             prevTop = y + gap
         }
         if (!shadow) ys += maxOf(ts.topY, ys[ys.size - 1] + 3.0)
+        ys += ys[ys.size - 1] + .7           // the stem narrows over this last row and is closed by a fan
         val rows = ys.size
         val stride = n + 1
 
@@ -827,10 +836,14 @@ object Geo {
             val wx = ts.cx(y); val wz = ts.cz(y)
             for (c in 0..n) {
                 val th = c.toDouble() / n * 2 * PI
-                val rr = ts.radius(th, y)
+                val rr = ts.radius(th, y) * (if (r == rows - 1) .3 else 1.0)
                 sb.vertex(sin(th) * rr + wx, y, cos(th) * rr + wz, c.toDouble() / n, y / 22.0)
             }
         }
+
+        val yTop = ys[rows - 1]
+        val cap = sb.vertex(ts.cx(yTop), yTop + .25, ts.cz(yTop), .5, yTop / 22.0)
+        for (c in 0 until n) sb.tri((rows - 1) * stride + c, (rows - 1) * stride + c + 1, cap)
 
         // Limbs: cut a hole in the ring pair, then sprout a collar, a mid ring and a tip from the loop around it.
         val hole = BooleanArray((rows - 1) * n)
@@ -856,11 +869,11 @@ object Geo {
                 nx /= nl; nz /= nl
                 val n0 = doubleArrayOf(nx, 0.0, nz)
                 val sx = -nz; val sz = nx
-                val len = limbLen[b] * (.6 + ts.r(340 + b) * .85)
-                val rise = -.3 + ts.r(350 + b) * 2.4                  // some limbs droop, some reach up
-                val bend = (ts.r(360 + b) - .5) * 1.3
-                val curl = (ts.r(365 + b) - .5) * .8
-                val thick = minOf(1.35, (.7 + ts.r(370 + b) * .6) * TREE_LIMB_THICK[sp])
+                val len = limbLen[b] * (.9 + ts.r(340 + b) * .8)
+                val rise = -.6 + ts.r(350 + b) * 2.4                  // some limbs droop, some reach up
+                val bend = (ts.r(360 + b) - .5) * 1.8
+                val curl = (ts.r(365 + b) - .5) * 1.1
+                val thick = (.55 + ts.r(370 + b) * .4) * TREE_LIMB_THICK[sp]
                 // Centre line: collar, mid ring, tip. It bends sideways, curls and rises or droops.
                 val along = doubleArrayOf(.14, .55, 1.0)
                 val cx = DoubleArray(3); val cy = DoubleArray(3); val cz = DoubleArray(3)
@@ -888,7 +901,7 @@ object Geo {
                 }
                 val round = minOf(1.0, (sMax - sMin) * 1.15 / maxOf(1e-6, yMax - yMin))
                 val vScale = doubleArrayOf((1.0 + round) / 2, round)
-                val ringScale = doubleArrayOf(.96 * thick, .66 * thick)
+                val ringScale = doubleArrayOf(.8 * thick, .42 * thick)
                 val ring = Array(2) { IntArray(kb) }
                 var meanU = 0.0
                 for (v in loop) meanU += sb.uv[v * 2]
@@ -902,15 +915,8 @@ object Geo {
                     ring[j2][i] = sb.vertex(cx[j2] + rv[0], cy[j2] + rv[1], cz[j2] + rv[2], u, v + along[j2] * len / 22.0)
                 }
                 val tip = sb.vertex(cx[2], cy[2], cz[2], meanU, sb.uv[loop[0] * 2 + 1] + len / 22.0)
-                // Winding: make the first collar face point away from the limb's axis; every other face follows the same order.
-                val l0 = loop[0]; val l1 = loop[1]; val q0 = ring[0][0]; val lo = loop[kb / 2]
-                val e1x = sb.x(l1) - sb.x(l0); val e1y = sb.y(l1) - sb.y(l0); val e1z = sb.z(l1) - sb.z(l0)
-                val e2x = sb.x(q0) - sb.x(l0); val e2y = sb.y(q0) - sb.y(l0); val e2z = sb.z(q0) - sb.z(l0)
-                val facing = (e1y * e2z - e1z * e2y) * (sb.x(l0) - sb.x(lo)) +
-                    (e1z * e2x - e1x * e2z) * (sb.y(l0) - sb.y(lo)) +
-                    (e1x * e2y - e1y * e2x) * (sb.z(l0) - sb.z(lo))
-                val flip = facing < 0
-                fun tri(a: Int, b2: Int, c: Int) { if (flip) sb.tri(c, b2, a) else sb.tri(a, b2, c) }
+                // The loop runs counter-clockwise seen from outside, so the faces built in loop order already face outward.
+                fun tri(a: Int, b2: Int, c: Int) { sb.tri(a, b2, c) }
                 val rings = arrayOf(loop, ring[0], ring[1])
                 for (j2 in 0..1) {
                     val lower = rings[j2]; val upper = rings[j2 + 1]

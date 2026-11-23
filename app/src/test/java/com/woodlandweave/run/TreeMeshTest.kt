@@ -75,9 +75,9 @@ class TreeMeshTest {
             val e = Edges(m)
             assertEquals("one connected piece, variant $v", 1, e.components)
             assertEquals("no edge shared by two faces in the same direction, variant $v", 0, e.duplicated())
-            // Open only at the bottom ring (buried in the soil) and the top ring (inside the crown): two rings of `radial` edges.
+            // Open only at the bottom ring (buried in the soil): one ring of `radial` edges. The top is closed.
             val radial = if (lifelike) maxOf(12, 3 * ridges[v]) else maxOf(12, 2 * ridges[v])
-            assertEquals("rim of variant $v lifelike $lifelike", 2 * radial, e.rimEdges())
+            assertEquals("rim of variant $v lifelike $lifelike", radial, e.rimEdges())
         }
     }
 
