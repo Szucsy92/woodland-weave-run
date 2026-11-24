@@ -589,7 +589,15 @@ vec3 sampleBlur(vec2 uv) {
   return (tap(uv) * 4.0 + tap(uv + d) + tap(uv - d) + tap(uv + vec2(d.x, -d.y)) + tap(uv + vec2(-d.x, d.y))) / 8.0;
 }
 // Interleaved gradient noise: cheap, blue-ish, no visible pattern.
-float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
+// Per-pixel noise without a lattice. Interleaved gradient noise repeats on a regular diagonal grid (about every 15 px), and
+// the AO, depth-of-field and light-shaft taps that it rotates, plus the upscaling of the half-resolution target, turned that
+// grid into visible curved moire lines. This hash (no sin, stable on mobile GPUs) has no such structure, and the existing
+// blurs average its fine noise away. The cost is a handful of ALU operations per use, like before.
+float ign(vec2 p) {
+  vec3 q = fract(vec3(p.xyx) * 0.1031);
+  q += dot(q, q.yzx + 33.33);
+  return fract((q.x + q.y) * q.z);
+}
 #ifdef Q_FULL
 vec3 acesFit(vec3 x) { return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
 // Gentle highlight roll-off: bright lights bend towards white instead of clipping into flat blobs.
@@ -909,7 +917,15 @@ uniform mat4 uProj;
 uniform vec2 uNF, uTanAspect, uTexel;
 uniform float uRadius;
 out vec4 o;
-float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
+// Per-pixel noise without a lattice. Interleaved gradient noise repeats on a regular diagonal grid (about every 15 px), and
+// the AO, depth-of-field and light-shaft taps that it rotates, plus the upscaling of the half-resolution target, turned that
+// grid into visible curved moire lines. This hash (no sin, stable on mobile GPUs) has no such structure, and the existing
+// blurs average its fine noise away. The cost is a handful of ALU operations per use, like before.
+float ign(vec2 p) {
+  vec3 q = fract(vec3(p.xyx) * 0.1031);
+  q += dot(q, q.yzx + 33.33);
+  return fract((q.x + q.y) * q.z);
+}
 float linZ(float d) { float z = d * 2.0 - 1.0; return 2.0 * uNF.x * uNF.y / ((uNF.y + uNF.x) - z * (uNF.y - uNF.x)); }
 vec3 vpos(vec2 uv) { float z = linZ(texture(uDepth, uv).r); return vec3((uv * 2.0 - 1.0) * uTanAspect * z, -z); }
 void main() {
