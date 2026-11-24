@@ -36,7 +36,7 @@ enum class Difficulty { EASY, NORMAL, HARD }
 enum class GameMode { CLASSIC, SURVIVE, FREEROAM }
 enum class PowerUpType { FREEZER, GHOST, SHOCKWAVE }
 enum class ForestMood { MANUAL, AUTO }
-enum class SecretType { RING }
+enum class SecretType { MONOLITH, RING, LANTERN }
 enum class SurviveStage { LIT, DYING, DARK, RED }
 
 class Tree(val x: Double, val z: Double, val scale: Double, val id: String) {
@@ -100,7 +100,9 @@ const val SECRET_CELL = 70
 const val SECRET_REACH = 3.5
 const val SECRET_CLEARING = 6.0
 val SECRET_NAMES = mapOf(
-    SecretType.RING to "The Fairy Ring"
+    SecretType.MONOLITH to "The Silent Monolith",
+    SecretType.RING to "The Fairy Ring",
+    SecretType.LANTERN to "The Lost Lantern",
 )
 
 const val GATE_CELL = 90
@@ -221,7 +223,7 @@ fun secretsAround(x: Double, z: Double): List<Secret> {
         out += Secret(
             gx * SECRET_CELL + 15 + hash(gx, gz, 301) * (SECRET_CELL - 30),
             gz * SECRET_CELL + 15 + hash(gx, gz, 302) * (SECRET_CELL - 30),
-            SecretType.values()[min(0, floor(hash(gx, gz, 303) * 1).toInt())],
+            SecretType.values()[min(2, floor(hash(gx, gz, 303) * 3).toInt())],
             "s$gx:$gz",
         )
     }
