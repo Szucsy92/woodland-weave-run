@@ -33,7 +33,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private companion object {
         const val CROWN_NEAR_SUBDIVISIONS = 2     // same canopy detail as the web build, close to the runner
         const val CROWN_FAR_SUBDIVISIONS = 2      // match the Capacitor canopy mesh at every distance; avoid a visible LOD silhouette seam
-        const val CROWN_LOD_DISTANCE = 22.0
+        const val CROWN_LOD_DISTANCE = 32.0
         // The shadow casters come from a wider lattice than the playable forest (see rebuildProps), so the light on the
         // ground depends on the real forest and not on the part of it that happens to be loaded around the runner.
         const val SHADOW_RADIUS = 22
