@@ -592,18 +592,23 @@ vec3 sampleBlur(vec2 uv) {
 // Interleaved gradient noise: cheap, blue-ish, no visible pattern.
 // Interleaved gradient noise: smooth and nearly invisible, fine for the +-1/255 final dither and the grain.
 float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
-// High-pass per-pixel noise for the taps that AO, depth of field and the light shafts rotate. ign() repeats on a regular
-// diagonal grid (about every 15 px), which the half-resolution upscale turned into curved moire lines, while plain white
-// noise is far too grainy. Each pixel here is a hash minus the mean of two neighbours' hashes, so the pixels are
-// anti-correlated (blue-ish, no lattice) and the existing blurs average it away. The sigmoid makes it uniform again.
+// Per-pixel noise for the taps that AO, depth of field and the light shafts rotate. ign() repeats on a regular diagonal
+// grid (about every 15 px), which the half-resolution upscale turned into curved moire lines; white and high-pass hash
+// noise are lattice-free but stay visibly grainy. This is a 4x4 Bayer matrix with a random cyclic shift per 4x4 tile:
+// every tile holds all 16 levels exactly once, so any blur of 4 px or more removes the noise completely (a white noise
+// is never fully averaged out), and the random shift per tile keeps the pattern from forming a regular lattice.
 float hash12(vec2 p) {
   vec3 q = fract(vec3(p.xyx) * 0.1031);
   q += dot(q, q.yzx + 33.33);
   return fract((q.x + q.y) * q.z);
 }
+int bayer2(int x, int y) { return (2 * x) ^ (3 * y); }
 float hpn(vec2 p) {
-  float t = hash12(p) - 0.5 * (hash12(p + vec2(1.0, 0.0)) + hash12(p + vec2(0.0, 1.0)));
-  return 1.0 / (1.0 + exp(-4.81 * t));
+  ivec2 q = ivec2(floor(p));
+  int cx = q.x & 3; int cy = q.y & 3;
+  float b = float(4 * bayer2(cx & 1, cy & 1) + bayer2((cx >> 1) & 1, (cy >> 1) & 1));
+  float o = floor(hash12(vec2(float(q.x >> 2), float(q.y >> 2))) * 16.0);
+  return (mod(b + o, 16.0) + 0.5) / 16.0;
 }
 #ifdef Q_FULL
 vec3 acesFit(vec3 x) { return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
@@ -926,18 +931,23 @@ uniform float uRadius;
 out vec4 o;
 // Interleaved gradient noise: smooth and nearly invisible, fine for the +-1/255 final dither and the grain.
 float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
-// High-pass per-pixel noise for the taps that AO, depth of field and the light shafts rotate. ign() repeats on a regular
-// diagonal grid (about every 15 px), which the half-resolution upscale turned into curved moire lines, while plain white
-// noise is far too grainy. Each pixel here is a hash minus the mean of two neighbours' hashes, so the pixels are
-// anti-correlated (blue-ish, no lattice) and the existing blurs average it away. The sigmoid makes it uniform again.
+// Per-pixel noise for the taps that AO, depth of field and the light shafts rotate. ign() repeats on a regular diagonal
+// grid (about every 15 px), which the half-resolution upscale turned into curved moire lines; white and high-pass hash
+// noise are lattice-free but stay visibly grainy. This is a 4x4 Bayer matrix with a random cyclic shift per 4x4 tile:
+// every tile holds all 16 levels exactly once, so any blur of 4 px or more removes the noise completely (a white noise
+// is never fully averaged out), and the random shift per tile keeps the pattern from forming a regular lattice.
 float hash12(vec2 p) {
   vec3 q = fract(vec3(p.xyx) * 0.1031);
   q += dot(q, q.yzx + 33.33);
   return fract((q.x + q.y) * q.z);
 }
+int bayer2(int x, int y) { return (2 * x) ^ (3 * y); }
 float hpn(vec2 p) {
-  float t = hash12(p) - 0.5 * (hash12(p + vec2(1.0, 0.0)) + hash12(p + vec2(0.0, 1.0)));
-  return 1.0 / (1.0 + exp(-4.81 * t));
+  ivec2 q = ivec2(floor(p));
+  int cx = q.x & 3; int cy = q.y & 3;
+  float b = float(4 * bayer2(cx & 1, cy & 1) + bayer2((cx >> 1) & 1, (cy >> 1) & 1));
+  float o = floor(hash12(vec2(float(q.x >> 2), float(q.y >> 2))) * 16.0);
+  return (mod(b + o, 16.0) + 0.5) / 16.0;
 }
 float linZ(float d) { float z = d * 2.0 - 1.0; return 2.0 * uNF.x * uNF.y / ((uNF.y + uNF.x) - z * (uNF.y - uNF.x)); }
 vec3 vpos(vec2 uv) { float z = linZ(texture(uDepth, uv).r); return vec3((uv * 2.0 - 1.0) * uTanAspect * z, -z); }
