@@ -589,14 +589,20 @@ vec3 sampleBlur(vec2 uv) {
   return (tap(uv) * 4.0 + tap(uv + d) + tap(uv - d) + tap(uv + vec2(d.x, -d.y)) + tap(uv + vec2(-d.x, d.y))) / 8.0;
 }
 // Interleaved gradient noise: cheap, blue-ish, no visible pattern.
-// Per-pixel noise without a lattice. Interleaved gradient noise repeats on a regular diagonal grid (about every 15 px), and
-// the AO, depth-of-field and light-shaft taps that it rotates, plus the upscaling of the half-resolution target, turned that
-// grid into visible curved moire lines. This hash (no sin, stable on mobile GPUs) has no such structure, and the existing
-// blurs average its fine noise away. The cost is a handful of ALU operations per use, like before.
-float ign(vec2 p) {
+// Interleaved gradient noise: smooth and nearly invisible, fine for the +-1/255 final dither and the grain.
+float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
+// High-pass per-pixel noise for the taps that AO, depth of field and the light shafts rotate. ign() repeats on a regular
+// diagonal grid (about every 15 px), which the half-resolution upscale turned into curved moire lines, while plain white
+// noise is far too grainy. Each pixel here is a hash minus the mean of two neighbours' hashes, so the pixels are
+// anti-correlated (blue-ish, no lattice) and the existing blurs average it away. The sigmoid makes it uniform again.
+float hash12(vec2 p) {
   vec3 q = fract(vec3(p.xyx) * 0.1031);
   q += dot(q, q.yzx + 33.33);
   return fract((q.x + q.y) * q.z);
+}
+float hpn(vec2 p) {
+  float t = hash12(p) - 0.5 * (hash12(p + vec2(1.0, 0.0)) + hash12(p + vec2(0.0, 1.0)));
+  return 1.0 / (1.0 + exp(-4.81 * t));
 }
 #ifdef Q_FULL
 vec3 acesFit(vec3 x) { return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
@@ -624,7 +630,7 @@ vec3 dofGather(vec2 uv, vec3 c0) {
   float rad = coc * 0.011;
   // The tap spiral is rotated per pixel: fixed taps echo bright and dark edges as regular copies and horizontal stripes,
   // a rotated spiral turns that into fine noise that the dither hides.
-  float rot = ign(gl_FragCoord.xy) * 6.2831853;
+  float rot = hpn(gl_FragCoord.xy) * 6.2831853;
   vec3 acc = c0; float ws = 1.0;
   for (int i = 0; i < 16; i++) {
     float fi = (float(i) + 0.5) / 16.0;
@@ -676,7 +682,7 @@ vec3 shafts(vec3 c, vec2 uv, float d) {
   // swim and jump: with the old spacing (a function of the scene depth behind each pixel) every step moved every beam.
   float dtFix = uShaftMax / float(N);
   float ph = fract(-dot(ro, rd) / dtFix);
-  float j = ign(gl_FragCoord.xy);   // static per-pixel offset over a whole step: the world anchor stays, the banding (dashed lines) goes
+  float j = hpn(gl_FragCoord.xy);   // static per-pixel offset over a whole step: the world anchor stays, the banding (dashed lines) goes
   float cosT = dot(rd, uMoonDir);
   float g = 0.64;   // tighter source lobe: clearer light origin, without turning shafts into hard cones
   float phase = (1.0 - g * g) / (12.566 * pow(max(1.0 + g * g - 2.0 * g * cosT, 0.12), 1.5));
@@ -917,14 +923,20 @@ uniform mat4 uProj;
 uniform vec2 uNF, uTanAspect, uTexel;
 uniform float uRadius;
 out vec4 o;
-// Per-pixel noise without a lattice. Interleaved gradient noise repeats on a regular diagonal grid (about every 15 px), and
-// the AO, depth-of-field and light-shaft taps that it rotates, plus the upscaling of the half-resolution target, turned that
-// grid into visible curved moire lines. This hash (no sin, stable on mobile GPUs) has no such structure, and the existing
-// blurs average its fine noise away. The cost is a handful of ALU operations per use, like before.
-float ign(vec2 p) {
+// Interleaved gradient noise: smooth and nearly invisible, fine for the +-1/255 final dither and the grain.
+float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
+// High-pass per-pixel noise for the taps that AO, depth of field and the light shafts rotate. ign() repeats on a regular
+// diagonal grid (about every 15 px), which the half-resolution upscale turned into curved moire lines, while plain white
+// noise is far too grainy. Each pixel here is a hash minus the mean of two neighbours' hashes, so the pixels are
+// anti-correlated (blue-ish, no lattice) and the existing blurs average it away. The sigmoid makes it uniform again.
+float hash12(vec2 p) {
   vec3 q = fract(vec3(p.xyx) * 0.1031);
   q += dot(q, q.yzx + 33.33);
   return fract((q.x + q.y) * q.z);
+}
+float hpn(vec2 p) {
+  float t = hash12(p) - 0.5 * (hash12(p + vec2(1.0, 0.0)) + hash12(p + vec2(0.0, 1.0)));
+  return 1.0 / (1.0 + exp(-4.81 * t));
 }
 float linZ(float d) { float z = d * 2.0 - 1.0; return 2.0 * uNF.x * uNF.y / ((uNF.y + uNF.x) - z * (uNF.y - uNF.x)); }
 vec3 vpos(vec2 uv) { float z = linZ(texture(uDepth, uv).r); return vec3((uv * 2.0 - 1.0) * uTanAspect * z, -z); }
@@ -939,7 +951,7 @@ void main() {
   if (dot(n, -p) < 0.0) n = -n;
   vec3 tn = normalize(abs(n.x) > 0.9 ? cross(n, vec3(0.0, 1.0, 0.0)) : cross(n, vec3(1.0, 0.0, 0.0)));
   vec3 bn = cross(n, tn);
-  float ang = ign(gl_FragCoord.xy) * 6.2831853;
+  float ang = hpn(gl_FragCoord.xy) * 6.2831853;
   float occ = 0.0;
   for (int i = 0; i < SSAO_N; i++) {
     float fi = (float(i) + 0.5) / float(SSAO_N);
