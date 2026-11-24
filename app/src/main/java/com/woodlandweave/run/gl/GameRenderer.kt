@@ -68,7 +68,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         /** The web build's crowns, rocks and bushes were flat-shaded polyhedra (three.js non-indexed geometry). */
         const val FLAT_FACETS = true
         /** Power-up orbs: smooth spheres, see-through (1 = opaque). */
-        const val ORB_ALPHA = .768f
+        const val ORB_ALPHA = .5f
         /** The one resolution: the scene is drawn at half the surface's width and height and scaled up in the final pass. */
         const val RENDER_SCALE = 0.5f
         /** Adaptive: starts at the existing half-resolution target and scales down only when frame time requires it. */
@@ -913,11 +913,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         for ((i, o) in e.orbs.withIndex()) {
             val col = orbColor(o.p.type)
             val taken = o.taken
-            val base = groundHeight(o.p.x, o.p.z) + 1.3
+            val base = groundHeight(o.p.x, o.p.z) + 1.15
             val k = if (taken != null) min(1.0, (t - taken) / .25) else 0.0
             val vis = orbIn(o, t) * (1.0 - k)          // grows in when it appears, shrinks away when taken
             val vf = vis.toFloat(); val rs = .35 + .65 * vis
-            val size = (if (taken != null) max(.001, .5 * (1 - k)) else .5 + sin(t * 2.1 + i) * .04) * (.4 + .6 * orbIn(o, t))
+            val size = (if (taken != null) max(.001, .42 * (1 - k)) else .42 + sin(t * 2.1 + i) * .035) * (.4 + .6 * orbIn(o, t))
             val flow = min(1.0, k * 1.5)
             val px = if (taken != null) o.p.x + (cam.ex - o.p.x) * flow * .6 else o.p.x
             val pz = if (taken != null) o.p.z + (cam.ez - o.p.z) * flow * .6 else o.p.z
@@ -926,7 +926,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             GL.glEnable(GL.GL_BLEND); GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA); GL.glDepthMask(false)
             GL.glEnable(GL.GL_CULL_FACE); GL.glCullFace(GL.GL_BACK)
             material(litProg, col, col, 1.6f, alpha = ORB_ALPHA * (1f - k.toFloat() * .6f) * orbIn(o, t).toFloat(), rough = .2f)
-            place(parent, px, py, pz, 0.0, t, 0.0, size)
+            place(parent, px, py, pz, 0.0, t * .8, 0.0, size)
             uploadOne(orb, parent)
             GL.glDisable(GL.GL_CULL_FACE); GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
 
@@ -950,24 +950,36 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         for (g in e.gates) {
             val gyG = groundHeight(g.x, g.z)
             place(parent, g.x, gyG, g.z, 0.0, g.angle, 0.0)
-            material(litProg, Palette.rock, Palette.ember, 2.7f)
+            material(litProg, Palette.rock, Palette.ember, .9f, rough = .4f, metal = .2f)
             for (side in intArrayOf(-1, 1)) prim(box, parent, side * (GATE_HALF + .2), 2.1, 0.0, 0.0, 0.0, 0.0, .4, 4.6, .4)
             prim(box, parent, 0.0, 4.5, 0.0, 0.0, 0.0, 0.0, GATE_HALF * 2 + .8, .4, .4)
         }
         for ((i, g) in e.gates.withIndex()) {
             place(parent, g.x, groundHeight(g.x, g.z), g.z, 0.0, g.angle, 0.0)
-            additiveVeil(Palette.pursuer, (.182 + sin(t * 1.7 + i * 2) * .18).toFloat(), whiteTex, parent, GATE_HALF * 2, 4.4, ly = 2.2)
+            additiveVeil(Palette.pursuer, (.16 + sin(t * 1.7 + i * 2) * .06).toFloat(), whiteTex, parent, GATE_HALF * 2, 4.4, ly = 2.2)
         }
         for ((i, sec) in e.secrets.withIndex()) {
             val gyS = groundHeight(sec.x, sec.z)
             place(parent, sec.x, gyS, sec.z)
             when (sec.type) {
+                SecretType.MONOLITH -> {
+                    material(litProg, Palette.rock, Palette.secret, .08f, rough = .35f, metal = .2f)
+                    prim(box, parent, 0.0, 2.0, 0.0, 0.0, .4, 0.0, 1.0, 4.4, .35)
+                    material(litProg, Palette.secret, mode = 2)
+                    prim(box, parent, .07, 2.1, .2, 0.0, .4, 0.0, .06, 3.2, .02)
+                }
                 SecretType.RING -> {
                     material(litProg, Palette.green, mode = 2)
-                    for (m in 0 until 6) {
-                        val a = m / 6.0 * PI * 2 + t * .75
-                        prim(orb, parent, cos(a) * 1.6, .2, sin(a) * 1.6, 0.0, 0.0, 0.0, .2, .18, .2)
+                    for (m in 0 until 11) {
+                        val a = m / 11.0 * PI * 2 + t * .25
+                        prim(orb, parent, cos(a) * 2.6, .2, sin(a) * 2.6, 0.0, 0.0, 0.0, .16, .1, .16)
                     }
+                }
+                SecretType.LANTERN -> {
+                    material(litProg, Palette.trunk, rough = .9f)
+                    prim(cyl, parent, 0.0, .8, 0.0, 0.0, 0.0, .08, .12, 1.6, .12)
+                    material(litProg, Palette.lamp, mode = 2)
+                    prim(box, parent, .06, 1.7, 0.0, 0.0, 0.0, 0.0, .24, .3, .24)
                 }
             }
         }
@@ -1345,7 +1357,20 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             bMist.add(mx, groundHeight(mx, mz) + .7 + i * .15, mz, 14.0 + i * 3, 3.2, Palette.moon, .07)
         }
         if (s.mode == GameMode.FREEROAM) {
-            for (g in e.gates) bGlow.add(g.x, groundHeight(g.x, g.z) + 3, g.z, 20.0, 20.0, Palette.ember, .5 * haloDay * farFade(g.x, g.z, s, 50.0, 90.0), 3.0)
+            for ((i, sec) in e.secrets.withIndex()) {
+                val found = s.found.contains(sec.id)
+                val pulse = (if (found) 1.4 else 1.0) * (.8 + sin(t * 1.6 + i) * .2)
+                val gyS = groundHeight(sec.x, sec.z)
+                when (sec.type) {
+                    SecretType.MONOLITH -> bGlowFog.add(sec.x, gyS + 2.4, sec.z, 5.0, 7.0, Palette.secret, min(1.0, .35 * pulse) * (1.0 - dayLevel * .12) * farFade(sec.x, sec.z, s, 45.0, 75.0), 2.4)
+                    SecretType.RING -> for (m in 0 until 11) {
+                        val a = m / 11.0 * PI * 2 + t * .25
+                        bGlowFog.add(sec.x + cos(a) * 2.6, gyS + .3, sec.z + sin(a) * 2.6, .9, .9, Palette.green, min(1.0, .7 * pulse) * (1.0 - dayLevel * .12) * farFade(sec.x, sec.z, s, 45.0, 75.0), .3)
+                    }
+                    SecretType.LANTERN -> bGlowFog.add(sec.x + .06, gyS + 1.7, sec.z, 3.2, 3.2, Palette.lamp, min(1.0, .75 * pulse * (.85 + sin(t * 9 + i) * .15)) * (1.0 - dayLevel * .12) * farFade(sec.x, sec.z, s, 45.0, 75.0), 1.7)
+                }
+            }
+            for (g in e.gates) bGlow.add(g.x, groundHeight(g.x, g.z) + 3, g.z, 16.0, 16.0, Palette.ember, .32 * haloDay * farFade(g.x, g.z, s, 50.0, 90.0), 3.0)
             var hi = 0
             for (h in holesAround(s.x, s.z, s.universe)) {
                 if (hypot(h.x - s.x, h.z - s.z) >= HOLE_SEE) continue
