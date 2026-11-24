@@ -25,7 +25,7 @@ const val RADIUS = 13
 const val FOG_END = 38.0
 const val MAX_HEADING = 37.5 * PI / 180.0
 const val IMPACT_DURATION = 0.5
-const val MAX_IMPACTS = 4
+const val MAX_IMPACTS = 3
 const val PAUSE_SLOW = 0.7
 const val RESUME_TIME = 1.3
 const val EXIT_TIME = 0.9
@@ -36,7 +36,7 @@ enum class Difficulty { EASY, NORMAL, HARD }
 enum class GameMode { CLASSIC, SURVIVE, FREEROAM }
 enum class PowerUpType { FREEZER, GHOST, SHOCKWAVE }
 enum class ForestMood { MANUAL, AUTO }
-enum class SecretType { RING }
+enum class SecretType { MONOLITH, RING, LANTERN }
 enum class SurviveStage { LIT, DYING, DARK, RED }
 
 class Tree(val x: Double, val z: Double, val scale: Double, val id: String) {
@@ -77,7 +77,7 @@ class Point(val x: Double, val z: Double)
 
 const val POWERUP_START = 100.0
 const val POWERUP_DURATION = 5.0
-const val POWERUP_GAP = 200.0
+const val POWERUP_GAP = 120.0
 const val SHOCKWAVE_FULL = FOG_END + 6
 const val SHOCKWAVE_REACH = 0.75
 const val SHOCKWAVE_AHEAD = SHOCKWAVE_FULL * SHOCKWAVE_REACH
@@ -100,7 +100,9 @@ const val SECRET_CELL = 70
 const val SECRET_REACH = 3.5
 const val SECRET_CLEARING = 6.0
 val SECRET_NAMES = mapOf(
-    SecretType.RING to "The Fairy Ring"
+    SecretType.MONOLITH to "The Silent Monolith",
+    SecretType.RING to "The Fairy Ring",
+    SecretType.LANTERN to "The Lost Lantern",
 )
 
 const val GATE_CELL = 90
@@ -221,7 +223,7 @@ fun secretsAround(x: Double, z: Double): List<Secret> {
         out += Secret(
             gx * SECRET_CELL + 15 + hash(gx, gz, 301) * (SECRET_CELL - 30),
             gz * SECRET_CELL + 15 + hash(gx, gz, 302) * (SECRET_CELL - 30),
-            SecretType.values()[min(0, floor(hash(gx, gz, 303) * 1).toInt())],
+            SecretType.values()[min(2, floor(hash(gx, gz, 303) * 3).toInt())],
             "s$gx:$gz",
         )
     }
