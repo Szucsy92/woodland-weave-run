@@ -682,6 +682,11 @@ object Geo {
     private val TREE_RADIAL = intArrayOf(3,  3,  4)                                   // Körbeosztás (gyökerenként)
     private val TREE_FLARE_TOP = doubleArrayOf(5.0,  5.0,  6.0)                     // Sűrű gyűrűk magassága
     private val TREE_ROOT_W = doubleArrayOf(1.40,  .85,  1.85)          // (megtartva a régi kód kompatibilitásáért)
+    // Roots are shortened to this share of their former reach: less of a fin hangs over ground that falls away from the
+    // trunk. Below the soil each root ends in a quarter-ellipse that dives TREE_ROOT_DIVE into the ground, so a root tip
+    // is a rounded point that goes into the soil on sloping ground, not a flat cut that hovers above it. No per-tree maths.
+    private const val TREE_ROOT_REACH_SCALE = 0.7
+    private const val TREE_ROOT_DIVE = 0.3
     private const val TREE_GROUND = 1.1                                    // soil level in body space (the instance sits 1.1 m low)
 
     /** Growable vertex and index lists for a hand-built surface. */
@@ -746,7 +751,7 @@ object Geo {
             }
         }
         private val rootReach = DoubleArray(k) {
-            1.6 * TREE_ROOT_LEN[sp] * (TREE_ROOT_LEN_MIN[sp] + r(230 + it) * TREE_ROOT_LEN_RAND[sp]) *
+            TREE_ROOT_REACH_SCALE * 1.6 * TREE_ROOT_LEN[sp] * (TREE_ROOT_LEN_MIN[sp] + r(230 + it) * TREE_ROOT_LEN_RAND[sp]) *
                 (if (r(250 + it) < TREE_ROOT_STUB[sp]) TREE_ROOT_STUB_SCALE[sp] else 1.0)
         }
         // How high each buttress ridge climbs the trunk, and how concave (peaked) its profile is.
@@ -774,7 +779,11 @@ object Geo {
                 // How far this root still reaches at height y: its crest falls from rootHeight above the soil to the soil.
                 val f = maxOf(0.0, if (y >= TREE_GROUND) {
                     if (y < TREE_GROUND + rootHeight[i]) (1.0 - (y - TREE_GROUND) / rootHeight[i]).pow(rootSteep[i]) else 0.0
-                } else 1.0 + (TREE_GROUND - y) * TREE_ROOT_DEPTH[sp])
+                } else {
+                    // Below the soil the root rounds off to a point: a quarter ellipse, full reach at the soil line, none at the dive depth.
+                    val s = minOf(1.0, (TREE_GROUND - y) / TREE_ROOT_DIVE)
+                    sqrt(1.0 - s * s)
+                })
                 var crest = rootReach[i] * f
                 if (TREE_ROOT_ANGLE[sp] < 90.0 && f > 0.0 && y > TREE_GROUND) {
                     // Joint angle: near the joint the crest may leave the trunk at most TREE_ROOT_ANGLE off vertical
@@ -865,11 +874,12 @@ object Geo {
         }
         val levels = groupFrom.size
 
-        // Rows start exactly at the soil surface. No trunk volume or buried root-ball is generated below ground;
-        // only the radial root fins remain visible, spreading outward in a star pattern at ground level.
-        val bottom = TREE_GROUND
+        // Rows start a little below the soil surface (not for the shadow mesh): just enough for the root fins to round off
+        // and dive into the ground. No trunk volume or root-ball beyond that; the fins spread outward in a star at ground level.
+        val bottom = if (shadow) TREE_GROUND else TREE_GROUND - TREE_ROOT_DIVE
         val ys = ArrayList<Double>()
         ys += bottom
+        if (!shadow) { ys += TREE_GROUND - TREE_ROOT_DIVE * .75; ys += TREE_GROUND - TREE_ROOT_DIVE * .4 }
         if (shadow) {
             for (y in doubleArrayOf(.5, 1.1, 1.8, 2.8, 4.2, 7.5, 14.0)) if (y > bottom + .05) ys += y
             ys += ts.topY
