@@ -121,6 +121,8 @@ uniform float uLampSoft;
 uniform float uAlpha, uMaps, uFogNear, uFogFar, uHemi, uLampI, uRedI, uNormalScale, uRough, uLights, uRed, uFogOn, uEncode, uMetal;
 uniform int uMode;
 uniform vec2 uUvScale;
+uniform vec2 uTreeFade;   // radial distances: trees are fully solid up to x and fully dissolved at y
+
 uniform sampler2D uTex, uNorm, uRoughTex;
 uniform float uTime;
 $SUN_GAP_FN
@@ -230,6 +232,13 @@ void main() {
   float dist = length(toCam);
   vec3 v = toCam / max(dist, 1e-4);
   float depth = dot(vW - uCam, uFwd);
+  // Trunks (4) and crowns (5) dissolve into the fog at the far edge of the draw range with a screen-door
+  // dither instead of popping in as solid fog-coloured shapes that suddenly hide the distant lights behind them.
+  // The whole trunk and crown thins out together; the holes close up as the tree comes nearer.
+  if (uMode == 4 || uMode == 5) {
+    float cover = 1.0 - smoothstep(uTreeFade.x, uTreeFade.y, dist);
+    if (cover < 1.0 && cover <= fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))))) discard;
+  }
   if (uMode == 1) { o = vec4(finish(uColor, depth), texture(uTex, vUv).a * uAlpha); return; }
   if (uMode == 2) { o = vec4(finish(uColor, depth), uAlpha); return; }
   vec3 n = normalize(vN);

@@ -552,6 +552,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 u1(p, "uShadowOn", if (feat.shadows) 0f else 1f); u1(p, "uShadowK", min(1f, pp.tune.shadows))
             }
             u3(p, "uFog", fog); u1(p, "uFogNear", fogNear); u1(p, "uFogFar", fogFar)
+            // Trees are culled beyond FOG_END + 8: they thin out over the last 14 m before that, inside the fully fogged band.
+            GL.glUniform2f(loc(p, "uTreeFade"), (FOG_END + 8 - 14).toFloat(), (FOG_END + 8).toFloat())
             u3(p, "uSky", sky); u3(p, "uGroundC", groundC); u1(p, "uHemi", hemi)
             u3(p, "uMoonDir", moonDirV[0], moonDirV[1], moonDirV[2])
             u3(p, "uMoon", moonCol[0] * moonI, moonCol[1] * moonI, moonCol[2] * moonI)
