@@ -354,7 +354,15 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         // its local root flare starts just above grade and sinks naturally into the soil.
         // Keep the original species-independent trunk height: tree.scale changes girth and crown size only.
         // The unified body's root flare starts at local Y~1.2, so the original -1.1 ground anchor keeps it seated.
-        val base = groundHeight(tree.x, tree.z) - 1.1
+        // The ground under the tree is sampled once (this used to be done twice). The slope there decides how far the whole
+        // tree sinks: the root fins stay at one height while the soil falls away on the downhill side, so their tips used
+        // to hang in the air as sharp spikes. Sinking by slope x root reach seats the downhill tips in the soil; the uphill
+        // side just buries a little more of the flare. Two forward differences, once per tree (the props are cached).
+        val gy = groundHeight(tree.x, tree.z)
+        val slopeX = (groundHeight(tree.x + .5, tree.z) - gy) / .5
+        val slopeZ = (groundHeight(tree.x, tree.z + .5) - gy) / .5
+        val sink = min(.5, hypot(slopeX, slopeZ) * 1.5 * tree.scale)
+        val base = gy - 1.1 - sink
         val species = floor(h(200) * 3).toInt().coerceIn(0, 2)
         val shape = floor(h(300) * SHAPES).toInt().coerceIn(0, SHAPES - 1)
         val girth = doubleArrayOf(.8, .9, 1.15)[species] * tree.scale
@@ -366,7 +374,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         // No two trees are scaled alike: the trunk and roots are oval (random width and depth, turned by the yaw), a little taller or shorter.
         Mat.compose(m, 0, tree.x, base, tree.z, lx, yaw, lz, Mat.XYZ,
             girth * (.86 + h(310) * .30), .94 + h(312) * .14, girth * (.86 + h(311) * .30))
-        Mat.compose(m, 16, tree.x, groundHeight(tree.x, tree.z) + .05, tree.z,
+        Mat.compose(m, 16, tree.x, gy + .05, tree.z,
             0.0, 0.0, 0.0, Mat.XYZ, 3.4 * tree.scale, 1.0, 3.4 * tree.scale)
         val bodyXZ = tree.scale * (.88 + h(313) * .26)
         Mat.compose(m, 32, tree.x, base, tree.z, lx, yaw, lz, Mat.XYZ,

@@ -94,10 +94,11 @@ void main() {
   vLY = 0.0;
   vec2 w = aXZ + uOff;
   float h = gh(w.x, w.y);
+  // Forward differences off the height already computed: 3 height evaluations per vertex instead of 5.
   float e = 0.4;
-  float hx = gh(w.x + e, w.y) - gh(w.x - e, w.y);
-  float hz = gh(w.x, w.y + e) - gh(w.x, w.y - e);
-  vN = normalize(vec3(-hx / (2.0 * e), 1.0, -hz / (2.0 * e)));
+  float hx = gh(w.x + e, w.y) - h;
+  float hz = gh(w.x, w.y + e) - h;
+  vN = normalize(vec3(-hx / e, 1.0, -hz / e));
   vW = vec3(w.x, h, w.y);
   vUv = w / 4.5;
   gl_Position = uVP * vec4(vW, 1.0);
