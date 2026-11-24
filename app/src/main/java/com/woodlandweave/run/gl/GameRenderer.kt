@@ -354,10 +354,15 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         // its local root flare starts just above grade and sinks naturally into the soil.
         // Keep the original species-independent trunk height: tree.scale changes girth and crown size only.
         // The unified body's root flare starts at local Y~1.2, so the original -1.1 ground anchor keeps it seated.
-        // The ground under the tree is sampled once (this used to be done twice). The root fins are shortened and dive into
-        // the soil in the mesh itself (see TREE_ROOT_REACH_SCALE), so no slope maths is needed here.
+        // The ground under the tree is sampled once (this used to be done twice). The slope there decides how far the whole
+        // tree sinks: the root fins stay at one height while the soil falls away on the downhill side, so their tips used
+        // to hang in the air as sharp spikes. Sinking by slope x root reach seats the downhill tips in the soil; the uphill
+        // side just buries a little more of the flare. Two forward differences, once per tree (the props are cached).
         val gy = groundHeight(tree.x, tree.z)
-        val base = gy - 1.1
+        val slopeX = (groundHeight(tree.x + .5, tree.z) - gy) / .5
+        val slopeZ = (groundHeight(tree.x, tree.z + .5) - gy) / .5
+        val sink = min(.5, hypot(slopeX, slopeZ) * 1.5 * tree.scale)
+        val base = gy - 1.1 - sink
         val species = floor(h(200) * 3).toInt().coerceIn(0, 2)
         val shape = floor(h(300) * SHAPES).toInt().coerceIn(0, SHAPES - 1)
         val girth = doubleArrayOf(.8, .9, 1.15)[species] * tree.scale
