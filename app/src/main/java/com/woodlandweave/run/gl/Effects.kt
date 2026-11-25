@@ -19,6 +19,8 @@ class EffectState {
     /** The nearest gate on screen: x, y (0..1), radius (screen heights), strength; [gateSx] squashes the circle into the ellipse the upright ring makes. */
     val gate = floatArrayOf(.5f, .5f, .1f, 0f)
     var gateSx = 1f
+    /** Screen aspect (width / height), so the gate-pass kick can match the gate lens's centre zoom. */
+    var aspect = 16.0 / 9.0
 }
 
 /** Port of ForestEffects.tsx's per-frame logic: what drives blur, glitch, lens kicks, frost and the rest. */
@@ -95,8 +97,14 @@ class EffectsModel {
             flash += max(0.0, 1 - s.warp / .3) * .6
         }
         // Passing a survive gate (in or out): the same elastic fisheye as the black hole / a pickup, a damped spring.
+        // Its size is the one the gate's own lens defines (GateRing.LENS_MAGNIFY = the zoom at the centre of the ring), as a springy
+        // damped oscillation, and it skips the 25% reduction of the other kicks.
+        val aspect = out.aspect
+        var gateLens = 0.0
         if (s.gateKick >= 0 && s.gateKick < GATE_KICK_TIME) {
-            lens += 1.8 * exp(-s.gateKick * 2.4) * cos(s.gateKick * 11)
+            val m = Visuals.GateRing.LENS_MAGNIFY
+            val edge = (aspect * .5).pow(2.0) + .25
+            gateLens = m / ((1 - m) * edge * 1.6) * exp(-s.gateKick * 2.4) * cos(s.gateKick * 11)
             flash += max(0.0, 1 - s.gateKick / .25) * .25
         }
         if (s.warpOut >= 0) {
@@ -136,7 +144,7 @@ class EffectsModel {
         if (lastFound != null) glitch += kick(s.elapsed - lastFound)
         glitch += warp * .12
         clock += min(delta, .1)
-        out.blur = blur; out.glitch = glitch; out.lens = lens * LENS_SCALE; out.warp = warp; out.flash = flash
+        out.blur = blur; out.glitch = glitch; out.lens = lens * LENS_SCALE + gateLens; out.warp = warp; out.flash = flash
         out.hue = hueNow; out.time = clock
     }
 }

@@ -501,6 +501,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         System.arraycopy(tmp2, 0, view, 0, 16)
         Matrix.multiplyMM(vp, 0, proj, 0, view, 0)
 
+        effectState.aspect = aspectRatio.toDouble()
         effects.update(s, dt, effectState, { holeScreen(it, cam) }, { gateScreen(it, cam) })
 
         if (ADAPTIVE_SCALE && scaler.tick(dt)) post.setScale(scaler.density / surfaceDensity)
