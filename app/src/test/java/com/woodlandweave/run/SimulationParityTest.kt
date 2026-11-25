@@ -92,17 +92,17 @@ class SimulationParityTest {
         assertEquals(2.943499185015331, sp.h, 1e-12)
     }
 
-    @Test fun threeTreeHitsEndTheRun() {
+    @Test fun fifthTreeHitEndsTheRun() {
         val s = Simulation()
         beginRun(s)
         s.phase = Phase.RUNNING
         val tree = Tree(0.0, -2.0, 1.0, "t")
         s.trees = listOf(tree)
-        repeat(3) {
-            s.x = 0.0; s.z = -2.0; s.cooldown = 0.0; s.lastTree = ""
-            collide(s, tree)
-        }
-        assertEquals(Phase.FALLING, s.phase)
+        fun hit() { s.x = 0.0; s.z = -2.0; s.cooldown = 0.0; s.lastTree = ""; collide(s, tree) }
+        repeat(4) { hit() }
+        assertEquals(Phase.RUNNING, s.phase)   // four hits are survived
+        hit()
+        assertEquals(Phase.FALLING, s.phase)   // the fifth ends the run
     }
 
     @Test fun pauseFreezesTimeAndExitReturnsToMenu() {
