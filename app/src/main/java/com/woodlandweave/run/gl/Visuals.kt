@@ -31,7 +31,23 @@ object Visuals {
      */
     object GateRing {
         const val ON = true
-        const val GAP = .3
+        const val GAP = .2             // lowest point of the tube above the ground, in metres
+        const val TORUS_R = 2.4        // radius of the torusA mesh; the ring is scaled to GATE_HALF / TORUS_R
+        const val TORUS_TUBE = .14     // tube radius of the torusA mesh (scaled the same way)
+        const val SEE = 130.0          // gates further away than this get no glow and no lens
+
+        /** A ring of additive glow sprites that shows through the fog (fog is off for them). */
+        const val GLOW = true
+        const val GLOW_COUNT = 22      // sprites around one ring
+        const val GLOW_SIZE = 3.2      // sprite size in metres
+        const val GLOW_ALPHA = .5
+        const val GLOW_PULSE = .15     // slow breathing, fraction of the alpha
+        const val GLOW_MAX = 6         // gates that glow at the same time (the sprite batch holds GLOW_MAX * GLOW_COUNT)
+
+        /** Lens distortion inside the ring, done by the effect pass in screen space. */
+        const val LENS = true
+        const val LENS_MAGNIFY = .45   // how much the middle is magnified (0 = none)
+        const val LENS_FADE_NEAR = 6.0 // the lens fades out over the last metres, so it does not fill the screen when you step through
     }
 
     /**

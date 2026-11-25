@@ -149,8 +149,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private val bOrbHalo = Sprites(16, { orbHaloTex }, true, true)
     private val bHoleGlow = Sprites(64, { holeGlowTex }, true, false)          // a black hole's halo and sparks
     private val bWarpSpores = Sprites(1600, { warpSporeTex }, true, false)     // the dots of the warp
+    private val bGateGlow = Sprites(Visuals.GateRing.GLOW_MAX * Visuals.GateRing.GLOW_COUNT, { holeGlowTex }, true, false)   // the gates' glow, visible through the fog
     // One array for the whole run: the per-frame arrayOf() it replaces was a small allocation every frame.
-    private val spriteBatches = arrayOf(bMist, bPollenCore, bForestLights, bPollenGlow, bOrbHalo, bHoleGlow, bWarpSpores)
+    private val spriteBatches = arrayOf(bMist, bPollenCore, bForestLights, bPollenGlow, bOrbHalo, bHoleGlow, bGateGlow, bWarpSpores)
     // The key-light shadow map is re-rendered every SHADOW_EVERY-th frame (the light is fixed and the map snaps to whole texels, so a
     // one-frame-old map is still exactly consistent with itself); the first frame after it (re)appears is always rendered.
     private var shadowTick = 0
@@ -498,7 +499,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         System.arraycopy(tmp2, 0, view, 0, 16)
         Matrix.multiplyMM(vp, 0, proj, 0, view, 0)
 
-        effects.update(s, dt, effectState) { holeScreen(it, cam) }
+        effects.update(s, dt, effectState, { holeScreen(it, cam) }, { gateScreen(it, cam) })
 
         if (ADAPTIVE_SCALE && scaler.tick(dt)) post.setScale(scaler.density / surfaceDensity)
         encode = if (post.linear) 0f else 1f
@@ -936,12 +937,13 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         }
         // The gates exist (and work) in Freeroam; each one is shown as a plain ring.
         if (!Visuals.GateRing.ON || s.mode != GameMode.FREEROAM) return
-        material(litProg, Palette.ember, mode = 2)
+        material(litProg, Palette.ember, mode = 2, fogOn = 0f)   // no fog on the ring itself: it must stay visible in the mist
+        val k = GATE_HALF / Visuals.GateRing.TORUS_R              // torusA is built with radius TORUS_R; scale it to the gate
         for (g in e.gates) {
             place(parent, g.x, groundHeight(g.x, g.z), g.z, 0.0, g.angle, 0.0)
-            // torusA's radius is GATE_HALF; it already lies in the local XY plane, so with no tilt it stands upright (the runner
-            // goes through it along the gate's normal, as in passGate) and just clears the ground by GateRing.GAP.
-            prim(torusA, parent, 0.0, GATE_HALF + Visuals.GateRing.GAP, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
+            // The torus already lies in the local XY plane, so with no tilt it stands upright (the runner goes through it along the
+            // gate's normal, as in passGate). Its lowest point (tube included) floats GateRing.GAP above the ground.
+            prim(torusA, parent, 0.0, GATE_HALF + Visuals.GateRing.TORUS_TUBE * k + Visuals.GateRing.GAP, 0.0, 0.0, 0.0, 0.0, k, k, k)
         }
     }
 
@@ -1159,13 +1161,71 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
 
     // ---- sprites ----
     private fun buildSprites(s: Simulation, e: GameEngine) {
-        bForestLights.clear(); bPollenGlow.clear(); bPollenCore.clear(); bMist.clear(); bOrbHalo.clear(); bHoleGlow.clear()
+        bForestLights.clear(); bPollenGlow.clear(); bPollenCore.clear(); bMist.clear(); bOrbHalo.clear(); bHoleGlow.clear(); bGateGlow.clear()
         val t = s.elapsed
         if (Visuals.ForestLights.ON) buildForestLights(s, e, t)
         if (Visuals.Pollen.ON) buildPollen(s, e, t)
         if (Visuals.OrbHalo.ON) buildOrbHalos(e)
         if (Visuals.Mist.ON) buildMist(s, t)
         if (Visuals.BlackHole.GLOW) buildBlackHoleGlow(s, t)
+        if (Visuals.GateRing.ON && Visuals.GateRing.GLOW) buildGateGlow(s, e, t)
+    }
+
+    /** Where the centre of a gate's ring is: the ring's lowest point floats GAP above the ground. */
+    private fun gateCentreY(g: Gate): Double {
+        val k = GATE_HALF / Visuals.GateRing.TORUS_R
+        return groundHeight(g.x, g.z) + GATE_HALF + Visuals.GateRing.TORUS_TUBE * k + Visuals.GateRing.GAP
+    }
+
+    /** A necklace of additive glow sprites around each ring (fog off), so a gate can be seen from far away in the mist. */
+    private fun buildGateGlow(s: Simulation, e: GameEngine, t: Double) {
+        if (s.mode != GameMode.FREEROAM || s.warp >= 0) return
+        val v = Visuals.GateRing
+        var n = 0
+        for (g in e.gates) {
+            if (n >= v.GLOW_MAX) break
+            val dist = hypot(g.x - s.x, g.z - s.z)
+            if (dist >= v.SEE) continue
+            val cy = gateCentreY(g)
+            val a = v.GLOW_ALPHA * (1.0 + sin(t * 1.3 + n * 1.9) * v.GLOW_PULSE) * ((v.SEE - dist) / 40.0).coerceIn(0.0, 1.0)
+            val lx = cos(g.angle); val lz = -sin(g.angle)      // the ring's sideways axis (the same one passGate uses)
+            for (i in 0 until v.GLOW_COUNT) {
+                val th = i * 2 * PI / v.GLOW_COUNT
+                val rx = cos(th) * GATE_HALF; val ry = sin(th) * GATE_HALF
+                bGateGlow.add(g.x + lx * rx, cy + ry, g.z + lz * rx, v.GLOW_SIZE, v.GLOW_SIZE, Palette.ember, a)
+            }
+            n++
+        }
+    }
+
+    /**
+     * The nearest gate on screen, for the lens inside its ring: x, y, radius (in screen heights), strength, and the horizontal
+     * squash (the upright ring is an ellipse when seen at an angle, and a line when seen edge-on).
+     */
+    private fun gateScreen(s: Simulation, cam: CameraPose): FloatArray? {
+        val v = Visuals.GateRing
+        if (!v.ON || !v.LENS || s.mode != GameMode.FREEROAM || s.warp >= 0) return null
+        var best: Gate? = null; var bestD = v.SEE
+        for (g in engine.gates) {
+            val d = hypot(g.x - cam.ex, g.z - cam.ez)
+            if (d < bestD) { best = g; bestD = d }
+        }
+        val g = best ?: return null
+        val cy = gateCentreY(g)
+        val dist3 = max(.5, sqrt((g.x - cam.ex).pow(2) + (cy - cam.ey).pow(2) + (g.z - cam.ez).pow(2)))
+        val px = vp[0] * g.x + vp[4] * cy + vp[8] * g.z + vp[12]
+        val py = vp[1] * g.x + vp[5] * cy + vp[9] * g.z + vp[13]
+        val pz = vp[2] * g.x + vp[6] * cy + vp[10] * g.z + vp[14]
+        val pw = vp[3] * g.x + vp[7] * cy + vp[11] * g.z + vp[15]
+        if (pw <= 0f || pz / pw >= 1f) return null
+        // The ring's normal is (sin a, cos a) in x/z; the view direction on the ground plane against it gives the squash.
+        val vx = g.x - cam.ex; val vz = g.z - cam.ez
+        val vl = max(.001, hypot(vx, vz))
+        val sx = abs((vx * sin(g.angle) + vz * cos(g.angle)) / vl)
+        val rs = .5 * GATE_HALF / dist3 / tan(Math.toRadians(FOV / 2.0))
+        // Fades in with distance and out again in the last metres, and when the ring is nearly edge-on.
+        val strength = (v.LENS_MAGNIFY * ((v.SEE - dist3) / 50.0).coerceIn(0.0, 1.0) * ((dist3 - 1.5) / v.LENS_FADE_NEAR).coerceIn(0.0, 1.0) * (sx / .25).coerceIn(0.0, 1.0))
+        return floatArrayOf((px / pw * .5 + .5).toFloat(), (py / pw * .5 + .5).toFloat(), rs.toFloat(), strength.toFloat(), sx.toFloat().coerceAtLeast(.05f))
     }
 
     /** Distant forest lights: green, purple and lavender glows that stutter out one by one in survive mode. */

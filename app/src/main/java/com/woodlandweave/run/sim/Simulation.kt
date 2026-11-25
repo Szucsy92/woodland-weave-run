@@ -108,9 +108,9 @@ val SECRET_NAMES = mapOf(
 )
 
 const val GATE_CELL = 90
-const val GATE_HALF = 2.4
+const val GATE_HALF = 3.6
 const val GATE_DEPTH = 0.9
-const val GATE_CLEARING = 5.0
+const val GATE_CLEARING = 6.5
 const val GATE_REARM = 9.0
 
 const val HOLE_CELL = 220

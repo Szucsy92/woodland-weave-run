@@ -16,6 +16,9 @@ class EffectState {
     var warp = 0.0; var flash = 0.0; var hue = 0.0; var time = 0.0
     val reach = FloatArray(SHOCKWAVE_RINGS)
     val hole = floatArrayOf(.5f, .5f, .1f, 0f)
+    /** The nearest gate on screen: x, y (0..1), radius (screen heights), strength; [gateSx] squashes the circle into the ellipse the upright ring makes. */
+    val gate = floatArrayOf(.5f, .5f, .1f, 0f)
+    var gateSx = 1f
 }
 
 /** Port of ForestEffects.tsx's per-frame logic: what drives blur, glitch, lens kicks, frost and the rest. */
@@ -32,7 +35,7 @@ class EffectsModel {
     private var hadPower = false
     private var powerEndedAt = -99.0
 
-    fun update(s: Simulation, delta: Double, out: EffectState, holeFor: (Simulation) -> FloatArray?) {
+    fun update(s: Simulation, delta: Double, out: EffectState, holeFor: (Simulation) -> FloatArray?, gateFor: (Simulation) -> FloatArray? = { null }) {
         val lying = s.phase == Phase.FALLING || s.phase == Phase.FALLEN
         val awake = s.phase == Phase.AWAKENING
         val impact = if (s.impact > 0) sin((1 - s.impact / IMPACT_DURATION) * PI) else 0.0
@@ -95,6 +98,10 @@ class EffectsModel {
 
         val hole = holeFor(s)
         if (hole != null) hole.copyInto(out.hole) else { out.hole[0] = .5f; out.hole[1] = .5f; out.hole[2] = .1f; out.hole[3] = 0f }
+
+        val gate = gateFor(s)
+        if (gate != null) { out.gate[0] = gate[0]; out.gate[1] = gate[1]; out.gate[2] = gate[2]; out.gate[3] = gate[3]; out.gateSx = gate[4] }
+        else { out.gate[0] = .5f; out.gate[1] = .5f; out.gate[2] = .1f; out.gate[3] = 0f; out.gateSx = 1f }
 
         val hueTarget = universeHue(s.universe) + warp * sin(clock * 1.4) * .7
         hueNow += (hueTarget - hueNow) * min(1.0, delta * 1.8)

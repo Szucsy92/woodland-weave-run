@@ -538,6 +538,8 @@ uniform float blur, glitch, frost, lens, wave, waveT, warp, flash, hue, time;
 uniform float uSrcSrgb;
 uniform float uSharpen;
 uniform vec4 hole;
+uniform vec4 gate;     // the survive gate: screen centre, radius, strength
+uniform float gateSx;  // horizontal squash of the ring seen at an angle
 uniform float reach[RINGS];
 uniform vec2 resolution;
 // Glass panels, in dp with the origin at the bottom left of the screen.
@@ -758,6 +760,19 @@ void main() {
     vec2 src = hq + dd * max(0.0, 1.0 - pull / rh);
     q = src; d = vec2(q.x / asp, q.y);
     hring = exp(-pow((rh - rs * 1.15) / (rs * 0.3), 2.0)) * hole.w;
+  }
+  // Lens inside the survive gate: the middle of the ring is magnified, and the effect dies out smoothly at the ring itself,
+  // so nothing outside the ring moves and there is no seam.
+  if (gate.w > 0.001) {
+    vec2 gq = (gate.xy - 0.5) * vec2(asp, 1.0);
+    vec2 dg = q - gq;
+    vec2 pg = vec2(dg.x / max(gateSx, 0.05), dg.y) / gate.z;
+    float rr2 = dot(pg, pg);
+    if (rr2 < 1.0) {
+      float k = 1.0 - gate.w * (1.0 - rr2) * (1.0 - rr2 * 0.35);
+      q = gq + dg * k;
+      d = vec2(q.x / asp, q.y);
+    }
   }
   // The elastic fisheye zooms in towards the middle instead of pulling in what lies outside the picture (no edge smear).
   float lensEdge = (asp * 0.5) * (asp * 0.5) + 0.25;
