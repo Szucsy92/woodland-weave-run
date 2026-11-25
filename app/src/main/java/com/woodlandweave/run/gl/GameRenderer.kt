@@ -82,8 +82,6 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
          * between a heavy and a light frame, which reads as judder on a slow device; every frame is steadier.
          */
         const val SHADOW_EVERY = 1
-        /** PROBE: true draws the forest without any foliage (crowns), to measure what the foliage costs. Set to false (or apply the revert diff) to restore it. */
-        const val NO_FOLIAGE = true
         private val TREE_GIRTH_R = doubleArrayOf(.8, .9, 1.15)
     }
 
@@ -1207,7 +1205,6 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     }
 
     private fun emit(kind: Int, src: FloatArray, off: Int) {
-        if (NO_FOLIAGE && isCrownKind(kind)) return   // PROBE: no crowns, near or far
         val b = bufs[kind]
         b.position(counts[kind] * 16); b.put(src, off, 16); counts[kind]++
     }
