@@ -13,7 +13,7 @@ object Visuals {
         const val ALPHA = .5f
         const val EMISSIVE = 1.6f
         const val ROUGH = .2f
-        const val HEIGHT = 1.15      // centre above the ground
+        const val HEIGHT = 0.45      // centre above the ground
     }
 
     /** The soft glow around a power-up sphere: its own additive, fogged sprite batch with its own texture. */
@@ -74,16 +74,16 @@ object Visuals {
     object GateRing {
         const val ON = true
         const val GAP = 0.0            // lowest point of the tube above the ground, in metres (0 = the ring may touch the ground)
-        const val TORUS_R = 2.4        // radius of the torusA mesh; the ring is scaled to GATE_HALF / TORUS_R
-        const val TORUS_TUBE = .14     // tube radius of the torusA mesh (scaled the same way)
+        const val TORUS_R = 7.2        // radius of the torusA mesh; the ring is scaled to GATE_HALF / TORUS_R
+        const val TORUS_TUBE = .048     // tube radius of the torusA mesh (scaled the same way)
         const val SEE = 130.0          // gates further away than this get no glow and no lens
 
         /** A ring of additive glow sprites that shows through the fog (fog is off for them). */
         const val GLOW = true
-        const val GLOW_COUNT = 22      // sprites around one ring
-        const val GLOW_SIZE = 3.2      // sprite size in metres
-        const val GLOW_ALPHA = .5
-        const val GLOW_PULSE = .15     // slow breathing, fraction of the alpha
+        const val GLOW_COUNT = 26      // sprites around one ring
+        const val GLOW_SIZE = 4.87      // sprite size in metres
+        const val GLOW_ALPHA = .741
+        const val GLOW_PULSE = .044     // slow breathing, fraction of the alpha
         const val GLOW_MAX = 6         // gates that glow at the same time (the sprite batch holds GLOW_MAX * GLOW_COUNT)
 
         /** Lens distortion inside the ring, done by the effect pass in screen space. */
