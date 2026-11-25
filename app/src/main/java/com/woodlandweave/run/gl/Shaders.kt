@@ -505,6 +505,78 @@ void main() {
 }
 """
 
+    /** The power-up sphere: a glass shell with slowly morphing, rippling veils inside (a few ray steps through the ball, no real particles). */
+    val ORB_VS = """#version 300 es
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNor;
+layout(location=2) in vec2 aUv;
+layout(location=3) in vec4 iA;
+layout(location=4) in vec4 iB;
+layout(location=5) in vec4 iC;
+layout(location=6) in vec4 iD;
+uniform mat4 uVP;
+out vec3 vW; out vec3 vC; out float vR;
+void main() {
+  mat4 m = mat4(iA, iB, iC, iD);
+  vec4 w = m * vec4(aPos, 1.0);
+  vW = w.xyz; vC = m[3].xyz; vR = length(m[0].xyz);
+  gl_Position = uVP * w;
+}
+"""
+
+    val ORB_FS = """#version 300 es
+precision highp float;
+in vec3 vW; in vec3 vC; in float vR;
+uniform vec3 uColor, uCam, uFog;
+uniform float uT, uSteps, uGlow, uAlpha, uFogNear, uFogFar, uEncode;
+out vec4 o;
+vec3 linearToSrgb(vec3 c) {
+  c = max(c, vec3(0.0));
+  vec3 lo = c * 12.92;
+  vec3 hi = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;
+  return vec3(c.r <= 0.0031308 ? lo.r : hi.r, c.g <= 0.0031308 ? lo.g : hi.g, c.b <= 0.0031308 ? lo.b : hi.b);
+}
+// A thin, rippling sheet: where a doubly domain-warped field crosses zero. The warp is what makes it flow and morph.
+float veil(vec3 p, float t) {
+  vec3 q = p * 2.2;
+  q += 0.55 * sin(q.yzx * 1.7 + vec3(t * 0.7, t * 0.5, t * 0.6));
+  q += 0.35 * sin(q.zxy * 2.9 - vec3(t * 0.9, t * 0.6, t * 0.8));
+  float n = sin(q.x * 2.1 + sin(q.y * 1.9 + t * 0.4)) + sin(q.z * 2.3 + sin(q.x * 1.7 - t * 0.35));
+  return exp(-n * n * 2.6);
+}
+void main() {
+  vec3 rd = normalize(vW - uCam);
+  vec3 oc = uCam - vC;
+  float b = dot(oc, rd);
+  float disc = max(b * b - (dot(oc, oc) - vR * vR), 0.0);
+  float sq = sqrt(disc);
+  float t0 = max(-b - sq, 0.0), t1 = -b + sq;
+  vec3 nrm = normalize(vW - vC);
+  float t = uT + dot(vC.xz, vec2(0.37, 0.61));   // every sphere ripples out of step with the others
+  float acc = 0.0;
+  float n = max(uSteps, 1.0);
+  for (int i = 0; i < 8; i++) {
+    if (float(i) >= n) break;
+    vec3 p = (uCam + rd * (t0 + (float(i) + 0.5) / n * (t1 - t0)) - vC) / vR;
+    float r2 = dot(p, p);
+    float c = cos(t * 0.2), s = sin(t * 0.2);
+    p = vec3(c * p.x - s * p.z, p.y, s * p.x + c * p.z);   // the whole inside turns slowly
+    float g = fract(sin(dot(floor(p * 34.0), vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+    float grain = mix(0.35, 1.5, g * g);                    // fine speckle, so the sheets read as made of points
+    acc += veil(p, t) * grain * (1.0 - smoothstep(0.55, 1.0, r2));
+  }
+  acc = clamp(acc / n * 2.4, 0.0, 1.0);
+  float fr = pow(1.0 - abs(dot(nrm, -rd)), 2.5);
+  vec3 veilCol = mix(uColor * 1.1, vec3(0.78, 0.62, 1.0), pow(acc, 1.5) * 0.7);
+  vec3 emit = (veilCol * acc * 1.25 + mix(uColor, vec3(1.0), 0.25) * fr * 0.9) * uGlow;
+  float a = clamp(uAlpha * 0.6 + fr * 0.35 + acc * 0.25, 0.0, 0.92);
+  vec3 col = emit + uColor * 0.10 * a;
+  float f = smoothstep(uFogNear, uFogFar, distance(vW, uCam));
+  col = mix(col, uFog * a, f);
+  o = vec4(uEncode > 0.5 ? linearToSrgb(clamp(col, 0.0, 1.0)) : col, a);
+}
+"""
+
     val POST_VS = """#version 300 es
 out vec2 vUv;
 void main() {

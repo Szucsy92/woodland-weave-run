@@ -80,6 +80,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
 
     // ---- GL objects ----
     private var litProg = 0; private var groundProg = 0; private var spriteProg = 0
+    private var orbProg = 0   // the power-up spheres with the rippling veils inside; 0 = shader failed, the plain glass is drawn
     private val locs = android.util.SparseArray<HashMap<String, Int>>()
     private lateinit var meshes: Array<Mesh>
     private lateinit var box: Mesh; private lateinit var orb: Mesh; private lateinit var holeBody: Mesh
@@ -208,6 +209,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         groundProg = GlUtil.program(Shaders.GROUND_VS, Shaders.litFs(startDefs))
         shadow = null; shadowProg = 0
         spriteProg = GlUtil.program(Shaders.SPRITE_VS, Shaders.SPRITE_FS)
+        orbProg = GlUtil.programOrNull(Shaders.ORB_VS, Shaders.ORB_FS)
         locs.clear()
         meshes = arrayOf(
             Mesh(Geo.treeBody(false, variant = 0), MAX_PROPS), Mesh(Geo.flatQuad(), MAX_PROPS * 2),
@@ -926,7 +928,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
      * The relics (spore spiral, fairy ring) are drawn by drawRelics; the lantern and the gate frames are not drawn.
      */
     private fun drawLandmarks(s: Simulation, e: GameEngine) {
-        if (Visuals.OrbSphere.ON) for (o in e.orbs) {
+        val flow = Visuals.OrbSphere.ON && Visuals.OrbSphere.FLOW && orbProg != 0
+        if (flow) drawFlowOrbs(e)
+        if (Visuals.OrbSphere.ON && !flow) for (o in e.orbs) {
             if (o.taken != null) continue
             val col = orbColor(o.p.type)
             val py = groundHeight(o.p.x, o.p.z) + Visuals.OrbSphere.HEIGHT
@@ -949,6 +953,32 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             // gate's normal, as in passGate). Its lowest point (tube included) floats GateRing.GAP above the ground.
             prim(torusA, parent, 0.0, GATE_HALF + Visuals.GateRing.TORUS_TUBE * k + Visuals.GateRing.GAP, 0.0, 0.0, 0.0, 0.0, k, k, k)
         }
+    }
+
+    /** The power-up spheres: glass with slowly morphing, rippling veils inside (see Shaders.ORB_FS). */
+    private fun drawFlowOrbs(e: GameEngine) {
+        var any = false
+        for (o in e.orbs) if (o.taken == null) { any = true; break }
+        if (!any) return
+        val p = orbProg
+        GL.glUseProgram(p)
+        GL.glUniformMatrix4fv(loc(p, "uVP"), 1, false, vp, 0)
+        u3(p, "uCam", cam.ex.toFloat(), cam.ey.toFloat(), cam.ez.toFloat())
+        u3(p, "uFog", fog); u1(p, "uFogNear", fogNear); u1(p, "uFogFar", fogFar); u1(p, "uEncode", encode)
+        u1(p, "uT", animT.toFloat()); u1(p, "uSteps", (4 + min(feat.rank, 2)).toFloat())
+        u1(p, "uGlow", Visuals.OrbSphere.EMISSIVE * .6f); u1(p, "uAlpha", Visuals.OrbSphere.ALPHA)
+        // Premultiplied: the veils and rim add light, the glass body darkens a little. No depth write, front faces only.
+        GL.glEnable(GL.GL_BLEND); GL.glBlendFunc(GL.GL_ONE, GL.GL_ONE_MINUS_SRC_ALPHA); GL.glDepthMask(false)
+        GL.glEnable(GL.GL_CULL_FACE); GL.glCullFace(GL.GL_BACK)
+        for (o in e.orbs) {
+            if (o.taken != null) continue
+            u3(p, "uColor", orbColor(o.p.type))
+            val py = groundHeight(o.p.x, o.p.z) + Visuals.OrbSphere.HEIGHT
+            place(parent, o.p.x, py, o.p.z, 0.0, 0.0, 0.0, Visuals.OrbSphere.SIZE)
+            uploadOne(orb, parent)
+        }
+        GL.glDisable(GL.GL_CULL_FACE); GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
+        GL.glUseProgram(litProg)   // the code that follows sets litProg's uniforms without binding it again
     }
 
     /** The black holes: a plain black body and a tilted accretion veil (three faint glows turning slowly), exactly as before. */

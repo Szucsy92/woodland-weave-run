@@ -14,6 +14,8 @@ object Visuals {
         const val EMISSIVE = 1.6f
         const val ROUGH = .2f
         const val HEIGHT = 1.15      // centre above the ground
+        /** The morphing veils inside the sphere (off: the plain still glass above). */
+        const val FLOW = true
     }
 
     /** The soft glow around a power-up sphere: its own additive, fogged sprite batch with its own texture. */
