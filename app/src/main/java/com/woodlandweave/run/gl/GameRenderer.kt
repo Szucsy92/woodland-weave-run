@@ -144,17 +144,20 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     }
     // One batch, one texture and one block of numbers (Visuals) per element. `fog` mirrors three.js's SpriteMaterial.fog of the web build.
     private val bForestLights = Sprites(200, { forestLightTex }, true, false)
-    private val bPollenGlow = Sprites(32, { pollenGlowTex }, true, false)
+    // Same texture, additive, no fog: the pollen glow and the relic motes are ONE batch (one draw). Additive blending does not depend on
+    // draw order, so the picture is the same; each element still fills it from its own block of numbers in Visuals.
+    private val bPollenGlow = Sprites(32 + Visuals.Relic.MAX * (Visuals.Relic.CLUSTER_COUNT + Visuals.Relic.SWIRL_COUNT), { pollenGlowTex }, true, false)
+    private val bRelicMotes = bPollenGlow
     private val bPollenCore = Sprites(32, { pollenCoreTex }, false, true)
     private val bMist = Sprites(8, { mistTex }, false, true)
     private val bOrbHalo = Sprites(16, { orbHaloTex }, true, true)
-    private val bHoleGlow = Sprites(64, { holeGlowTex }, true, false)          // a black hole's halo and sparks
+    // Same texture, additive, no fog: a black hole's halo and sparks, the relics' glow and the gates' glow are ONE batch (one draw).
+    private val bHoleGlow = Sprites(64 + Visuals.Relic.MAX * (1 + Visuals.Relic.FAIRY_COUNT) + Visuals.GateRing.GLOW_MAX * Visuals.GateRing.GLOW_COUNT, { holeGlowTex }, true, false)
+    private val bRelicGlow = bHoleGlow
+    private val bGateGlow = bHoleGlow
     private val bWarpSpores = Sprites(1600, { warpSporeTex }, true, false)     // the dots of the warp
-    private val bRelicGlow = Sprites(Visuals.Relic.MAX * (1 + Visuals.Relic.FAIRY_COUNT), { holeGlowTex }, true, false)   // soft glow of a relic, visible through the fog
-    private val bRelicMotes = Sprites(Visuals.Relic.MAX * (Visuals.Relic.CLUSTER_COUNT + Visuals.Relic.SWIRL_COUNT), { pollenGlowTex }, true, false)   // spore cluster and the found-swirl
-    private val bGateGlow = Sprites(Visuals.GateRing.GLOW_MAX * Visuals.GateRing.GLOW_COUNT, { holeGlowTex }, true, false)   // the gates' glow, visible through the fog
     // One array for the whole run: the per-frame arrayOf() it replaces was a small allocation every frame.
-    private val spriteBatches = arrayOf(bMist, bPollenCore, bForestLights, bPollenGlow, bRelicMotes, bRelicGlow, bOrbHalo, bHoleGlow, bGateGlow, bWarpSpores)
+    private val spriteBatches = arrayOf(bMist, bPollenCore, bForestLights, bPollenGlow, bOrbHalo, bHoleGlow, bWarpSpores)
     // The key-light shadow map is re-rendered every SHADOW_EVERY-th frame (the light is fixed and the map snaps to whole texels, so a
     // one-frame-old map is still exactly consistent with itself); the first frame after it (re)appears is always rendered.
     private var shadowTick = 0
@@ -176,6 +179,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var shadowTreeBodies: Array<Mesh?> = arrayOfNulls(3 * SHAPES)
     private val SHADOW_FADE_END = 118f
     private val one: FloatBuffer = GlUtil.floatBuffer(16)
+    private val BLACK = floatArrayOf(0f, 0f, 0f)
+    private val forestLightColors = arrayOf(Palette.green, Palette.purple, Palette.lavender, Palette.purple, Palette.lavender)
+    private val holeRingColors = arrayOf(Palette.lavender, Palette.purple, Palette.secret)
 
     // ---- matrices ----
     private val proj = FloatArray(16); private val view = FloatArray(16); private val vp = FloatArray(16)
@@ -666,12 +672,13 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         if (!feat.shadows) {
             GL.glEnable(GL.GL_BLEND); GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA); GL.glDepthMask(false)
             bindMaps(glowTex, glowTex, glowTex)
-            material(litProg, floatArrayOf(0f, 0f, 0f), alpha = .6f, mode = 1)
+            material(litProg, BLACK, alpha = .6f, mode = 1)
             meshes[K_SHADOW].draw(bufs[K_SHADOW], counts[K_SHADOW])
             GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
         }
 
         buildSprites(s, e)
+        beginSprites()
         for (b in spriteBatches) drawSprites(b)
 
         post.present(effectState, e.glass, pp)
@@ -993,17 +1000,16 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val y = groundHeight(h.x, h.z) + HOLE_HEIGHT + sin(t * .6 + i) * Visuals.BlackHole.BOB
             if (Visuals.BlackHole.BODY) {
                 // The body: pure black and untouched by fog, so it reads from far away.
-                material(litProg, floatArrayOf(0f, 0f, 0f), mode = 2, fogOn = 0f)
+                material(litProg, BLACK, mode = 2, fogOn = 0f)
                 place(parent, h.x, y, h.z, 0.0, 0.0, 0.0, HOLE_RADIUS)
                 uploadOne(holeBody, parent)
             }
             if (Visuals.BlackHole.VEILS) {
                 // A tilted accretion veil: three faint, soft glows turning slowly.
                 Mat.compose(parent, 0, h.x, y, h.z, 1.2 + sin(t * .2 + i) * .12, 0.0, .35 + sin(t * .15 + i * 2) * .1, Mat.XYZ, 1.0, 1.0, 1.0)
-                val rings = arrayOf(Triple(10.0, Palette.lavender, .16f), Triple(13.0, Palette.purple, .11f), Triple(17.0, Palette.secret, .07f))
-                for ((r, ring) in rings.withIndex()) {
+                for (r in holeRingColors.indices) {
                     val spin = t * (.9 - r * .28) * (if (r % 2 == 1) -1 else 1)
-                    additiveVeil(ring.second, ring.third, ringTex, parent, ring.first, ring.first, rz = spin, fogOn = 0f)
+                    additiveVeil(holeRingColors[r], Visuals.BlackHole.RING_ALPHA[r], ringTex, parent, Visuals.BlackHole.RING_SIZE[r], Visuals.BlackHole.RING_SIZE[r], rz = spin, fogOn = 0f)
                 }
             }
             i++
@@ -1196,7 +1202,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
 
     // ---- sprites ----
     private fun buildSprites(s: Simulation, e: GameEngine) {
-        bForestLights.clear(); bPollenGlow.clear(); bPollenCore.clear(); bMist.clear(); bOrbHalo.clear(); bHoleGlow.clear(); bGateGlow.clear(); bRelicGlow.clear(); bRelicMotes.clear()
+        bForestLights.clear(); bPollenGlow.clear(); bPollenCore.clear(); bMist.clear(); bOrbHalo.clear(); bHoleGlow.clear()
         val t = s.elapsed
         if (Visuals.ForestLights.ON) buildForestLights(s, e, t)
         if (Visuals.Pollen.ON) buildPollen(s, e, t)
@@ -1403,7 +1409,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private fun buildForestLights(s: Simulation, e: GameEngine, t: Double) {
         val v = Visuals.ForestLights
         val haloDay = 1.0 - dayLevel * v.DAY_DIM     // the lights' halos stay visible by day
-        val cols = arrayOf(Palette.green, Palette.purple, Palette.lavender, Palette.purple, Palette.lavender)
+        val cols = forestLightColors
         for (light in forestLightsFor(s.mode, s.x, s.z)) {
             val lx = light.x; val lz = light.z; val lg = groundHeight(lx, lz) + v.HEIGHT
             for (i in 0 until 5) {
@@ -1490,20 +1496,25 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         }
     }
 
-    private fun drawSprites(b: Sprites) {
+    /** The sprite program and everything that is the same for every batch this frame (camera, fog, encoding): set once, not per batch. */
+    private fun beginSprites() {
         val e = engine
+        GL.glUseProgram(spriteProg)
+        GL.glUniformMatrix4fv(loc(spriteProg, "uVP"), 1, false, vp, 0)
+        // Camera right/up are the first two rows of the view rotation.
+        GL.glUniform3f(loc(spriteProg, "uRight"), view[0], view[4], view[8])
+        GL.glUniform3f(loc(spriteProg, "uUp"), view[1], view[5], view[9])
+        GL.glUniform1i(loc(spriteProg, "uTex"), 0)
+        GL.glUniform3f(loc(spriteProg, "uCam"), e.camera.ex.toFloat(), e.camera.ey.toFloat(), e.camera.ez.toFloat())
+        GL.glUniform3f(loc(spriteProg, "uFwd"), camFwdX, camFwdY, camFwdZ)
+        GL.glUniform3f(loc(spriteProg, "uFog"), fog[0], fog[1], fog[2])
+        GL.glUniform1f(loc(spriteProg, "uFogNear"), fogNear); GL.glUniform1f(loc(spriteProg, "uFogFar"), fogFar)
+        GL.glUniform1f(loc(spriteProg, "uEncode"), encode)
+    }
+
+    private fun drawSprites(b: Sprites) {
         if (b.count > 0) {
-            GL.glUseProgram(spriteProg)
-            GL.glUniformMatrix4fv(loc(spriteProg, "uVP"), 1, false, vp, 0)
-            // Camera right/up are the first two rows of the view rotation.
-            GL.glUniform3f(loc(spriteProg, "uRight"), view[0], view[4], view[8])
-            GL.glUniform3f(loc(spriteProg, "uUp"), view[1], view[5], view[9])
-            GL.glUniform1i(loc(spriteProg, "uTex"), 0)
-            GL.glUniform3f(loc(spriteProg, "uCam"), e.camera.ex.toFloat(), e.camera.ey.toFloat(), e.camera.ez.toFloat())
-            GL.glUniform3f(loc(spriteProg, "uFwd"), camFwdX, camFwdY, camFwdZ)
-            GL.glUniform3f(loc(spriteProg, "uFog"), fog[0], fog[1], fog[2])
-            GL.glUniform1f(loc(spriteProg, "uFogNear"), fogNear); GL.glUniform1f(loc(spriteProg, "uFogFar"), fogFar)
-            GL.glUniform1f(loc(spriteProg, "uFogOn"), if (b.fog) 1f else 0f); GL.glUniform1f(loc(spriteProg, "uEncode"), encode)
+            GL.glUniform1f(loc(spriteProg, "uFogOn"), if (b.fog) 1f else 0f)
             GL.glEnable(GL.GL_BLEND)
             if (b.additive) GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE) else GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
             GL.glDepthMask(false)

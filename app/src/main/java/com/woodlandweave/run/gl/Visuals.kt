@@ -106,6 +106,9 @@ object Visuals {
         const val WARP_SPORES = true    // the dots that fill the warp
         const val MAX_VISIBLE = 6
         const val BOB = .12
+        /** The accretion veil: three soft rings, each with its own size (metres) and alpha (the colours are in GameRenderer.holeRingColors). */
+        val RING_SIZE = doubleArrayOf(10.0, 13.0, 17.0)
+        val RING_ALPHA = floatArrayOf(.16f, .11f, .07f)
     }
 
     /** The distant green / purple / lavender forest lights. */
