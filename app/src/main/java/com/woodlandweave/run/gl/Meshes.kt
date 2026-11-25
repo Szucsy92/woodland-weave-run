@@ -634,7 +634,7 @@ object Geo {
     private val TREE_FOOT_FLARE = doubleArrayOf(0.38,  0.38,  0.7)                 // Tő kiszélesedés mértéke
     private val TREE_LEAN = doubleArrayOf(0.008,  0.014,  0.012)                   // Dőlés
     private val TREE_SWAY_AMT = doubleArrayOf(1.0,  1.0,  0.45)                     // Középvonal hullámzása
-    private val TREE_RIDGES = intArrayOf(5,  7,  7)                                   // Gyökerek száma
+    private val TREE_RIDGES = intArrayOf(7,  7,  7)                                   // Gyökerek száma
     private val TREE_ROOT_SIGMA = doubleArrayOf(0.21,  0.21,  0.1995)                 // Gyökerek vastagsága
     private val TREE_ROOT_H = doubleArrayOf(1.5,  0.6,  2.2)                       // Csatlakozás magassága
     private val TREE_ROOT_ANGLE = doubleArrayOf(90.0,  90.0,  30.0)                // Csatlakozási szög
@@ -650,7 +650,7 @@ object Geo {
     private val TREE_ROOT_DEPTH = doubleArrayOf(0.0,  0.0,  0.0)                    // Talaj alatti kiszélesedés
     private val TREE_CUT_DEPTH = doubleArrayOf(0.05,  0.05,  0.1)                   // Vágás mélysége a talaj alatt
     private val TREE_BOTTOM_CAP = intArrayOf(1,  1,  1)                               // Zárt alj
-    private val TREE_LIMB_COUNT = intArrayOf(9,  9,  5)                               // Ágak száma
+    private val TREE_LIMB_COUNT = intArrayOf(9,  9,  7)                               // Ágak száma
     private val TREE_LIMBS_PER_LEVEL = intArrayOf(2,  3,  2)                          // Ágak szintenként
     private val TREE_LIMB_START = doubleArrayOf(7.2,  5.0,  12.0)                  // Első ág magassága
     private val TREE_LIMB_SPACING = doubleArrayOf(1.42,  1.4,  1.5)                // Ágak távolsága
@@ -666,7 +666,7 @@ object Geo {
     private val TREE_LIMB_BEND = doubleArrayOf(1.8,  1.8,  1.2)                     // Oldalirányú hajlás
     private val TREE_LIMB_CURL = doubleArrayOf(1.1,  1.1,  0.8)                     // Kanyargás
     private val TREE_LIMB_HOLE = doubleArrayOf(0.3,  0.3,  0.34)                    // Ágtő magassága
-    private val TREE_LIMB_RINGS = intArrayOf(2,  2,  2)                               // Ág gyűrűi (simaság)
+    private val TREE_LIMB_RINGS = intArrayOf(2,  2,  3)                               // Ág gyűrűi (simaság)
     private val TREE_FORK_COUNT = intArrayOf(0,  0,  2)                               // Mellékágak ágonként
     private val TREE_FORK_START = doubleArrayOf(0.5,  0.5,  0.5)                    // Elágazás helye
     private val TREE_FORK_SPREAD = doubleArrayOf(0.35,  0.35,  0.35)               // Elágazások szórása
@@ -679,7 +679,7 @@ object Geo {
     private val TREE_BURL = doubleArrayOf(1.0,  1.0,  0.8)                          // Göcs mérete
     private val TREE_BARK_REPEAT = intArrayOf(2,  1,  2)                              // Kéreg-ismétlés a törzs körül (a Shaders.kt-ban lévő táblával egyezzen)
     private const val TREE_BARK_PER_M = 0.65                                       // ismétlés / méter kerület: így az ágon is négyzetes a texel
-    private val TREE_RADIAL = intArrayOf(2,  2,  3)                                   // Körbeosztás (gyökerenként)
+    private val TREE_RADIAL = intArrayOf(3,  3,  4)                                   // Körbeosztás (gyökerenként)
     private val TREE_FLARE_TOP = doubleArrayOf(5.0,  5.0,  6.0)                     // Sűrű gyűrűk magassága
     private val TREE_ROOT_W = doubleArrayOf(1.40,  .85,  1.85)          // (megtartva a régi kód kompatibilitásáért)
     private const val TREE_GROUND = 1.1                                    // soil level in body space (the instance sits 1.1 m low)
