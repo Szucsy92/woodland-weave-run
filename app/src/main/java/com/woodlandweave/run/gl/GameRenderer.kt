@@ -961,6 +961,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         for (o in e.orbs) if (o.taken == null) { any = true; break }
         if (!any) return
         val p = orbProg
+        val cam = engine.camera
         GL.glUseProgram(p)
         GL.glUniformMatrix4fv(loc(p, "uVP"), 1, false, vp, 0)
         u3(p, "uCam", cam.ex.toFloat(), cam.ey.toFloat(), cam.ez.toFloat())
