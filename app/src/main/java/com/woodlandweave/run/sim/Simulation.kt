@@ -107,11 +107,13 @@ val SECRET_NAMES = mapOf(
     SecretType.LANTERN to "The Lost Lantern",
 )
 
-const val GATE_CELL = 90
+const val GATE_CELL = 250        // was 90: one cell of the gate lattice, in metres
+const val GATE_CHANCE = 0.3      // was 0.4: the chance that a cell holds a gate (together roughly 10x fewer gates than before)
 const val GATE_HALF = 3.6
 const val GATE_DEPTH = 0.9
 const val GATE_CLEARING = 6.5
 const val GATE_REARM = 9.0
+const val GATE_KICK_TIME = 1.6   // the lens kick when a gate is passed (into or out of Survive)
 
 const val HOLE_CELL = 220
 const val HOLE_CHANCE = 0.3
@@ -245,7 +247,7 @@ fun gatesAround(x: Double, z: Double): List<Gate> {
     for (i in -1..1) for (j in -1..1) {
         val gx = cx + i; val gz = cz + j
         if (gx == 0 && gz == 0) continue
-        if (hash(gx, gz, 500) > 0.4) continue
+        if (hash(gx, gz, 500) > GATE_CHANCE) continue
         out += Gate(
             gx * GATE_CELL + 15 + hash(gx, gz, 501) * (GATE_CELL - 30),
             gz * GATE_CELL + 15 + hash(gx, gz, 502) * (GATE_CELL - 30),
@@ -266,6 +268,7 @@ fun passGate(s: Simulation, gate: Gate): Boolean {
     val normal = dx * sin(gate.angle) + dz * cos(gate.angle)
     if (abs(lateral) > GATE_HALF || abs(normal) > GATE_DEPTH) return false
     s.lastGate = gate.id
+    s.gateKick = 0.0
     s.surviveTime = if (s.surviveTime >= 0) -1.0 else 0.0
     return true
 }
@@ -384,6 +387,7 @@ class Simulation {
     var threat = 0.0
     val cleared = LinkedHashSet<String>(); val clearedAt = HashMap<String, Double>()
     var surviveTime = -1.0; var lastGate = ""; val found = ArrayList<String>()
+    var gateKick = -1.0   // seconds since the gate was passed; < 0 when idle
     var warp = -1.0; var warpOut = -1.0; var warpHole = ""; var warpFrom = Point(0.0, 0.0)
     var universe = 0; var universeAt = 0.0
 
@@ -396,7 +400,7 @@ class Simulation {
         pause = PauseState.NONE; pauseTime = 0.0
         this.mode = mode; powerUp = null; powerUpTime = 0.0; waveSpeed = BASE_SPEED
         threat = 0.0; cleared.clear(); clearedAt.clear()
-        surviveTime = -1.0; lastGate = ""; found.clear()
+        surviveTime = -1.0; lastGate = ""; found.clear(); gateKick = -1.0
         warp = -1.0; warpOut = -1.0; warpHole = ""; warpFrom = Point(0.0, 0.0)
         universe = 0; universeAt = 0.0
     }
@@ -582,6 +586,10 @@ fun stepSimulation(s: Simulation, steering: Double, delta: Double) {
     if (s.warp >= 0 && s.phase == Phase.RUNNING) {
         s.warp += dt
         if (s.warp >= WARP_DURATION) exitWarp(s)
+    }
+    if (s.gateKick >= 0) {
+        s.gateKick += dt
+        if (s.gateKick >= GATE_KICK_TIME) s.gateKick = -1.0
     }
     if (s.warpOut >= 0) {
         s.warpOut += dt

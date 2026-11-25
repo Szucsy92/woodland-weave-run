@@ -75,7 +75,7 @@ class SimulationParityTest {
         assertEquals(SecretType.RING, sec.type)
         assertEquals(52.22025678428361, sec.x, 1e-9)
 
-        val g = gatesAround(100.0, 100.0)[0]
+        val g = gatesAround(100.0, 100.0).first { it.id == "g0:1" }   // the lattice is sparser now, so g0:1 is no longer the first
         assertEquals("g0:1", g.id)
         assertEquals(1.2883121263911737, g.angle, 1e-12)
 

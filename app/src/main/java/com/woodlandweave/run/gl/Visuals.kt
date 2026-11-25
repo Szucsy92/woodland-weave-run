@@ -31,7 +31,7 @@ object Visuals {
      */
     object GateRing {
         const val ON = true
-        const val GAP = .2             // lowest point of the tube above the ground, in metres
+        const val GAP = 0.0            // lowest point of the tube above the ground, in metres (0 = the ring may touch the ground)
         const val TORUS_R = 2.4        // radius of the torusA mesh; the ring is scaled to GATE_HALF / TORUS_R
         const val TORUS_TUBE = .14     // tube radius of the torusA mesh (scaled the same way)
         const val SEE = 130.0          // gates further away than this get no glow and no lens

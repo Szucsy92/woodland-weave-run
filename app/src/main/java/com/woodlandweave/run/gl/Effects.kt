@@ -90,6 +90,11 @@ class EffectsModel {
             lens += 2.2 * exp(-s.warp * 2.2) * cos(s.warp * 11)
             flash += max(0.0, 1 - s.warp / .3) * .6
         }
+        // Passing a survive gate (in or out): the same elastic fisheye as the black hole / a pickup, a damped spring.
+        if (s.gateKick >= 0 && s.gateKick < GATE_KICK_TIME) {
+            lens += 1.8 * exp(-s.gateKick * 2.4) * cos(s.gateKick * 11)
+            flash += max(0.0, 1 - s.gateKick / .25) * .25
+        }
         if (s.warpOut >= 0) {
             lens += 1.9 * exp(-s.warpOut * 2.6) * cos(s.warpOut * 12)
             flash += exp(-s.warpOut * 3.4) * min(1.0, (WARP_EXIT_TIME - s.warpOut) / .5) * .9
