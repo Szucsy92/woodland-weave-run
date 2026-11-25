@@ -625,7 +625,7 @@ object Geo {
     // Finomhangolva a Tree Mesh Studio-ban (2026-11-23 14:25). Minden érték fajonként: 0 = oak, 1 = pine, 2 = ancient.
     // A fa-paraméterek egy az egyben megegyeznek a 3D előnézetben látott beállításokkal (TreeTuning.json).
 
-    private val TREE_HEIGHT = doubleArrayOf(20.5,  20.5,  22.0)                    // Magasság
+    private val TREE_HEIGHT = doubleArrayOf(6.0,  6.0,  17.0)                    // Magasság
     private val TREE_HEIGHT_RAND = doubleArrayOf(3.0,  3.0,  0.0)                   // Magasság szórása
     private val TREE_TRUNK_SCALE = doubleArrayOf(1.5225,  0.8925,  1.365)                // Törzs vastagsága
     private val TREE_TRUNK_RADIUS = doubleArrayOf(0.27,  0.27,  0.28)              // Csúcs sugara
@@ -650,13 +650,13 @@ object Geo {
     private val TREE_ROOT_DEPTH = doubleArrayOf(0.0,  0.0,  0.0)                    // Talaj alatti kiszélesedés
     private val TREE_CUT_DEPTH = doubleArrayOf(0.05,  0.05,  0.1)                   // Vágás mélysége a talaj alatt
     private val TREE_BOTTOM_CAP = intArrayOf(1,  1,  1)                               // Zárt alj
-    private val TREE_LIMB_COUNT = intArrayOf(9,  9,  7)                               // Ágak száma
+    private val TREE_LIMB_COUNT = intArrayOf(5,  6,  5)                               // Ágak száma
     private val TREE_LIMBS_PER_LEVEL = intArrayOf(2,  3,  2)                          // Ágak szintenként
-    private val TREE_LIMB_START = doubleArrayOf(7.2,  5.0,  12.0)                  // Első ág magassága
+    private val TREE_LIMB_START = doubleArrayOf(7.2,  5.0,  9.0)                  // Első ág magassága
     private val TREE_LIMB_SPACING = doubleArrayOf(1.42,  1.4,  1.5)                // Ágak távolsága
     private val TREE_LIMB_JITTER = doubleArrayOf(0.45,  0.42,  0.5)                // Ágmagasság szórása
     private val TREE_LEVEL_JITTER = doubleArrayOf(1.4,  1.4,  1.0)                  // Szintek szórása
-    private val TREE_LIMB_LEN = doubleArrayOf(1.2,  0.95,  1.16)                   // Ágak hossza
+    private val TREE_LIMB_LEN = doubleArrayOf(1.2,  0.8,  1.16)                   // Ágak hossza
     private val TREE_LIMB_LEN_BASE = doubleArrayOf(3.0,  4.1,  3.4)                 // Alap ághossz
     private val TREE_LIMB_LEN_SLOPE = doubleArrayOf(0.0,  -0.26,  -0.08)            // Hossz változása felfelé
     private val TREE_LIMB_LEN_RAND = doubleArrayOf(1.25,  0.0,  1.0)                // Ághossz szórása
@@ -681,6 +681,8 @@ object Geo {
     private const val TREE_BARK_PER_M = 0.65                                       // ismétlés / méter kerület: így az ágon is négyzetes a texel
     private val TREE_RADIAL = intArrayOf(3,  3,  4)                                   // Körbeosztás (gyökerenként)
     private val TREE_FLARE_TOP = doubleArrayOf(5.0,  5.0,  6.0)                     // Sűrű gyűrűk magassága
+    private val TREE_MIN_SIDES = intArrayOf(12, 12, 12, 12)                            // Legkevesebb oldal
+    private val TREE_FLARE_ROWS = intArrayOf(12, 9, 12, 12)                           // Törzstő sorai
     private val TREE_ROOT_W = doubleArrayOf(1.40,  .85,  1.85)          // (megtartva a régi kód kompatibilitásáért)
     private const val TREE_GROUND = 1.1                                    // soil level in body space (the instance sits 1.1 m low)
 
@@ -842,7 +844,7 @@ object Geo {
     fun treeBody(lifelike: Boolean, shadow: Boolean = false, variant: Int = 0, shape: Int = 0): MeshData {
         val sp = variant.coerceIn(0, 2) // oak, pine, ancient
         val ridges = TREE_RIDGES[sp]
-        val n = if (shadow) 2 * ridges else if (lifelike) maxOf(12, TREE_RADIAL[sp] * ridges) else maxOf(12, 2 * ridges)
+        val n = if (shadow) 2 * ridges else if (lifelike) maxOf(TREE_MIN_SIDES[sp], TREE_RADIAL[sp] * ridges) else maxOf(TREE_MIN_SIDES[sp], 2 * ridges)
         val ts = TreeShape(sp, shape.coerceIn(0, 15), n)
         val loopW = if (lifelike) 4 else 3
 
@@ -875,7 +877,12 @@ object Geo {
             ys += ts.topY
         } else {
             val flareTop = maxOf(TREE_FLARE_TOP[sp], TREE_GROUND + TREE_ROOT_H[sp] + TREE_ROOT_H_RAND[sp] + .4)
-            for (y in doubleArrayOf(.5, .8, 1.1, 1.25, 1.45, 1.7, 2.05, 2.45, 2.95, 3.55, 4.2, 5.0)) {
+            // TREE_FLARE_ROWS of the 12 flare rows stay, spread evenly (the lowest and the highest always).
+            val flareRows = TREE_FLARE_ROWS[sp].coerceIn(3, 12)
+            val keep = BooleanArray(12)
+            for (i in 0 until flareRows) keep[(i * 22 + (flareRows - 1)) / (2 * (flareRows - 1))] = true
+            for ((fi, y) in doubleArrayOf(.5, .8, 1.1, 1.25, 1.45, 1.7, 2.05, 2.45, 2.95, 3.55, 4.2, 5.0).withIndex()) {
+                if (!keep[fi]) continue
                 val v = TREE_GROUND + (y - .5) * (flareTop - TREE_GROUND) / 4.5
                 if (v > bottom + .05) ys += v
             }
