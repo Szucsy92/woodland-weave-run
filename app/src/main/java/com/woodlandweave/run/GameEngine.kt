@@ -274,7 +274,7 @@ class GameEngine(
             onPhase(s.phase, floor(s.distance).toInt())
         }
         audio.setMode(settings.sound, inRun())
-        if (s.impact > 0 && lastImpact <= 0) { buzz(65); audio.impactDip() }
+        if (s.impact > 0 && lastImpact <= 0) { if (settings.haptics) haptics.hit(); audio.impactDip() }
         lastImpact = s.impact
         if (s.stumble > 0 && lastStumble <= 0) { buzz(22); audio.cue(Cue.STUMBLE) }
         lastStumble = s.stumble

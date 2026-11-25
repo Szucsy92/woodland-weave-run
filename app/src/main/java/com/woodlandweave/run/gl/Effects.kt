@@ -31,6 +31,9 @@ class EffectsModel {
         const val LENS_END = .45
         /** Fisheye kicks (pickup, expiry, black hole in/out, gate pass) are 25% weaker; the gate membrane has its own distortion. */
         const val LENS_SCALE = .75
+        /** The tree-hit colour split: how strong it peaks, and how quickly (seconds) the other kicks die away. */
+        const val GLITCH_PEAK = 2.6
+        const val GLITCH_KICK_TIME = .32
     }
 
     private var frost = 0.0
@@ -52,7 +55,7 @@ class EffectsModel {
         }
         // A tree hit: a sharp punch that decays (the old sine envelope started at 0 and was smeared away by the blur).
         val hitK = if (s.impact > 0) (s.impact / IMPACT_DURATION).coerceIn(0.0, 1.0) else 0.0
-        var glitch = hitK.pow(1.3) * 1.6 + occasional +
+        var glitch = hitK.pow(2.2) * GLITCH_PEAK + occasional +
             (if (awake) sin(s.phaseTime * 8).pow(2.0) * (1 - s.phaseTime / 1.15) * .35 else 0.0)
 
         // Pause warp: blur and glitch swell while time slows, hold softly while frozen, drain as the run resumes.
@@ -138,7 +141,7 @@ class EffectsModel {
             if (r >= 0 && r < .45) glitch += sin((r / .45) * PI) * 1.1
         }
         // The same smooth purple/green colour split as a tree hit: black hole in and out, passing a gate, finding a secret.
-        fun kick(age: Double) = if (age >= 0 && age < IMPACT_DURATION) (1 - age / IMPACT_DURATION).pow(1.3) * 1.6 else 0.0
+        fun kick(age: Double) = if (age >= 0 && age < GLITCH_KICK_TIME) (1 - age / GLITCH_KICK_TIME).pow(2.2) * GLITCH_PEAK else 0.0
         glitch += kick(s.warp) + kick(s.warpOut) + kick(s.gateKick)
         val lastFound = s.foundAt.values.maxOrNull()
         if (lastFound != null) glitch += kick(s.elapsed - lastFound)

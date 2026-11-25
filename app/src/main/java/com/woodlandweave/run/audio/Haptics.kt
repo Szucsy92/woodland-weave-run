@@ -13,6 +13,20 @@ class Haptics(context: Context) {
         if (Build.VERSION.SDK_INT >= 31) context.getSystemService(VibratorManager::class.java)?.defaultVibrator
         else context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
 
+    /** A tree hit: a hard thump at full amplitude that tails off (the old 65 ms pulse at 110/255 was barely felt on many phones). */
+    fun hit() {
+        val v = vibrator ?: return
+        if (!v.hasVibrator()) return
+        try {
+            v.vibrate(
+                if (v.hasAmplitudeControl()) VibrationEffect.createWaveform(longArrayOf(50, 70), intArrayOf(255, 120), -1)
+                else VibrationEffect.createWaveform(longArrayOf(0, 110), -1),
+            )
+        } catch (_: Exception) {
+            // Vibration is optional and must never break a run.
+        }
+    }
+
     /** Pattern = alternating on/off milliseconds, e.g. pulse(70, 60, 110). */
     fun pulse(vararg pattern: Long) {
         val v = vibrator ?: return
