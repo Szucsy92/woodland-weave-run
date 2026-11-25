@@ -36,7 +36,7 @@ enum class Difficulty { EASY, NORMAL, HARD }
 enum class GameMode { CLASSIC, SURVIVE, FREEROAM }
 enum class PowerUpType { FREEZER, GHOST, SHOCKWAVE }
 enum class ForestMood { MANUAL, AUTO }
-enum class SecretType { MONOLITH, RING, LANTERN }
+enum class SecretType { SPIRAL, RING, LANTERN }
 enum class SurviveStage { LIT, DYING, DARK, RED }
 
 class Tree(val x: Double, val z: Double, val scale: Double, val id: String) {
@@ -100,11 +100,11 @@ const val FREEROAM_TURN = 1.5
 
 const val SECRET_CELL = 180      // was 70: far fewer relics (about 7x)
 const val SECRET_CHANCE = 0.4    // was 0.45
-const val MONOLITH_SHARE = 0.55  // the rest are fairy rings; the lantern is not drawn, so it no longer appears
-const val SECRET_REACH = 3.5
+const val SPIRAL_SHARE = 0.55  // the rest are fairy rings; the lantern is not drawn, so it no longer appears
+const val SECRET_REACH = 3.0     // found as soon as the runner is within 3 m of the relic (not at its centre)
 const val SECRET_CLEARING = 6.0
 val SECRET_NAMES = mapOf(
-    SecretType.MONOLITH to "The Silent Monolith",
+    SecretType.SPIRAL to "The Spore Spiral",
     SecretType.RING to "The Fairy Ring",
     SecretType.LANTERN to "The Lost Lantern",
 )
@@ -229,7 +229,7 @@ fun secretsAround(x: Double, z: Double): List<Secret> {
         out += Secret(
             gx * SECRET_CELL + 15 + hash(gx, gz, 301) * (SECRET_CELL - 30),
             gz * SECRET_CELL + 15 + hash(gx, gz, 302) * (SECRET_CELL - 30),
-            if (hash(gx, gz, 303) < MONOLITH_SHARE) SecretType.MONOLITH else SecretType.RING,
+            if (hash(gx, gz, 303) < SPIRAL_SHARE) SecretType.SPIRAL else SecretType.RING,
             "s$gx:$gz",
         )
     }

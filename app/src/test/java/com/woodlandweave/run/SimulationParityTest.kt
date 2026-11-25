@@ -72,7 +72,7 @@ class SimulationParityTest {
 
         val sec = secretsAround(100.0, 100.0)[0]   // the relic lattice is much sparser now
         assertEquals("s0:-1", sec.id)
-        assertEquals(SecretType.MONOLITH, sec.type)
+        assertEquals(SecretType.SPIRAL, sec.type)
         assertEquals(64.19980142712589, sec.x, 1e-9)
         assertEquals(-41.764927985324746, sec.z, 1e-9)
 

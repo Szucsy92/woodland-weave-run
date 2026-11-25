@@ -922,7 +922,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
 
     /**
      * The power-up glass spheres (still, translucent, nothing inside them) and the gate ring. Everything about them is in Visuals.
-     * The relics (monolith, fairy ring) are drawn by drawRelics; the lantern and the gate frames are not drawn.
+     * The relics (spore spiral, fairy ring) are drawn by drawRelics; the lantern and the gate frames are not drawn.
      */
     private fun drawLandmarks(s: Simulation, e: GameEngine) {
         if (Visuals.OrbSphere.ON) for (o in e.orbs) {
@@ -1175,16 +1175,14 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         if (Visuals.Relic.ON) buildRelicSprites(s, e, t)
     }
 
-    // ---- relics (monolith, fairy ring) ----
+    // ---- relics (spore spiral, fairy ring) ----
     private val fp = DoubleArray(3)   // scratch: a fairy-ring sphere's position
-    private val moteMono = Array(Palette.relic.size) { Palette.mix(Palette.pollenWarm, Palette.relic[it], .4f) }
     private val moteFairy = Array(Palette.fairy.size) { Palette.mix(Palette.pollenWarm, Palette.fairy[it], .5f) }
 
     private fun sstep(x: Double, a: Double, b: Double): Double { val q = ((x - a) / (b - a)).coerceIn(0.0, 1.0); return q * q * (3 - 2 * q) }
     private fun relicHash(sec: Secret, salt: Int) = hash(floor(sec.x * 10).toInt(), floor(sec.z * 10).toInt(), salt)
     /** Seconds since this relic was found in this run, or -1 while it is still to be found. */
     private fun relicAge(s: Simulation, sec: Secret): Double { val at = s.foundAt[sec.id] ?: return -1.0; return max(0.0, s.elapsed - at) }
-    private fun relicTintIndex(sec: Secret) = floor(relicHash(sec, 305) * Palette.relic.size).toInt().coerceIn(0, Palette.relic.size - 1)
 
     /** Is this relic drawn right now (near enough, and not yet dissolved)? Used by both the meshes and the sprites, so they agree. */
     private fun relicShown(s: Simulation, sec: Secret): Boolean {
@@ -1214,25 +1212,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val age = relicAge(s, sec)
             val u = if (age < 0) 0.0 else age / v.VANISH_TIME
             val gy = groundHeight(sec.x, sec.z)
-            if (sec.type == SecretType.MONOLITH) drawMonolith(sec, gy, age, u) else drawFairyRing(sec, s.elapsed, gy, u)
-        }
-    }
-
-    /** A grey stone pillar, as tall as the eye (1.6 m), with three matte coloured stripes round all four sides; the stripes light up once it is found. */
-    private fun drawMonolith(sec: Secret, gy: Double, age: Double, u: Double) {
-        val v = Visuals.Relic
-        val k = 1.0 - sstep(u, v.SHRINK_FROM, 1.0)    // the stone shrinks away while the spores swirl
-        if (k <= .02) return
-        place(parent, sec.x, gy, sec.z, 0.0, relicHash(sec, 304) * 2 * PI, 0.0)
-        material(litProg, Palette.stone, mode = 0, rough = .93f)
-        prim(box, parent, 0.0, v.MONO_H * .5 * k, 0.0, 0.0, 0.0, 0.0, v.MONO_W * k, v.MONO_H * k, v.MONO_D * k)
-        val col = Palette.relic[relicTintIndex(sec)]
-        val lit = if (age < 0) 0f else (min(1.0, age / v.LIGHT_UP) * v.LIT_EMISSIVE).toFloat()   // 0 = a plain painted ring
-        material(litProg, col, col, lit, mode = 0, rough = .75f)
-        // Each stripe is a thin box a hair bigger than the pillar, so it wraps all four sides. They sit at 1/4, 2/4 and 3/4 of the height.
-        for (i in 1..v.STRIPES) {
-            val y = v.MONO_H * i / (v.STRIPES + 1)
-            prim(box, parent, 0.0, y * k, 0.0, 0.0, 0.0, 0.0, (v.MONO_W + 2 * v.STRIPE_OUT) * k, v.STRIPE_H * k, (v.MONO_D + 2 * v.STRIPE_OUT) * k)
+            if (sec.type == SecretType.RING) drawFairyRing(sec, s.elapsed, gy, u)   // the spore spiral is sprites only
         }
     }
 
@@ -1252,7 +1232,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     }
 
     /**
-     * Relic sprites. Unfound: a soft glow (fog off, so it shows through the mist) and a wide cluster of spores drifting around it.
+     * Relic sprites. Unfound: (fairy ring) soft glows, a spore spiral with three odd-coloured spores, and a wide cluster of spores drifting around it.
      * Found: the glow flares, and a swirl of spores spins up around the relic while it dissolves.
      */
     private fun buildRelicSprites(s: Simulation, e: GameEngine, t: Double) {
@@ -1269,20 +1249,35 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val found = age >= 0
             val u = if (found) age / v.VANISH_TIME else 0.0
             val gy = groundHeight(sec.x, sec.z)
-            val mono = sec.type == SecretType.MONOLITH
-            val ti = relicTintIndex(sec)
+            val spiral = sec.type == SecretType.SPIRAL
             val seed = floor(sec.x * 10).toInt() * 31 + floor(sec.z * 10).toInt()
             val pulse = 1.0 + sin(t * 1.4 + relicHash(sec, 306) * 6.28) * v.GLOW_PULSE
 
-            if (mono) {
-                val k = 1.0 - sstep(u, v.SHRINK_FROM, 1.0)
-                val a = (v.GLOW_ALPHA + (if (found) v.FOUND_GLOW_BOOST else 0.0)) * pulse * far * k
-                bRelicGlow.add(sec.x, gy + v.MONO_H * .55, sec.z, v.GLOW_SIZE, v.GLOW_SIZE, Palette.relic[ti], a, v.MONO_H * .55)
-            } else {
+            if (!spiral) {
                 for (k in 0 until v.FAIRY_COUNT) {
                     fairyPos(sec, k, t, gy, u)
                     bRelicGlow.add(fp[0], fp[1], fp[2], v.FAIRY_GLOW_SIZE, v.FAIRY_GLOW_SIZE, Palette.fairy[k % Palette.fairy.size],
                         v.FAIRY_GLOW_ALPHA * pulse * far * (1.0 - u), fp[1] - gy)
+                }
+            }
+
+            if (spiral) {
+                // Two arms of spores turning slowly (a spiral that folds up into the swirl once found), and three odd-coloured spores among them.
+                val sa = far * (1.0 - u)
+                val half = v.SPIRAL_COUNT / 2
+                for (i in 0 until v.SPIRAL_COUNT) {
+                    val arm = i % 2; val f = (i / 2 + .5) / half
+                    val ang = arm * PI + f * v.SPIRAL_TURNS * 2 * PI + t * v.SPIRAL_SPIN + u * 5.0
+                    val r = (.3 + f * v.SPIRAL_RADIUS) * (1.0 - .7 * u * u)
+                    val hh = .35 + f * .45 + sin(t * .9 + i * 1.7) * .08 + u * .5
+                    val size = v.SPIRAL_SIZE * (.8 + .4 * hash(i, seed, 340))
+                    bRelicMotes.add(sec.x + cos(ang) * r, gy + hh, sec.z + sin(ang) * r, size, size, Palette.pollenWarm, v.SPIRAL_ALPHA * sa, hh)
+                }
+                for (k in 0 until 3) {
+                    val ang = t * .5 + k * 2 * PI / 3 + u * 5.0
+                    val r = v.SPIRAL_RADIUS * (.35 + .25 * k / 2.0) * (1.0 - .7 * u * u)
+                    val hh = 1.0 + sin(t * 1.1 + k * 2.1) * .2 + u * .5
+                    bRelicMotes.add(sec.x + cos(ang) * r, gy + hh, sec.z + sin(ang) * r, v.TRIO_SIZE, v.TRIO_SIZE, Palette.spiralTrio[k], v.TRIO_ALPHA * sa, hh)
                 }
             }
 
@@ -1296,7 +1291,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                     val z = sec.z + sin(ang) * r + cos(t * .27 + h4 * 6) * .35
                     val hh = .25 + h3 * v.CLUSTER_HEIGHT + sin(t * .6 + h2 * 6) * .15
                     val size = v.CLUSTER_SIZE * (.7 + h4 * .6)
-                    val col = if (mono) moteMono[ti] else moteFairy[i % moteFairy.size]
+                    val col = if (spiral) Palette.pollenWarm else moteFairy[i % moteFairy.size]
                     bRelicMotes.add(x, groundHeight(x, z) + hh, z, size, size, col, v.CLUSTER_ALPHA * far * (.75 + .25 * sin(t * 1.5 + h1 * 9)), hh)
                 }
             } else {
@@ -1308,7 +1303,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                     val r = (.5 + h3 * 1.8) * (1.0 - .7 * u * u) + .15
                     val hh = .1 + h4 * 1.1 + u * (.3 + h1 * .6)
                     val size = v.SWIRL_SIZE * (.8 + .5 * sin(age * 6 + h2 * 9)) * (1.0 - .4 * u)
-                    val col = if (mono) moteMono[ti] else moteFairy[i % moteFairy.size]
+                    val col = if (spiral) Palette.pollenWarm else moteFairy[i % moteFairy.size]
                     bRelicMotes.add(sec.x + cos(ang) * r, gy + hh, sec.z + sin(ang) * r, size, size, col, fade * far, hh)
                 }
             }

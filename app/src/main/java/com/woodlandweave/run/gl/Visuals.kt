@@ -26,30 +26,27 @@ object Visuals {
     }
 
     /**
-     * The relics (secrets): the monolith, a grey stone pillar (no taller than eye height) with three matte coloured stripes round it, and the
-     * fairy ring, six glass spheres of different colours. Until found a relic only glows softly (and a cluster of spores drifts around it);
-     * when found, the monolith's stripes light up, a swirl of spores rises around it and the relic dissolves for this run.
+     * The relics (secrets): the spore spiral, two arms of spores slowly turning among the other spores (with three odd-coloured spores
+     * drifting in it), and the fairy ring, six glass spheres of different colours. When found, a swirl of spores rises and the relic
+     * dissolves for this run.
      */
     object Relic {
         const val ON = true
         const val MAX = 6                 // relics drawn at once
         const val SEE = 110.0
         const val VANISH_TIME = 2.4       // seconds from "found" to gone
-        const val SHRINK_FROM = .55       // fraction of VANISH_TIME after which the stone shrinks away
 
-        // monolith (eye height is 1.6 m, so the pillar is as tall as the eye and no taller; it grew wider and deeper instead)
-        const val MONO_H = 1.6
-        const val MONO_W = .95
-        const val MONO_D = .75
-        const val STRIPES = 3             // horizontal stripes, evenly spaced, running round all four sides
-        const val STRIPE_H = .12          // height of one stripe
-        const val STRIPE_OUT = .012       // how far a stripe stands out of the stone
-        const val LIGHT_UP = .5           // seconds for the ring to light up once found
-        const val LIT_EMISSIVE = 1.7
-        const val GLOW_SIZE = 8.0
-        const val GLOW_ALPHA = .32
-        const val FOUND_GLOW_BOOST = .35
         const val GLOW_PULSE = .18
+
+        // spore spiral
+        const val SPIRAL_COUNT = 36       // spores in the two arms
+        const val SPIRAL_RADIUS = 3.2
+        const val SPIRAL_TURNS = 1.25
+        const val SPIRAL_SPIN = .35       // radians per second
+        const val SPIRAL_SIZE = .46
+        const val SPIRAL_ALPHA = .8
+        const val TRIO_SIZE = .7          // the three odd-coloured spores
+        const val TRIO_ALPHA = .95
 
         // fairy ring
         const val FAIRY_COUNT = 6

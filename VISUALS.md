@@ -11,7 +11,7 @@ runs the highest tier the device can really handle instead of crashing (`PostFx.
 | Round shapes: canopy, rocks, bushes smooth and finely tessellated (no polygon facets) | faceted (web look) | smooth | smooth |
 | Round rings and posts (relic rings, poles) | 6-8 sides | 12-20 sides | 12-20 sides |
 | Trunk and roots with a real form (see below) | | yes | yes |
-| Boxes (monolith, gate posts, lintel, lantern) | boxes | boxes | boxes |
+| Boxes (gate posts, lintel, lantern) | boxes | boxes | boxes |
 | Filmic tone mapping (ACES), film grain, faint chromatic aberration | | | yes |
 | Key-light shadow map (2048, 4-tap hardware PCF, 92 m wide, centred on the runner; coarse trunks, roots, branches, rocks, bushes), replaces the contact-shadow decals | | | yes |
 | SSAO (half-res, 8 samples, bilateral blur) | | | yes |
@@ -62,7 +62,7 @@ Not compiled or run on a device in the environment this was written in: build wi
 ## Going in and out of halos, frost, day and night (from the screen recording)
 - Light sprites now dissolve over their whole radius (up to 18 m for the big forest halos) with a smootherstep curve, so
   walking into a halo no longer floods the screen with white and leaving it no longer snaps back to dark. All tiers.
-- Every glow that reaches into the ground (forest halos, the fairy-ring glows, orb auras, the lantern and monolith glows)
+- Every glow that reaches into the ground (forest halos, the fairy-ring glows, orb auras, the lantern glows)
   carries its height above the ground and fades out softly towards it: no more flat, cut-off bottoms. All tiers.
 - The elastic fisheye on pickup (and when a power-up ends) no longer pulls in pixels from outside the picture, which
   produced the horizontal edge smear in the video; it now zooms in towards the middle instead. All tiers.
