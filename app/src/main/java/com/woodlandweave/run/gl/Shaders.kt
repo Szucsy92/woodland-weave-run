@@ -799,8 +799,19 @@ void main() {
     c = tap(uv);
   } else {
     c = sampleBlur(uv);
-    vec3 left = sampleBlur(uv + split), right = sampleBlur(uv - split);
-    c = mix(c, vec3(left.r, right.g, left.b), min(glitch * 0.85, 0.85));
+    if (glitch >= 0.001) {
+      // Colour tear: a purple copy to one side, a green copy to the other, taken from the sharp picture (not the blur, which
+      // used to smear the split away), with a few horizontal bands that jump sideways.
+      float gk = min(glitch, 1.6);
+      float row = floor(uv.y * 34.0);
+      float rnd = fract(sin(row * 12.9898 + floor(time * 24.0) * 78.233) * 43758.5453);
+      float tear = (rnd > 0.72 ? (rnd - 0.86) * 0.09 : 0.0) * min(gk, 1.0);
+      vec2 sp = vec2(gk * 0.016 + tear, gk * 0.003);
+      vec3 pu = tap(uv + sp + vec2(tear, 0.0)), gr = tap(uv - sp + vec2(tear, 0.0));
+      vec3 sharp = vec3(pu.r, gr.g, pu.b);
+      c = mix(c, sharp, min(gk * 0.9, 0.9));
+      c += (vec3(0.55, 0.12, 0.85) * max(pu.r - c.r, 0.0) + vec3(0.1, 0.8, 0.35) * max(gr.g - c.g, 0.0)) * min(gk, 1.0) * 0.5;
+    }
   }
 #ifdef Q_FULL
   if (uChroma > 0.0 && blur < 0.001 && glitch < 0.001) {

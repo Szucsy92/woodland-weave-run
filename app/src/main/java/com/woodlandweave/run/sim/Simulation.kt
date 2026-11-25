@@ -101,7 +101,7 @@ const val FREEROAM_TURN = 1.5
 const val SECRET_CELL = 180      // was 70: far fewer relics (about 7x)
 const val SECRET_CHANCE = 0.4    // was 0.45
 const val SPIRAL_SHARE = 0.55  // the rest are fairy rings; the lantern is not drawn, so it no longer appears
-const val SECRET_REACH = 3.0     // found as soon as the runner is within 3 m of the relic (not at its centre)
+const val SECRET_REACH = 6.0     // found as soon as the runner is within 6 m of the relic (not at its centre)
 const val SECRET_CLEARING = 6.0
 val SECRET_NAMES = mapOf(
     SecretType.SPIRAL to "The Spore Spiral",
@@ -109,8 +109,8 @@ val SECRET_NAMES = mapOf(
     SecretType.LANTERN to "The Lost Lantern",
 )
 
-const val GATE_CELL = 250        // was 90: one cell of the gate lattice, in metres
-const val GATE_CHANCE = 0.3      // was 0.4: the chance that a cell holds a gate (together roughly 10x fewer gates than before)
+const val GATE_CELL = 400        // was 250: one cell of the gate lattice, in metres
+const val GATE_CHANCE = 0.2      // was 0.3: the chance that a cell holds a gate (together about 4x rarer than before)
 const val GATE_HALF = 3.6
 const val GATE_DEPTH = 0.9
 const val GATE_CLEARING = 6.5
@@ -325,8 +325,29 @@ fun enterHole(s: Simulation, hole: BlackHole): Boolean {
     return true
 }
 
+/** The nearest spot to [p] (spiralling outwards) that is clear of every trunk, so the runner never comes out inside a tree. */
+private fun freeSpot(p: Point, treeGap: Double): Point {
+    val trees = treesAround(fl(p.x / CELL), fl(p.z / CELL), treeGap, 0)
+    fun free(x: Double, z: Double) = trees.none {
+        val (rx, rz) = it.collisionRadii
+        val nx = (x - it.x) / (rx + 0.8); val nz = (z - it.z) / (rz + 0.8)
+        nx * nx + nz * nz < 1.0
+    }
+    if (free(p.x, p.z)) return p
+    var r = 1.5
+    while (r <= 18.0) {
+        for (k in 0 until 16) {
+            val a = k * PI / 8
+            val x = p.x + cos(a) * r; val z = p.z + sin(a) * r
+            if (free(x, z)) return Point(x, z)
+        }
+        r += 1.5
+    }
+    return p
+}
+
 fun exitWarp(s: Simulation) {
-    val exit = holeExit(BlackHole(s.warpFrom.x, s.warpFrom.z, s.warpHole))
+    val exit = freeSpot(holeExit(BlackHole(s.warpFrom.x, s.warpFrom.z, s.warpHole)), levelOf(s.difficulty).treeGap)
     s.x = exit.x; s.z = exit.z
     s.warp = -1.0
     s.warpOut = 0.0
@@ -438,7 +459,7 @@ private fun treeCollisionRadii(tree: Tree): Pair<Double, Double> {
 
 fun collide(s: Simulation, tree: Tree): Boolean {
     if (s.phase != Phase.RUNNING) return false
-    if (s.powerUp == PowerUpType.GHOST || s.warp >= 0) return false
+    if (s.powerUp == PowerUpType.GHOST || s.warp >= 0 || s.warpOut >= 0) return false   // no hits inside the hole or in its exit flash
     if (s.cleared.contains(tree.id)) return false
     val dx = s.x - tree.x; val dz = s.z - tree.z
     val (radiusX, radiusZ) = tree.collisionRadii
@@ -479,7 +500,7 @@ fun collide(s: Simulation, tree: Tree): Boolean {
 
 fun collideObstacle(s: Simulation, o: Obstacle): Boolean {
     if (s.phase != Phase.RUNNING || s.stumble > 0) return false
-    if (s.powerUp == PowerUpType.GHOST || s.warp >= 0) return false
+    if (s.powerUp == PowerUpType.GHOST || s.warp >= 0 || s.warpOut >= 0) return false
     if (s.cleared.contains(o.id)) return false
     if (hypot(s.x - o.x, s.z - o.z) >= o.radius + 0.24) return false
     s.stumble = if (o.big) 1.0 else 0.5

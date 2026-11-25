@@ -215,7 +215,9 @@ class GameEngine(
         keyCx = cx; keyCz = cz; keyUniverse = s.universe
         s.cell = "$cx,${cz}u${s.universe}"
         val level = levelOf(s.difficulty)
-        var trees = treesAround(cx, cz, level.treeGap, s.universe)
+        // The forest layout is the same in every universe: nothing re-rolls (no trees popping up in front of the runner) when
+        // a black hole is entered or left. Only the hue and the holes change with the universe.
+        var trees = treesAround(cx, cz, level.treeGap, 0)
         // Undergrowth bushes are disabled: keep the forest floor clear and avoid extra collision/draw work.
         var obstacles = emptyList<Obstacle>()
         if (s.mode == GameMode.FREEROAM) {

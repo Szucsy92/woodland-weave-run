@@ -336,7 +336,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             (engine.secrets.all { hypot(x - it.x, z - it.z) > SECRET_CLEARING } &&
                 engine.gates.all { hypot(x - it.x, z - it.z) > GATE_CLEARING } &&
                 holes.all { hypot(x - it.x, z - it.z) > HOLE_CLEARING })
-        for (t in treesAround(cx, cz, levelOf(s.difficulty).treeGap, s.universe, SHADOW_RADIUS, skipInner = RADIUS)) {
+        for (t in treesAround(cx, cz, levelOf(s.difficulty).treeGap, 0, SHADOW_RADIUS, skipInner = RADIUS)) {
             if (abs(floor(t.x / CELL).toInt() - cx) <= RADIUS && abs(floor(t.z / CELL).toInt() - cz) <= RADIUS) continue   // inside the window: already a real tree (or removed on purpose)
             if (!open(t.x, t.z)) continue
             ring += cache.getOrPut(t.id) { treeProp(t) }; alive += t.id

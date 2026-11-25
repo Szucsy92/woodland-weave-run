@@ -46,7 +46,9 @@ class EffectsModel {
             awake -> (1 - s.phaseTime / 1.15) * 1.2
             else -> impact * 1.7
         }
-        var glitch = impact * 1.1 + occasional +
+        // A tree hit: a sharp punch that decays (the old sine envelope started at 0 and was smeared away by the blur).
+        val hitK = if (s.impact > 0) (s.impact / IMPACT_DURATION).coerceIn(0.0, 1.0) else 0.0
+        var glitch = hitK.pow(1.3) * 1.6 + occasional +
             (if (awake) sin(s.phaseTime * 8).pow(2.0) * (1 - s.phaseTime / 1.15) * .35 else 0.0)
 
         // Pause warp: blur and glitch swell while time slows, hold softly while frozen, drain as the run resumes.
