@@ -538,11 +538,11 @@ vec3 linearToSrgb(vec3 c) {
 }
 // A thin, rippling sheet: where a doubly domain-warped field crosses zero. The warp is what makes it flow and morph.
 float veil(vec3 p, float t) {
-  vec3 q = p * 2.2;
+  vec3 q = p * 1.8;
   q += 0.55 * sin(q.yzx * 1.7 + vec3(t * 0.7, t * 0.5, t * 0.6));
   q += 0.35 * sin(q.zxy * 2.9 - vec3(t * 0.9, t * 0.6, t * 0.8));
   float n = sin(q.x * 2.1 + sin(q.y * 1.9 + t * 0.4)) + sin(q.z * 2.3 + sin(q.x * 1.7 - t * 0.35));
-  return exp(-n * n * 2.6);
+  return exp(-n * n * 5.0);   // thinner sheets, so there is dark space between them
 }
 void main() {
   vec3 rd = normalize(vW - uCam);
@@ -562,15 +562,16 @@ void main() {
     float c = cos(t * 0.2), s = sin(t * 0.2);
     p = vec3(c * p.x - s * p.z, p.y, s * p.x + c * p.z);   // the whole inside turns slowly
     float g = fract(sin(dot(floor(p * 34.0), vec3(12.9898, 78.233, 37.719))) * 43758.5453);
-    float grain = mix(0.35, 1.5, g * g);                    // fine speckle, so the sheets read as made of points
+    float grain = mix(0.55, 1.45, g * g);                    // fine speckle, so the sheets read as made of points
     acc += veil(p, t) * grain * (1.0 - smoothstep(0.55, 1.0, r2));
   }
-  acc = clamp(acc / n * 2.4, 0.0, 1.0);
+  acc = clamp(acc / n * 3.2, 0.0, 1.0);
   float fr = pow(1.0 - abs(dot(nrm, -rd)), 2.5);
-  vec3 veilCol = mix(uColor * 1.1, vec3(0.78, 0.62, 1.0), pow(acc, 1.5) * 0.7);
-  vec3 emit = (veilCol * acc * 1.25 + mix(uColor, vec3(1.0), 0.25) * fr * 0.9) * uGlow;
-  float a = clamp(uAlpha * 0.6 + fr * 0.35 + acc * 0.25, 0.0, 0.92);
-  vec3 col = emit + uColor * 0.10 * a;
+  // The ribbons: neon lemon-yellow where they are thin, going to white where they are dense.
+  vec3 veilCol = mix(vec3(0.82, 1.0, 0.12), vec3(1.0), smoothstep(0.25, 0.9, acc));
+  vec3 emit = (veilCol * acc * 1.6 + mix(uColor, vec3(1.0), 0.25) * fr * 0.9) * uGlow;
+  float a = clamp(uAlpha * 0.9 + fr * 0.3 + acc * 0.2, 0.0, 0.92);   // a darker glass body, so the ribbons stand out of it
+  vec3 col = emit + uColor * 0.04 * a;
   float f = smoothstep(uFogNear, uFogFar, distance(vW, uCam));
   col = mix(col, uFog * a, f);
   o = vec4(uEncode > 0.5 ? linearToSrgb(clamp(col, 0.0, 1.0)) : col, a);
