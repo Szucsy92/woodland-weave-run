@@ -939,7 +939,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         material(litProg, Palette.ember, mode = 2)
         for (g in e.gates) {
             place(parent, g.x, groundHeight(g.x, g.z), g.z, 0.0, g.angle, 0.0)
-            prim(torusA, parent, 0.0, GATE_HALF, 0.0, PI / 2, 0.0, 0.0, 1.0, 1.0, 1.0)   // torusA's radius is GATE_HALF
+            // torusA's radius is GATE_HALF; it already lies in the local XY plane, so with no tilt it stands upright (the runner
+            // goes through it along the gate's normal, as in passGate) and just clears the ground by GateRing.GAP.
+            prim(torusA, parent, 0.0, GATE_HALF + Visuals.GateRing.GAP, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
         }
     }
 

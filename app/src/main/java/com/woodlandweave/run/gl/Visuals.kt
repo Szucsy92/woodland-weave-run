@@ -25,9 +25,13 @@ object Visuals {
         const val HEIGHT = 1.15
     }
 
-    /** The gate: a plain ring (a torus of radius GATE_HALF) standing in the gate's plane. The gate itself works with or without it. */
+    /**
+     * The gate: a plain ring (a torus of radius GATE_HALF) standing upright in the gate's plane, so the runner passes through it.
+     * The gate itself works with or without it. GAP is how far the lowest point of the ring floats above the ground.
+     */
     object GateRing {
         const val ON = true
+        const val GAP = .3
     }
 
     /**
