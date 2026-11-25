@@ -70,10 +70,11 @@ class SimulationParityTest {
         assertEquals(175.44222553503752, h.x, 1e-9)
         assertEquals(535.10270401605, h.z, 1e-9)
 
-        val sec = secretsAround(100.0, 100.0)[0]
-        assertEquals("s0:1", sec.id)
-        assertEquals(SecretType.RING, sec.type)
-        assertEquals(52.22025678428361, sec.x, 1e-9)
+        val sec = secretsAround(100.0, 100.0)[0]   // the relic lattice is much sparser now
+        assertEquals("s0:-1", sec.id)
+        assertEquals(SecretType.MONOLITH, sec.type)
+        assertEquals(64.19980142712589, sec.x, 1e-9)
+        assertEquals(-41.764927985324746, sec.z, 1e-9)
 
         val g = gatesAround(100.0, 100.0).first { it.id == "g0:1" }   // the lattice is sparser now, so g0:1 is no longer the first
         assertEquals("g0:1", g.id)

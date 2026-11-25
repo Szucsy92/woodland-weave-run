@@ -7,7 +7,6 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.woodlandweave.run.sim.Difficulty
 import com.woodlandweave.run.gl.FX_NEUTRAL
@@ -33,7 +32,8 @@ data class Settings(
     val fx: FxTuning = FxTuning(),
     val best: Int = 0,
     val last: Int = 0,
-    val secrets: Set<String> = emptySet(),
+    /** The most relics found in a single run (the found relics themselves reset every run). */
+    val bestSecrets: Int = 0,
 )
 
 private val Context.store by preferencesDataStore("forest")
@@ -52,7 +52,7 @@ class SettingsRepo(private val context: Context) {
         val quality = stringPreferencesKey("quality")
         val best = intPreferencesKey("best")
         val last = intPreferencesKey("last")
-        val secrets = stringSetPreferencesKey("secrets")
+        val bestSecrets = intPreferencesKey("best_secrets")
     }
 
     private fun fxKey(name: String) = floatPreferencesKey("fx_$name")
@@ -79,7 +79,7 @@ class SettingsRepo(private val context: Context) {
             ),
             best = p[K.best] ?: 0,
             last = p[K.last] ?: 0,
-            secrets = p[K.secrets] ?: emptySet(),
+            bestSecrets = p[K.bestSecrets] ?: 0,
         )
     }
 
@@ -94,7 +94,7 @@ class SettingsRepo(private val context: Context) {
     suspend fun setTimeOfDay(v: Float) = context.store.edit { it[K.tod] = v.coerceIn(0f, 1f); it[K.mood] = ForestMood.MANUAL.name }
     suspend fun setQuality(v: Quality) = context.store.edit { it[K.quality] = v.name }
     suspend fun setFx(name: String, v: Float) = context.store.edit { it[fxKey(name)] = v }
-    suspend fun setSecrets(v: Set<String>) = context.store.edit { it[K.secrets] = v }
+    suspend fun setBestSecrets(v: Int) = context.store.edit { it[K.bestSecrets] = max(it[K.bestSecrets] ?: 0, v) }
     suspend fun recordScore(score: Int) = context.store.edit {
         it[K.last] = score
         it[K.best] = max(it[K.best] ?: 0, score)

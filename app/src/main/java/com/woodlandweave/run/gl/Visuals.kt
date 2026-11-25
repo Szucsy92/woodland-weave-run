@@ -26,6 +26,50 @@ object Visuals {
     }
 
     /**
+     * The relics (secrets): the monolith, a grey stone pillar (no taller than eye height) with a matte coloured ring on its face, and the
+     * fairy ring, six glass spheres of different colours. Until found a relic only glows softly (and a cluster of spores drifts around it);
+     * when found, the monolith's ring lights up, a swirl of spores rises around it and the relic dissolves for this run.
+     */
+    object Relic {
+        const val ON = true
+        const val MAX = 6                 // relics drawn at once
+        const val SEE = 110.0
+        const val VANISH_TIME = 2.4       // seconds from "found" to gone
+        const val SHRINK_FROM = .55       // fraction of VANISH_TIME after which the stone shrinks away
+
+        // monolith (eye height is 1.6 m)
+        const val MONO_H = 1.5
+        const val MONO_W = .55
+        const val MONO_D = .42
+        const val RING_R = .2             // radius of the ring on the stone's face
+        const val RING_Y = 1.0            // its height on the stone
+        const val LIGHT_UP = .5           // seconds for the ring to light up once found
+        const val LIT_EMISSIVE = 1.7
+        const val GLOW_SIZE = 6.0
+        const val GLOW_ALPHA = .32
+        const val FOUND_GLOW_BOOST = .35
+        const val GLOW_PULSE = .18
+
+        // fairy ring
+        const val FAIRY_COUNT = 6
+        const val FAIRY_RADIUS = 2.3
+        const val FAIRY_HEIGHT = 1.0
+        const val FAIRY_SPIN = .28
+        const val FAIRY_SPHERE = .3
+        const val FAIRY_GLOW_SIZE = 2.2
+        const val FAIRY_GLOW_ALPHA = .55
+
+        // spores: a wide cluster around an unfound relic, and the swirl when it is found
+        const val CLUSTER_COUNT = 34
+        const val CLUSTER_RADIUS = 7.5
+        const val CLUSTER_HEIGHT = 2.2
+        const val CLUSTER_SIZE = .42
+        const val CLUSTER_ALPHA = .65
+        const val SWIRL_COUNT = 44
+        const val SWIRL_SIZE = .5
+    }
+
+    /**
      * The gate: a plain ring (a torus of radius GATE_HALF) standing upright in the gate's plane, so the runner passes through it.
      * The gate itself works with or without it. GAP is how far the lowest point of the ring floats above the ground.
      */

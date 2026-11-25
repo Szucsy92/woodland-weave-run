@@ -149,9 +149,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private val bOrbHalo = Sprites(16, { orbHaloTex }, true, true)
     private val bHoleGlow = Sprites(64, { holeGlowTex }, true, false)          // a black hole's halo and sparks
     private val bWarpSpores = Sprites(1600, { warpSporeTex }, true, false)     // the dots of the warp
+    private val bRelicGlow = Sprites(Visuals.Relic.MAX * (1 + Visuals.Relic.FAIRY_COUNT), { holeGlowTex }, true, false)   // soft glow of a relic, visible through the fog
+    private val bRelicMotes = Sprites(Visuals.Relic.MAX * (Visuals.Relic.CLUSTER_COUNT + Visuals.Relic.SWIRL_COUNT), { pollenGlowTex }, true, false)   // spore cluster and the found-swirl
     private val bGateGlow = Sprites(Visuals.GateRing.GLOW_MAX * Visuals.GateRing.GLOW_COUNT, { holeGlowTex }, true, false)   // the gates' glow, visible through the fog
     // One array for the whole run: the per-frame arrayOf() it replaces was a small allocation every frame.
-    private val spriteBatches = arrayOf(bMist, bPollenCore, bForestLights, bPollenGlow, bOrbHalo, bHoleGlow, bGateGlow, bWarpSpores)
+    private val spriteBatches = arrayOf(bMist, bPollenCore, bForestLights, bPollenGlow, bRelicMotes, bRelicGlow, bOrbHalo, bHoleGlow, bGateGlow, bWarpSpores)
     // The key-light shadow map is re-rendered every SHADOW_EVERY-th frame (the light is fixed and the map snaps to whole texels, so a
     // one-frame-old map is still exactly consistent with itself); the first frame after it (re)appears is always rendered.
     private var shadowTick = 0
@@ -920,7 +922,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
 
     /**
      * The power-up glass spheres (still, translucent, nothing inside them) and the gate ring. Everything about them is in Visuals.
-     * Secrets (monolith, ring, lantern) and the gate frames are not drawn for now.
+     * The relics (monolith, fairy ring) are drawn by drawRelics; the lantern and the gate frames are not drawn.
      */
     private fun drawLandmarks(s: Simulation, e: GameEngine) {
         if (Visuals.OrbSphere.ON) for (o in e.orbs) {
@@ -935,6 +937,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             uploadOne(orb, parent)
             GL.glDisable(GL.GL_CULL_FACE); GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
         }
+        drawRelics(s, e)
         // The gates exist (and work) in Freeroam; each one is shown as a plain ring.
         if (!Visuals.GateRing.ON || s.mode != GameMode.FREEROAM) return
         material(litProg, Palette.ember, mode = 2, fogOn = 0f)   // no fog on the ring itself: it must stay visible in the mist
@@ -1161,7 +1164,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
 
     // ---- sprites ----
     private fun buildSprites(s: Simulation, e: GameEngine) {
-        bForestLights.clear(); bPollenGlow.clear(); bPollenCore.clear(); bMist.clear(); bOrbHalo.clear(); bHoleGlow.clear(); bGateGlow.clear()
+        bForestLights.clear(); bPollenGlow.clear(); bPollenCore.clear(); bMist.clear(); bOrbHalo.clear(); bHoleGlow.clear(); bGateGlow.clear(); bRelicGlow.clear(); bRelicMotes.clear()
         val t = s.elapsed
         if (Visuals.ForestLights.ON) buildForestLights(s, e, t)
         if (Visuals.Pollen.ON) buildPollen(s, e, t)
@@ -1169,6 +1172,144 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         if (Visuals.Mist.ON) buildMist(s, t)
         if (Visuals.BlackHole.GLOW) buildBlackHoleGlow(s, t)
         if (Visuals.GateRing.ON && Visuals.GateRing.GLOW) buildGateGlow(s, e, t)
+        if (Visuals.Relic.ON) buildRelicSprites(s, e, t)
+    }
+
+    // ---- relics (monolith, fairy ring) ----
+    private val fp = DoubleArray(3)   // scratch: a fairy-ring sphere's position
+    private val moteMono = Array(Palette.relic.size) { Palette.mix(Palette.pollenWarm, Palette.relic[it], .4f) }
+    private val moteFairy = Array(Palette.fairy.size) { Palette.mix(Palette.pollenWarm, Palette.fairy[it], .5f) }
+
+    private fun sstep(x: Double, a: Double, b: Double): Double { val q = ((x - a) / (b - a)).coerceIn(0.0, 1.0); return q * q * (3 - 2 * q) }
+    private fun relicHash(sec: Secret, salt: Int) = hash(floor(sec.x * 10).toInt(), floor(sec.z * 10).toInt(), salt)
+    /** Seconds since this relic was found in this run, or -1 while it is still to be found. */
+    private fun relicAge(s: Simulation, sec: Secret): Double { val at = s.foundAt[sec.id] ?: return -1.0; return max(0.0, s.elapsed - at) }
+    private fun relicTintIndex(sec: Secret) = floor(relicHash(sec, 305) * Palette.relic.size).toInt().coerceIn(0, Palette.relic.size - 1)
+
+    /** Is this relic drawn right now (near enough, and not yet dissolved)? Used by both the meshes and the sprites, so they agree. */
+    private fun relicShown(s: Simulation, sec: Secret): Boolean {
+        if (sec.type == SecretType.LANTERN) return false   // the lantern has no look
+        if (hypot(sec.x - s.x, sec.z - s.z) >= Visuals.Relic.SEE) return false
+        return relicAge(s, sec).let { it < 0 || it < Visuals.Relic.VANISH_TIME }
+    }
+
+    /** Position of sphere [k] of a fairy ring; while it dissolves ([u] 0..1) the spheres spiral inwards and up (never above ~1.6 m). */
+    private fun fairyPos(sec: Secret, k: Int, t: Double, gy: Double, u: Double) {
+        val v = Visuals.Relic
+        val ang = t * v.FAIRY_SPIN + k * 2 * PI / v.FAIRY_COUNT + u * 5.0
+        val r = v.FAIRY_RADIUS * (1.0 - .75 * u * u)
+        fp[0] = sec.x + cos(ang) * r
+        fp[1] = gy + v.FAIRY_HEIGHT + sin(t * 1.1 + k * 1.3) * .12 + u * .45
+        fp[2] = sec.z + sin(ang) * r
+    }
+
+    private fun drawRelics(s: Simulation, e: GameEngine) {
+        val v = Visuals.Relic
+        if (!v.ON || s.mode != GameMode.FREEROAM) return
+        var n = 0
+        for (sec in e.secrets) {
+            if (n >= v.MAX) break
+            if (!relicShown(s, sec)) continue
+            n++
+            val age = relicAge(s, sec)
+            val u = if (age < 0) 0.0 else age / v.VANISH_TIME
+            val gy = groundHeight(sec.x, sec.z)
+            if (sec.type == SecretType.MONOLITH) drawMonolith(sec, gy, age, u) else drawFairyRing(sec, s.elapsed, gy, u)
+        }
+    }
+
+    /** A grey stone pillar, 1.5 m (below eye height), with a matte coloured ring on its face; the ring lights up once the monolith is found. */
+    private fun drawMonolith(sec: Secret, gy: Double, age: Double, u: Double) {
+        val v = Visuals.Relic
+        val k = 1.0 - sstep(u, v.SHRINK_FROM, 1.0)    // the stone shrinks away while the spores swirl
+        if (k <= .02) return
+        place(parent, sec.x, gy, sec.z, 0.0, relicHash(sec, 304) * 2 * PI, 0.0)
+        material(litProg, Palette.stone, mode = 0, rough = .93f)
+        prim(box, parent, 0.0, v.MONO_H * .5 * k, 0.0, 0.0, 0.0, 0.0, v.MONO_W * k, v.MONO_H * k, v.MONO_D * k)
+        val col = Palette.relic[relicTintIndex(sec)]
+        val lit = if (age < 0) 0f else (min(1.0, age / v.LIGHT_UP) * v.LIT_EMISSIVE).toFloat()   // 0 = a plain painted ring
+        material(litProg, col, col, lit, mode = 0, rough = .75f)
+        val rs = v.RING_R / .8                          // torusC has radius .8
+        prim(torusC, parent, 0.0, v.RING_Y * k, (v.MONO_D * .5 + .004) * k, 0.0, 0.0, 0.0, rs * k, rs * k, rs * .5 * k)
+    }
+
+    /** Six glass spheres of six colours turning slowly around the centre. */
+    private fun drawFairyRing(sec: Secret, t: Double, gy: Double, u: Double) {
+        val v = Visuals.Relic
+        GL.glEnable(GL.GL_BLEND); GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA); GL.glDepthMask(false)
+        GL.glEnable(GL.GL_CULL_FACE); GL.glCullFace(GL.GL_BACK)
+        for (k in 0 until v.FAIRY_COUNT) {
+            val col = Palette.fairy[k % Palette.fairy.size]
+            fairyPos(sec, k, t, gy, u)
+            material(litProg, col, col, Visuals.OrbSphere.EMISSIVE, alpha = (Visuals.OrbSphere.ALPHA * (1.0 - u)).toFloat(), rough = Visuals.OrbSphere.ROUGH)
+            place(parent, fp[0], fp[1], fp[2], 0.0, 0.0, 0.0, v.FAIRY_SPHERE * (1.0 - .5 * u))
+            uploadOne(orb, parent)
+        }
+        GL.glDisable(GL.GL_CULL_FACE); GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
+    }
+
+    /**
+     * Relic sprites. Unfound: a soft glow (fog off, so it shows through the mist) and a wide cluster of spores drifting around it.
+     * Found: the glow flares, and a swirl of spores spins up around the relic while it dissolves.
+     */
+    private fun buildRelicSprites(s: Simulation, e: GameEngine, t: Double) {
+        val v = Visuals.Relic
+        if (s.mode != GameMode.FREEROAM) return
+        var n = 0
+        for (sec in e.secrets) {
+            if (n >= v.MAX) break
+            if (!relicShown(s, sec)) continue
+            n++
+            val dist = hypot(sec.x - s.x, sec.z - s.z)
+            val far = ((v.SEE - dist) / 35.0).coerceIn(0.0, 1.0)
+            val age = relicAge(s, sec)
+            val found = age >= 0
+            val u = if (found) age / v.VANISH_TIME else 0.0
+            val gy = groundHeight(sec.x, sec.z)
+            val mono = sec.type == SecretType.MONOLITH
+            val ti = relicTintIndex(sec)
+            val seed = floor(sec.x * 10).toInt() * 31 + floor(sec.z * 10).toInt()
+            val pulse = 1.0 + sin(t * 1.4 + relicHash(sec, 306) * 6.28) * v.GLOW_PULSE
+
+            if (mono) {
+                val k = 1.0 - sstep(u, v.SHRINK_FROM, 1.0)
+                val a = (v.GLOW_ALPHA + (if (found) v.FOUND_GLOW_BOOST else 0.0)) * pulse * far * k
+                bRelicGlow.add(sec.x, gy + v.MONO_H * .55, sec.z, v.GLOW_SIZE, v.GLOW_SIZE, Palette.relic[ti], a, v.MONO_H * .55)
+            } else {
+                for (k in 0 until v.FAIRY_COUNT) {
+                    fairyPos(sec, k, t, gy, u)
+                    bRelicGlow.add(fp[0], fp[1], fp[2], v.FAIRY_GLOW_SIZE, v.FAIRY_GLOW_SIZE, Palette.fairy[k % Palette.fairy.size],
+                        v.FAIRY_GLOW_ALPHA * pulse * far * (1.0 - u), fp[1] - gy)
+                }
+            }
+
+            if (!found) {
+                // A big, loose cluster of spores around the relic (a disc of CLUSTER_RADIUS, thicker towards the middle).
+                for (i in 0 until v.CLUSTER_COUNT) {
+                    val h1 = hash(i, seed, 320); val h2 = hash(i, seed, 321); val h3 = hash(i, seed, 322); val h4 = hash(i, seed, 323)
+                    val r = v.CLUSTER_RADIUS * h1.pow(.8)
+                    val ang = h2 * 2 * PI + t * (.05 + h4 * .08) * (if (h3 > .5) 1.0 else -1.0)
+                    val x = sec.x + cos(ang) * r + sin(t * .31 + h3 * 6) * .35
+                    val z = sec.z + sin(ang) * r + cos(t * .27 + h4 * 6) * .35
+                    val hh = .25 + h3 * v.CLUSTER_HEIGHT + sin(t * .6 + h2 * 6) * .15
+                    val size = v.CLUSTER_SIZE * (.7 + h4 * .6)
+                    val col = if (mono) moteMono[ti] else moteFairy[i % moteFairy.size]
+                    bRelicMotes.add(x, groundHeight(x, z) + hh, z, size, size, col, v.CLUSTER_ALPHA * far * (.75 + .25 * sin(t * 1.5 + h1 * 9)), hh)
+                }
+            } else {
+                // The swirl: motes spin faster and faster, funnel inwards and upwards, and fade out as the relic goes.
+                val fade = (1.0 - u).pow(.6) * min(1.0, age / .15)
+                for (i in 0 until v.SWIRL_COUNT) {
+                    val h1 = hash(i, seed, 330); val h2 = hash(i, seed, 331); val h3 = hash(i, seed, 332); val h4 = hash(i, seed, 333)
+                    val ang = h2 * 2 * PI + age * (2.2 + h1 * 2.0) * (1.0 + 3.0 * u)
+                    val r = (.5 + h3 * 1.8) * (1.0 - .7 * u * u) + .15
+                    val hh = .1 + h4 * 1.1 + u * (.3 + h1 * .6)
+                    val size = v.SWIRL_SIZE * (.8 + .5 * sin(age * 6 + h2 * 9)) * (1.0 - .4 * u)
+                    val col = if (mono) moteMono[ti] else moteFairy[i % moteFairy.size]
+                    bRelicMotes.add(sec.x + cos(ang) * r, gy + hh, sec.z + sin(ang) * r, size, size, col, fade * far, hh)
+                }
+            }
+        }
     }
 
     /** Where the centre of a gate's ring is: the ring's lowest point floats GAP above the ground. */

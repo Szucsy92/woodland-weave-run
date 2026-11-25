@@ -26,6 +26,10 @@ object Palette {
     val pollen = lin(0xd3d5a0); val pollenWarm = lin(0xd9bd88); val pollenDay = lin(0xe8a21c)
     val ember = lin(0xff2a1a); val pursuer = lin(0xff1e10); val blood = lin(0x3a0605)
     val freezer = lin(0x2b6cff); val ghost = lin(0x2ee88a); val shock = lin(0xb04dff); val secret = lin(0x7fe8d8)
+    // Relics: a grey-green stone, matte ring colours for the monoliths (never neon; they only glow once found), and the six sphere colours of the fairy ring.
+    val stone = lin(0x6b7268)
+    val relic = intArrayOf(0xb23a32, 0xc7922c, 0x2f9a8f, 0x4a56c4, 0x8b4ab8, 0x5ea543).map { lin(it) }
+    val fairy = intArrayOf(0x2b6cff, 0x2ee88a, 0xb04dff, 0xff7a3d, 0xf6ff4f, 0xff6bd6).map { lin(it) }
     // More saturated daytime atmosphere: emerald foliage haze and a clearer blue sky.
     val dayFog = lin(0x557f68); val daySky = lin(0x6da9d8); val dayFogLight = lin(0x83ad83); val daySkyLight = lin(0x9bc9ed); val dayMoon = lin(0xe5edff); val ghostGlow = lin(0xeaf6ff)
     // Distinct, vivid key-light colours: golden sunrise, warm bright noon, orange-red sunset.

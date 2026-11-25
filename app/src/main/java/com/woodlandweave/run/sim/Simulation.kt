@@ -98,7 +98,9 @@ const val LIGHTS_DIE = 1.2
 const val DARK_PAUSE = 1.75
 const val FREEROAM_TURN = 1.5
 
-const val SECRET_CELL = 70
+const val SECRET_CELL = 180      // was 70: far fewer relics (about 7x)
+const val SECRET_CHANCE = 0.4    // was 0.45
+const val MONOLITH_SHARE = 0.55  // the rest are fairy rings; the lantern is not drawn, so it no longer appears
 const val SECRET_REACH = 3.5
 const val SECRET_CLEARING = 6.0
 val SECRET_NAMES = mapOf(
@@ -223,11 +225,11 @@ fun secretsAround(x: Double, z: Double): List<Secret> {
     for (i in -1..1) for (j in -1..1) {
         val gx = cx + i; val gz = cz + j
         if (gx == 0 && gz == 0) continue
-        if (hash(gx, gz, 300) > 0.45) continue
+        if (hash(gx, gz, 300) > SECRET_CHANCE) continue
         out += Secret(
             gx * SECRET_CELL + 15 + hash(gx, gz, 301) * (SECRET_CELL - 30),
             gz * SECRET_CELL + 15 + hash(gx, gz, 302) * (SECRET_CELL - 30),
-            SecretType.values()[min(2, floor(hash(gx, gz, 303) * 3).toInt())],
+            if (hash(gx, gz, 303) < MONOLITH_SHARE) SecretType.MONOLITH else SecretType.RING,
             "s$gx:$gz",
         )
     }
@@ -238,6 +240,7 @@ fun discoverSecret(s: Simulation, secret: Secret): Boolean {
     if (s.mode != GameMode.FREEROAM || s.phase != Phase.RUNNING || s.found.contains(secret.id)) return false
     if (hypot(s.x - secret.x, s.z - secret.z) > SECRET_REACH) return false
     s.found.add(secret.id)
+    s.foundAt[secret.id] = s.elapsed
     return true
 }
 
@@ -387,6 +390,7 @@ class Simulation {
     var threat = 0.0
     val cleared = LinkedHashSet<String>(); val clearedAt = HashMap<String, Double>()
     var surviveTime = -1.0; var lastGate = ""; val found = ArrayList<String>()
+    val foundAt = HashMap<String, Double>()   // when (s.elapsed) each relic of this run was found
     var gateKick = -1.0   // seconds since the gate was passed; < 0 when idle
     var warp = -1.0; var warpOut = -1.0; var warpHole = ""; var warpFrom = Point(0.0, 0.0)
     var universe = 0; var universeAt = 0.0
@@ -400,7 +404,7 @@ class Simulation {
         pause = PauseState.NONE; pauseTime = 0.0
         this.mode = mode; powerUp = null; powerUpTime = 0.0; waveSpeed = BASE_SPEED
         threat = 0.0; cleared.clear(); clearedAt.clear()
-        surviveTime = -1.0; lastGate = ""; found.clear(); gateKick = -1.0
+        surviveTime = -1.0; lastGate = ""; found.clear(); foundAt.clear(); gateKick = -1.0
         warp = -1.0; warpOut = -1.0; warpHole = ""; warpFrom = Point(0.0, 0.0)
         universe = 0; universeAt = 0.0
     }

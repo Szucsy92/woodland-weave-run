@@ -39,6 +39,7 @@ data class UiState(
     val power: PowerUpType? = null,
     val leavingPower: PowerUpType? = null,
     val secretCount: Int? = null,
+    val bestSecrets: Int = 0,
     val settings: Settings = Settings(),
     val notice: String = "",
     val warp: Float = 0f,
@@ -110,6 +111,7 @@ class GameEngine(
     private var published = UiState()
     private var uiBest = 0
     private var uiLast = 0
+    private var uiBestSecrets = 0
 
     private val _ui = MutableStateFlow(UiState())
     val ui: StateFlow<UiState> = _ui
@@ -123,7 +125,7 @@ class GameEngine(
         settings = next
         touchMode = next.touch
         uiBest = next.best; uiLast = next.last
-        if (prev.secrets != next.secrets && sim.found.isEmpty()) { /* restored later by start() */ }
+        uiBestSecrets = max(uiBestSecrets, next.bestSecrets)
         audio.setMode(next.sound, inRun())
         if (sim.phase == Phase.MENU) applySelection()
         publish(force = true)
@@ -136,8 +138,7 @@ class GameEngine(
         beginRun(s)
         touch = 0.0; tilt = 0.0
         resetTilt(tiltCal, nowMs())
-        // Secrets found in earlier sessions stay found.
-        s.found.addAll(settings.secrets)
+        // The relics come back every run (beginRun cleared them); only the best count is kept.
         secretCount = s.found.size
         audio.play(Sting.START)
         publish(force = true)
@@ -373,8 +374,11 @@ class GameEngine(
         secretCount = sim.found.size
         buzz(30, 50, 30, 50, 80)
         audio.cue(Cue.SECRET)
-        val snapshot = sim.found.toSet()
-        scope.launch { repo.setSecrets(snapshot) }
+        if (secretCount > uiBestSecrets) {
+            uiBestSecrets = secretCount
+            val best = uiBestSecrets
+            scope.launch { repo.setBestSecrets(best) }
+        }
     }
 
     // ---- camera and lamp -------------------------------------------------------------------
@@ -448,6 +452,7 @@ class GameEngine(
             power = activePower,
             leavingPower = leavingPower,
             secretCount = if (s.mode == GameMode.FREEROAM) secretCount else null,
+            bestSecrets = uiBestSecrets,
             settings = settings.copy(best = uiBest, last = uiLast),
             notice = notice,
             warp = warpEnvelope(s).toFloat(),

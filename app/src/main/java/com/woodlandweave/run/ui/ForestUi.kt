@@ -337,7 +337,8 @@ private fun Hud(ui: UiState) {
             Text("${ui.distance}", color = TextC, fontSize = 26.sp, fontWeight = FontWeight.Light, letterSpacing = 1.04.sp, style = big)
             Text("m", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp), style = small)
             ui.secretCount?.let {
-                Text(" · $it ${if (it == 1) "secret" else "secrets"}", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp), style = small)
+                val best = if (ui.bestSecrets > 0) " · best ${ui.bestSecrets}" else ""
+                Text(" · $it ${if (it == 1) "secret" else "secrets"}$best", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp), style = small)
             }
         }
     }
