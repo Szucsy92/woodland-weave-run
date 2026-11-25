@@ -27,6 +27,8 @@ class EffectsModel {
         const val LENS_PICKUP = .95 * 1.1
         const val LENS_RING = .5 * 1.1
         const val LENS_END = .45
+        /** Fisheye kicks (pickup, expiry, black hole in/out, gate pass) are 25% weaker; the gate membrane has its own distortion. */
+        const val LENS_SCALE = .75
     }
 
     private var frost = 0.0
@@ -127,9 +129,14 @@ class EffectsModel {
             val r = s.surviveTime - LIGHTS_DIE - DARK_PAUSE
             if (r >= 0 && r < .45) glitch += sin((r / .45) * PI) * 1.1
         }
+        // The same smooth purple/green colour split as a tree hit: black hole in and out, passing a gate, finding a secret.
+        fun kick(age: Double) = if (age >= 0 && age < IMPACT_DURATION) (1 - age / IMPACT_DURATION).pow(1.3) * 1.6 else 0.0
+        glitch += kick(s.warp) + kick(s.warpOut) + kick(s.gateKick)
+        val lastFound = s.foundAt.values.maxOrNull()
+        if (lastFound != null) glitch += kick(s.elapsed - lastFound)
         glitch += warp * .12
         clock += min(delta, .1)
-        out.blur = blur; out.glitch = glitch; out.lens = lens; out.warp = warp; out.flash = flash
+        out.blur = blur; out.glitch = glitch; out.lens = lens * LENS_SCALE; out.warp = warp; out.flash = flash
         out.hue = hueNow; out.time = clock
     }
 }
