@@ -27,6 +27,8 @@ class PostParams {
     var sharpen = 0.3f
     /** Day/night adjustments, 1 = night. */
     var exposureScale = 1f; var bloomScale = 1f; var shaftScale = 1f
+    /** 0 = every effect as designed. 1 = a shorter beam march. 2 = also no depth of field or motion blur. Raised by the adaptive scaler only on a device that cannot hold 60 fps at the lowest resolution. */
+    var lite = 0
 }
 
 /**
@@ -377,10 +379,10 @@ class PostFx {
         GL.glUniform3f(loc(prepassProg, "uMoonDir"), pp.moonDir[0], pp.moonDir[1], pp.moonDir[2])
         GL.glUniform3f(loc(prepassProg, "uMoonCol"), pp.moonCol[0], pp.moonCol[1], pp.moonCol[2])
         GL.glUniform1f(loc(prepassProg, "uMotion"), 0f)
-        GL.glUniform1f(loc(prepassProg, "uDofK"), if (f.dof) f.dofStrength * pp.tune.dof else 0f)
+        GL.glUniform1f(loc(prepassProg, "uDofK"), if (f.dof && pp.lite < 2) f.dofStrength * pp.tune.dof else 0f)
         GL.glUniform1f(loc(prepassProg, "uFocus"), f.focus)
         val shaftsOn = f.shafts && (!f.shadows || pp.shadowTex0 != 0) && pp.tune.shafts > 0.01f
-        GL.glUniform1f(loc(prepassProg, "uShaftSteps"), if (shaftsOn) f.shaftSteps.toFloat() else 0f)
+        GL.glUniform1f(loc(prepassProg, "uShaftSteps"), if (shaftsOn) (if (pp.lite >= 1) kotlin.math.floor(f.shaftSteps * 0.6f) else f.shaftSteps.toFloat()) else 0f)
         GL.glUniform1f(loc(prepassProg, "uShaftMax"), f.shaftMax)
         GL.glUniform1f(loc(prepassProg, "uFogDens"), f.fogDensity * pp.tune.shafts * pp.shaftScale)
         if (shaftsOn && f.shadows) {
@@ -488,9 +490,9 @@ class PostFx {
             GL.glUniform1f(loc("uShaftSteps"), if (!prepassed && f.shafts && (!f.shadows || pp.shadowTex0 != 0) && t.shafts > 0.01f) minOf(f.shaftSteps, 20).toFloat() else 0f)
             GL.glUniform1f(loc("uShaftMax"), f.shaftMax)
             GL.glUniform1f(loc("uFogDens"), f.fogDensity * t.shafts * pp.shaftScale)
-            GL.glUniform1f(loc("uDofK"), if (!prepassed && f.dof) f.dofStrength * t.dof else 0f)
+            GL.glUniform1f(loc("uDofK"), if (!prepassed && f.dof && pp.lite < 2) f.dofStrength * t.dof else 0f)
             GL.glUniform1f(loc("uFocus"), f.focus)
-            GL.glUniform1f(loc("uMotion"), if (f.motionBlur) pp.motion else 0f)
+            GL.glUniform1f(loc("uMotion"), if (f.motionBlur && pp.lite < 2) pp.motion else 0f)
         }
         GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
         GL.glEnable(GL.GL_DEPTH_TEST)

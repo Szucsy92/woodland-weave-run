@@ -40,8 +40,10 @@ enum class SecretType { MONOLITH, RING, LANTERN }
 enum class SurviveStage { LIT, DYING, DARK, RED }
 
 class Tree(val x: Double, val z: Double, val scale: Double, val id: String) {
-    // Calculated once when the deterministic tree is created; collision checks do no per-frame hashing.
-    val collisionRadii: Pair<Double, Double> = treeCollisionRadii(this)
+    private var radii: Pair<Double, Double>? = null
+    // Calculated once, on first use by a collision check (no per-frame hashing). The shadow ring's trees are never collided
+    // with, so they no longer pay for two hashes and three objects each time the world is rebuilt.
+    val collisionRadii: Pair<Double, Double> get() = radii ?: treeCollisionRadii(this).also { radii = it }
 }
 class Obstacle(val x: Double, val z: Double, val big: Boolean, val radius: Double, val id: String)
 class PowerUp(var x: Double, var z: Double, val type: PowerUpType, val id: String)
@@ -332,11 +334,13 @@ fun exitWarp(s: Simulation) {
 
 // ---- world generation -------------------------------------------------------------------------
 
-fun treesAround(cx: Int, cz: Int, keep: Double = 0.57, universe: Int = 0, radius: Int = RADIUS): List<Tree> {
+/** [skipInner] >= 0 leaves out the cells within that many of the centre (the caller already has them): no Tree is built for them. */
+fun treesAround(cx: Int, cz: Int, keep: Double = 0.57, universe: Int = 0, radius: Int = RADIUS, skipInner: Int = -1): List<Tree> {
     val trees = ArrayList<Tree>()
     val salt = universeSalt(universe); val size = universeScale(universe)
     val density = universeDensity(universe)
     for (i in -radius..radius) for (j in -radius..radius) {
+        if (i >= -skipInner && i <= skipInner && j >= -skipInner && j <= skipInner) continue
         val gx = cx + i; val gz = cz + j
         val hx = gx + salt; val hz = gz - salt
         if (hash(hx, hz) > keep * density) continue

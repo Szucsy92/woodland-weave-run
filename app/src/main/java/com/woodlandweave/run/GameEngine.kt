@@ -95,6 +95,7 @@ class GameEngine(
     private var stage = SurviveStage.LIT
     private var lastOrbSpawn = 0.0
     private var pollenGeneration = 0
+    private var keyCx = Int.MIN_VALUE; private var keyCz = Int.MIN_VALUE; private var keyUniverse = Int.MIN_VALUE
     private var pollenUniverse = Int.MIN_VALUE
     private var lastPowerUp: PowerUpType? = null
     private var lastRing = -1
@@ -208,9 +209,10 @@ class GameEngine(
     private fun rebuildWorldIfNeeded() {
         val s = sim
         val cx = floor(s.x / CELL).toInt(); val cz = floor(s.z / CELL).toInt()
-        val key = "$cx,${cz}u${s.universe}"
-        if (key == s.cell) return
-        s.cell = key
+        // Compare plain numbers: the old String key was built (and thrown away) on every single frame.
+        if (s.cell.isNotEmpty() && cx == keyCx && cz == keyCz && s.universe == keyUniverse) return
+        keyCx = cx; keyCz = cz; keyUniverse = s.universe
+        s.cell = "$cx,${cz}u${s.universe}"
         val level = levelOf(s.difficulty)
         var trees = treesAround(cx, cz, level.treeGap, s.universe)
         // Undergrowth bushes are disabled: keep the forest floor clear and avoid extra collision/draw work.

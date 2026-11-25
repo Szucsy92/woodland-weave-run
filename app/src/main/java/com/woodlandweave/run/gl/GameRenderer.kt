@@ -77,8 +77,12 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         const val MIN_DENSITY = 1.0f
         const val START_DENSITY = 1.5f
         const val TREE_SWAY = .15f
-        /** The shadow map is redrawn every N frames (1 = every frame). 2 halves the shadow pass; set back to 1 if the shadows ever jump. */
-        const val SHADOW_EVERY = 2
+        /**
+         * The shadow map is redrawn every N frames (1 = every frame). 2 halves the shadow pass but makes the frame time alternate
+         * between a heavy and a light frame, which reads as judder on a slow device; every frame is steadier.
+         */
+        const val SHADOW_EVERY = 1
+        private val TREE_GIRTH_R = doubleArrayOf(.8, .9, 1.15)
     }
 
     // ---- GL objects ----
@@ -157,6 +161,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         GlUtil.floatBuffer(MAX_PROPS * 2 * 16)
     }
     private val counts = IntArray(KINDS)
+    private val visCounts = IntArray(KINDS)
     // Instances drawn into the shadow map: the visible ones plus trees beyond the view whose long shadows reach into it.
     private val shadowCounts = IntArray(KINDS)
     // Shadow casters shrink to nothing between these distances from the runner, only at the very rim of the shadow lattice
@@ -327,7 +332,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             (engine.secrets.all { hypot(x - it.x, z - it.z) > SECRET_CLEARING } &&
                 engine.gates.all { hypot(x - it.x, z - it.z) > GATE_CLEARING } &&
                 holes.all { hypot(x - it.x, z - it.z) > HOLE_CLEARING })
-        for (t in treesAround(cx, cz, levelOf(s.difficulty).treeGap, s.universe, SHADOW_RADIUS)) {
+        for (t in treesAround(cx, cz, levelOf(s.difficulty).treeGap, s.universe, SHADOW_RADIUS, skipInner = RADIUS)) {
             if (abs(floor(t.x / CELL).toInt() - cx) <= RADIUS && abs(floor(t.z / CELL).toInt() - cz) <= RADIUS) continue   // inside the window: already a real tree (or removed on purpose)
             if (!open(t.x, t.z)) continue
             ring += cache.getOrPut(t.id) { treeProp(t) }; alive += t.id
@@ -339,7 +344,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         if (treeX.size < treeN) { treeX = FloatArray(treeN + 64); treeZ = FloatArray(treeN + 64); treeR = FloatArray(treeN + 64) }
         for ((i, t) in s.trees.withIndex()) {
             val species = min(2, floor(hash(floor(t.x).toInt(), floor(t.z).toInt(), 200) * 3).toInt())
-            val girth = doubleArrayOf(.8, .9, 1.15)[species] * t.scale
+            val girth = TREE_GIRTH_R[species] * t.scale
             treeX[i] = t.x.toFloat(); treeZ[i] = t.z.toFloat(); treeR[i] = (.42 * girth + .08).toFloat()
         }
     }
@@ -365,7 +370,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val base = gy - 1.1 - sink
         val species = floor(h(200) * 3).toInt().coerceIn(0, 2)
         val shape = floor(h(300) * SHAPES).toInt().coerceIn(0, SHAPES - 1)
-        val girth = doubleArrayOf(.8, .9, 1.15)[species] * tree.scale
+        val girth = TREE_GIRTH_R[species] * tree.scale
         val leanAmt = if (species == 2) .03 else .015
         val leanDir = h(201) * PI * 2
         val lx = cos(leanDir) * leanAmt
@@ -1251,7 +1256,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         // Shadow casters beyond the view. The light shines from ahead, so a tree 60 m away still throws its shadow (and a
         // dark gap in the beams) over the ground near the runner. Culling such trees with the visible set made that shadow
         // pop into the beams the moment the tree came into view. They are added here for the shadow map only.
-        val vis = counts.copyOf()
+        System.arraycopy(counts, 0, visCounts, 0, KINDS)
+        val vis = visCounts
         val lx = moonDirV[0].toDouble(); val lz = moonDirV[2].toDouble()
         val ll = hypot(lx, lz).coerceAtLeast(1e-6)
         val extraReach = SHADOW_FADE_END + 4.0   // beyond this the casters have faded away completely
@@ -1286,7 +1292,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
 
     // ---- sprites ----
     private fun buildSprites(s: Simulation, e: GameEngine) {
-        for (b in arrayOf(bGlow, bGlowFog, bMist, bHole)) if (b !== bHole) b.clear()
+        bGlow.clear(); bGlowFog.clear(); bMist.clear()
         // bHole also carries the relics' glow queued earlier in this frame, so it is cleared after drawing.
         val t = s.elapsed
         val ember = surviveStage(s) == SurviveStage.RED
@@ -1309,7 +1315,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         }
         // Sparse forest pollen shares the existing additive glow batch and texture: no extra
         // texture, buffer, draw call or render pass. Ground height is cached at spawn time.
-        for (sp in e.spores) {
+        for (si in 0 until e.spores.size) {
+            val sp = e.spores[si]
             val dx = sp.x - s.x
             val dz = sp.z - s.z
             val distSq = dx * dx + dz * dz
@@ -1443,9 +1450,17 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             else { slowFor = 0.0; fastFor = 0.0 }
             if (slowFor > 1.5 && density > minDensity + 0.01f) {
                 ceiling = max(minDensity, density - 0.01f); ceilingHold = 90.0
-                density = max(minDensity, density - 0.125f)
+                // Far from 60 fps: a bigger step, so fewer of the (hitching) render-target rebuilds are needed.
+                density = max(minDensity, density - (if (avg > budget * 1.9) 0.25f else 0.125f))
                 slowFor = 0.0; cooldown = 10.0; avg = budget
                 return true
+            }
+            // Already at the lowest resolution and still too slow: take the mildest effects away, one level at a time
+            // (shorter beam march, then no depth of field / motion blur). A device that holds 60 fps never gets here.
+            if (slowFor > 3.0 && density <= minDensity + 0.01f && pp.lite < 2) {
+                pp.lite++
+                slowFor = 0.0; avg = budget
+                return false
             }
             val cap = minOf(maxDensity, ceiling)
             if (fastFor > 5.0 && cooldown <= 0.0 && density < cap - 0.01f) {
