@@ -27,7 +27,7 @@ import kotlin.math.tan
 /**
  * Pure OpenGL ES 3.0 renderer. Everything the web build did with three.js and its post-processing
  * composer is drawn here: displaced ground, instanced forest with wet normal-mapped bark, fog,
- * headlamp, glow sprites, black holes, the wormhole's relics and the full-screen effect pass.
+ * headlamp, glow sprites, black holes and the full-screen effect pass.
  */
 class GameRenderer(private val context: Context, private val engine: GameEngine) : GLSurfaceView.Renderer {
     private companion object {
@@ -55,20 +55,13 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val CROWN_KINDS = intArrayOf(K_CROWN, K_CROWN_1, K_CROWN_2)
         val CROWN_FAR_KINDS = intArrayOf(K_CROWN_FAR, K_CROWN_FAR_1, K_CROWN_FAR_2)
         const val TREE_PARTS = 3
-        const val HOLE_SLOTS = 6
-        const val SWARM = 48
-        const val REMNANTS = 26
-        const val REMNANT_SPAN = 90.0
         const val WINDOW = 100.0
         const val SHEET_N = 11
         const val RING_N = 56
         val WORM_COUNTS = intArrayOf(260, 3, 5)
-        val REM_COUNTS = intArrayOf(70, 1, 2)
         const val FOV = 72f
         /** The web build's crowns, rocks and bushes were flat-shaded polyhedra (three.js non-indexed geometry). */
         const val FLAT_FACETS = true
-        /** Power-up orbs: smooth spheres, see-through (1 = opaque). */
-        const val ORB_ALPHA = .5f
         /** The one resolution: the scene is drawn at half the surface's width and height and scaled up in the final pass. */
         const val RENDER_SCALE = 0.5f
         /** Adaptive: starts at the existing half-resolution target and scales down only when frame time requires it. */
@@ -97,7 +90,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var barkTex = 0; private var barkN = 0; private var barkR = 0
     private var floorTex = 0; private var floorN = 0; private var floorR = 0
     private var glowLow = 0; private var glowSmooth = 0
-    private var glowTex = 0; private var holeGlowTex = 0; private var ringTex = 0; private var whiteTex = 0
+    private var glowTex = 0   // only the contact-shadow decals use this one now
+    private var holeGlowTex = 0; private var warpSporeTex = 0; private var ringTex = 0   // the black hole's own textures
+    private var wormBase = FloatArray(0)
+    // Every sprite element owns its texture (see Visuals): changing one never changes another.
+    private var orbHaloTex = 0; private var forestLightTex = 0; private var pollenGlowTex = 0; private var pollenCoreTex = 0; private var mistTex = 0
     private var spriteVao = 0; private var spriteVbo = 0
     private val post = PostFx()
     private val surfaceDensity = minOf(context.resources.displayMetrics.density, GameView.MAX_DENSITY)
@@ -144,14 +141,16 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             count++
         }
     }
-    // `fog` mirrors three.js's SpriteMaterial.fog of the web build: forest lights and black-hole glow
-    // opt out, mist, orb auras and secret glows do not.
-    private val bGlow = Sprites(256, { glowTex }, true, false)
-    private val bGlowFog = Sprites(64, { glowTex }, true, true)
-    private val bMist = Sprites(16 + 24, { glowTex }, false, true)
-    private val bHole = Sprites(1600, { holeGlowTex }, true, false)
+    // One batch, one texture and one block of numbers (Visuals) per element. `fog` mirrors three.js's SpriteMaterial.fog of the web build.
+    private val bForestLights = Sprites(200, { forestLightTex }, true, false)
+    private val bPollenGlow = Sprites(32, { pollenGlowTex }, true, false)
+    private val bPollenCore = Sprites(32, { pollenCoreTex }, false, true)
+    private val bMist = Sprites(8, { mistTex }, false, true)
+    private val bOrbHalo = Sprites(16, { orbHaloTex }, true, true)
+    private val bHoleGlow = Sprites(64, { holeGlowTex }, true, false)          // a black hole's halo and sparks
+    private val bWarpSpores = Sprites(1600, { warpSporeTex }, true, false)     // the dots of the warp
     // One array for the whole run: the per-frame arrayOf() it replaces was a small allocation every frame.
-    private val spriteBatches = arrayOf(bMist, bGlow, bGlowFog, bHole)
+    private val spriteBatches = arrayOf(bMist, bPollenCore, bForestLights, bPollenGlow, bOrbHalo, bHoleGlow, bWarpSpores)
     // The key-light shadow map is re-rendered every SHADOW_EVERY-th frame (the light is fixed and the map snaps to whole texels, so a
     // one-frame-old map is still exactly consistent with itself); the first frame after it (re)appears is always rendered.
     private var shadowTick = 0
@@ -189,7 +188,6 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var dayLevel = -1.0
     private var cyc = -1.0   // eased position in the day cycle (0 night, .25 dawn, .5 day, .75 dusk)
     private var lampDay = 1f
-    private var wormBase = FloatArray(0); private var remBase = FloatArray(0); private var remSeed = -1
 
     // ---- props (trees and obstacles) ----
     private class Prop(val id: String, val x: Double, val z: Double, val kinds: IntArray, val m: FloatArray)
@@ -253,8 +251,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             .62f * (1f - s).toDouble().pow(.9).toFloat() + .38f * kotlin.math.exp(-(r / .12f) * (r / .12f))
         }
         glowTex = glowLow
+        orbHaloTex = 0; forestLightTex = 0; pollenGlowTex = 0; pollenCoreTex = 0; mistTex = 0   // the old context's ids are gone
+        rebuildSpriteTextures(false)
         holeGlowTex = GlUtil.glowTexture(floatArrayOf(0f, .35f, 1f), intArrayOf(255, 89, 0))
-        ringTex = GlUtil.ringTexture(); whiteTex = GlUtil.whiteTexture()
+        warpSporeTex = GlUtil.glowTexture(floatArrayOf(0f, .35f, 1f), intArrayOf(255, 89, 0))
+        ringTex = GlUtil.ringTexture()
 
         val sv = IntArray(1); val sb = IntArray(1)
         GL.glGenVertexArrays(1, sv, 0); GL.glGenBuffers(1, sb, 0)
@@ -269,7 +270,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
 
         post.create()
         GL.glEnable(GL.GL_DEPTH_TEST)
-        builtVersion = -1; cache.clear(); lastNs = 0L; remSeed = -1
+        builtVersion = -1; cache.clear(); lastNs = 0L
     }
 
     override fun onSurfaceChanged(gl: GL10?, w: Int, h: Int) {
@@ -651,9 +652,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         meshes[K_PLANT].draw(bufs[K_PLANT], counts[K_PLANT])
         GL.glDisable(GL.GL_CULL_FACE)
 
-        drawLandmarks(s, e, cam)
-        drawHoles(s)
-        drawRelics(s, cam)
+        drawLandmarks(s, e)
+        drawBlackHoles(s)
+        drawWarpSpores(s)
 
         // Contact shadows: soft dark decals just above the ground (High has real shadows instead).
         if (!feat.shadows) {
@@ -735,11 +736,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val lightCount = if (feat.rank >= 2) 4 else if (feat.rank >= 1) 2 else 1
         val baseIntensity = if (feat.rank >= 2) 19f else if (feat.rank >= 1) 13f else 8f
         val lightRadius = if (feat.rank >= 2) 15.5f else if (feat.rank >= 1) 14f else 12.5f
-        val t = s.elapsed
         // Nearest `lightCount` orbs within 23 m, ascending by squared distance (ties keep list order, as the old stable sort did).
         var picked = 0
         val orbList = e.orbs
         for (oi in 0 until orbList.size) {
+            if (orbList[oi].taken != null) continue   // a picked-up power-up gives no light
             val op = orbList[oi].p
             val dx = op.x - cam.ex
             val dz = op.z - cam.ez
@@ -752,34 +753,23 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             litD2[k] = d2; litIdx[k] = oi; litDist[k] = dist
         }
         for (index in 0 until picked) {
-                val orbState = orbList[litIdx[index]]
-                val entryDist = litDist[index]
-                val taken = orbState.taken
-                val kk = if (taken != null) min(1.0, (t - taken) / .25) else 0.0
-                val flow = min(1.0, kk * 1.5)
-                val base = groundHeight(orbState.p.x, orbState.p.z) + 1.15
-                val px = if (taken != null) orbState.p.x + (cam.ex - orbState.p.x) * flow * .6 else orbState.p.x
-                val pz = if (taken != null) orbState.p.z + (cam.ez - orbState.p.z) * flow * .6 else orbState.p.z
-                val py = if (taken != null) base + (cam.ey - .35 - base) * flow else base
-                val distanceFade = (1.0 - (entryDist / 23.0)).coerceIn(0.0, 1.0).toFloat()
-                val pulse = 0.92f + 0.08f * sin(animT.toFloat() * (2.0f + index * 0.17f) + index * 1.31f)
-                val offset = index * 4
-                localLightPositions[offset] = px.toFloat()
-                localLightPositions[offset + 1] = py.toFloat()
-                localLightPositions[offset + 2] = pz.toFloat()
-                localLightPositions[offset + 3] = baseIntensity * distanceFade * pulse * (1f - kk.toFloat()) * orbIn(orbState, t).toFloat()
-                val tint = orbColor(orbState.p.type)
-                localLightColors[offset] = tint[0]; localLightColors[offset + 1] = tint[1]; localLightColors[offset + 2] = tint[2]
-                localLightColors[offset + 3] = lightRadius
-                pickOccluders(index, px, pz, cam.ex, cam.ez)
-            }
+            val orbState = orbList[litIdx[index]]
+            val px = orbState.p.x
+            val pz = orbState.p.z
+            val py = groundHeight(px, pz) + 1.15
+            val distanceFade = (1.0 - (litDist[index] / 23.0)).coerceIn(0.0, 1.0).toFloat()
+            val offset = index * 4
+            localLightPositions[offset] = px.toFloat()
+            localLightPositions[offset + 1] = py.toFloat()
+            localLightPositions[offset + 2] = pz.toFloat()
+            localLightPositions[offset + 3] = baseIntensity * distanceFade   // steady: no pulse, no fade-in
+            val tint = orbColor(orbState.p.type)
+            localLightColors[offset] = tint[0]; localLightColors[offset + 1] = tint[1]; localLightColors[offset + 2] = tint[2]
+            localLightColors[offset + 3] = lightRadius
+            pickOccluders(index, px, pz, cam.ex, cam.ez)
+        }
         pickOccluders(4, e.lampX, e.lampZ, cam.ex, cam.ez)
     }
-
-    /** 1 near the player, easing to 0 between [a] and [b] metres: far lights appear and leave gradually. */
-    private val orbSeen = HashMap<String, Double>()
-    /** 0 -> 1 over 1.4 s from the moment an orb is first seen, so a new orb grows in instead of popping. */
-    private fun orbIn(o: Orb, t: Double): Double = smoothRange(t - orbSeen.getOrPut(o.p.id) { t }, 0.0, 1.4)
 
     private fun clockHours(): Double {
         val now = System.currentTimeMillis()
@@ -796,6 +786,20 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private fun setSway(p: Int, a: Float, b: Float, c: Float) = GL.glUniform3f(loc(p, "uSway"), a, b, c)
 
     /** Switches tier: effect chain, shaders, shadow map, round shapes. Anything that fails drops one tier instead of crashing. */
+    /** A fresh glow texture of the tier's profile. Each sprite element gets its own copy so they can be changed independently. */
+    private fun makeGlowTexture(smooth: Boolean): Int =
+        if (smooth) GlUtil.smoothGlowTexture { r ->
+            val s = r * r * (3f - 2f * r)
+            .62f * (1f - s).toDouble().pow(.9).toFloat() + .38f * kotlin.math.exp(-(r / .12f) * (r / .12f))
+        } else GlUtil.glowTexture(floatArrayOf(0f, .2f, 1f), intArrayOf(255, 153, 0))
+
+    private fun rebuildSpriteTextures(smooth: Boolean) {
+        val old = intArrayOf(orbHaloTex, forestLightTex, pollenGlowTex, pollenCoreTex, mistTex).filter { it != 0 }.toIntArray()
+        if (old.isNotEmpty()) GL.glDeleteTextures(old.size, old, 0)
+        orbHaloTex = makeGlowTexture(smooth); forestLightTex = makeGlowTexture(smooth)
+        pollenGlowTex = makeGlowTexture(smooth); pollenCoreTex = makeGlowTexture(smooth); mistTex = makeGlowTexture(smooth)
+    }
+
     private fun applyQuality(q: Quality) {
         var f = post.configure(Features(q))
         while (true) {
@@ -825,6 +829,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         locs.clear()
         rebuildTierMeshes(feat)
         glowTex = if (feat.smoothMeshes) glowSmooth else glowLow
+        rebuildSpriteTextures(feat.smoothMeshes)
         appliedQuality = q
         // A tier the device could not reach must not be retried every frame.
         if (feat.quality.ordinal < q.ordinal) qualityCap = feat.quality
@@ -912,147 +917,67 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
 
     private fun orbColor(t: PowerUpType) = when (t) { PowerUpType.FREEZER -> Palette.freezer; PowerUpType.GHOST -> Palette.ghost; PowerUpType.SHOCKWAVE -> Palette.shock }
 
-    /** Orbs, secrets and red gates. */
-    private fun drawLandmarks(s: Simulation, e: GameEngine, cam: CameraPose) {
-        val t = s.elapsed
-        for ((i, o) in e.orbs.withIndex()) {
+    /**
+     * The power-up glass spheres (still, translucent, nothing inside them) and the gate ring. Everything about them is in Visuals.
+     * Secrets (monolith, ring, lantern) and the gate frames are not drawn for now.
+     */
+    private fun drawLandmarks(s: Simulation, e: GameEngine) {
+        if (Visuals.OrbSphere.ON) for (o in e.orbs) {
+            if (o.taken != null) continue
             val col = orbColor(o.p.type)
-            val taken = o.taken
-            val base = groundHeight(o.p.x, o.p.z) + 1.15
-            val k = if (taken != null) min(1.0, (t - taken) / .25) else 0.0
-            val vis = orbIn(o, t) * (1.0 - k)          // grows in when it appears, shrinks away when taken
-            val vf = vis.toFloat(); val rs = .35 + .65 * vis
-            val size = (if (taken != null) max(.001, .42 * (1 - k)) else .42 + sin(t * 2.1 + i) * .035) * (.4 + .6 * orbIn(o, t))
-            val flow = min(1.0, k * 1.5)
-            val px = if (taken != null) o.p.x + (cam.ex - o.p.x) * flow * .6 else o.p.x
-            val pz = if (taken != null) o.p.z + (cam.ez - o.p.z) * flow * .6 else o.p.z
-            val py = if (taken != null) base + (cam.ey - .35 - base) * flow else base + sin(t * 1.3 + i * 2) * .08
+            val py = groundHeight(o.p.x, o.p.z) + Visuals.OrbSphere.HEIGHT
             // A translucent glass-like sphere: alpha blending, no depth write, front faces only.
             GL.glEnable(GL.GL_BLEND); GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA); GL.glDepthMask(false)
             GL.glEnable(GL.GL_CULL_FACE); GL.glCullFace(GL.GL_BACK)
-            material(litProg, col, col, 1.6f, alpha = ORB_ALPHA * (1f - k.toFloat() * .6f) * orbIn(o, t).toFloat(), rough = .2f)
-            place(parent, px, py, pz, 0.0, t * .8, 0.0, size)
+            material(litProg, col, col, Visuals.OrbSphere.EMISSIVE, alpha = Visuals.OrbSphere.ALPHA, rough = Visuals.OrbSphere.ROUGH)
+            place(parent, o.p.x, py, o.p.z, 0.0, 0.0, 0.0, Visuals.OrbSphere.SIZE)
             uploadOne(orb, parent)
             GL.glDisable(GL.GL_CULL_FACE); GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
-
-            // Unified energy orb: animated plasma bands remain inside the translucent glass sphere.
-            val pulse = 1.0 + sin(t * 3.1 + i * 1.7) * .055
-            place(parent, px, py, pz, 0.0, t * .22 + i, t * .11, 1.0)
-            GL.glEnable(GL.GL_BLEND); GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE)
-            GL.glDepthMask(false); GL.glDisable(GL.GL_CULL_FACE)
-            material(litProg, floatArrayOf(.08f, .72f, 1f), mode = 2, alpha = .58f * vf)
-            prim(torusA, parent, 0.0, 0.0, 0.0, .52 + sin(t * 1.35 + i) * .16, t * .72 + i, .22, .125 * pulse * rs, .125 * pulse * rs, .125 * pulse * rs)
-            material(litProg, floatArrayOf(.20f, .38f, 1f), mode = 2, alpha = .44f * vf)
-            prim(torusB, parent, 0.0, 0.0, 0.0, 1.08, -t * .91 + i, .82 + sin(t * 1.1 + i) * .18, .18 * pulse * rs, .18 * pulse * rs, .18 * pulse * rs)
-            material(litProg, floatArrayOf(.62f, .20f, 1f), mode = 2, alpha = .36f * vf)
-            prim(torusC, parent, 0.0, 0.0, 0.0, 1.72, t * .58 + i, -.58, .27 * pulse * rs, .27 * pulse * rs, .27 * pulse * rs)
-            // Fine filaments add a second, offset layer to the flowing plasma.
-            material(litProg, floatArrayOf(.12f, .88f, 1f), mode = 2, alpha = .30f * vf)
-            prim(torusB, parent, 0.0, 0.0, 0.0, .34, t * 1.18 + i * 2, 1.35, .14 * pulse * rs, .14 * pulse * rs, .14 * pulse * rs)
-            GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
         }
-        if (s.mode != GameMode.FREEROAM) return
+        // The gates exist (and work) in Freeroam; each one is shown as a plain ring.
+        if (!Visuals.GateRing.ON || s.mode != GameMode.FREEROAM) return
+        material(litProg, Palette.ember, mode = 2)
         for (g in e.gates) {
-            val gyG = groundHeight(g.x, g.z)
-            place(parent, g.x, gyG, g.z, 0.0, g.angle, 0.0)
-            material(litProg, Palette.rock, Palette.ember, .9f, rough = .4f, metal = .2f)
-            for (side in intArrayOf(-1, 1)) prim(box, parent, side * (GATE_HALF + .2), 2.1, 0.0, 0.0, 0.0, 0.0, .4, 4.6, .4)
-            prim(box, parent, 0.0, 4.5, 0.0, 0.0, 0.0, 0.0, GATE_HALF * 2 + .8, .4, .4)
-        }
-        for ((i, g) in e.gates.withIndex()) {
             place(parent, g.x, groundHeight(g.x, g.z), g.z, 0.0, g.angle, 0.0)
-            additiveVeil(Palette.pursuer, (.16 + sin(t * 1.7 + i * 2) * .06).toFloat(), whiteTex, parent, GATE_HALF * 2, 4.4, ly = 2.2)
-        }
-        for ((i, sec) in e.secrets.withIndex()) {
-            val gyS = groundHeight(sec.x, sec.z)
-            place(parent, sec.x, gyS, sec.z)
-            when (sec.type) {
-                SecretType.MONOLITH -> {
-                    material(litProg, Palette.rock, Palette.secret, .08f, rough = .35f, metal = .2f)
-                    prim(box, parent, 0.0, 2.0, 0.0, 0.0, .4, 0.0, 1.0, 4.4, .35)
-                    material(litProg, Palette.secret, mode = 2)
-                    prim(box, parent, .07, 2.1, .2, 0.0, .4, 0.0, .06, 3.2, .02)
-                }
-                SecretType.RING -> {
-                    material(litProg, Palette.green, mode = 2)
-                    for (m in 0 until 11) {
-                        val a = m / 11.0 * PI * 2 + t * .25
-                        prim(orb, parent, cos(a) * 2.6, .2, sin(a) * 2.6, 0.0, 0.0, 0.0, .16, .1, .16)
-                    }
-                }
-                SecretType.LANTERN -> {
-                    material(litProg, Palette.trunk, rough = .9f)
-                    prim(cyl, parent, 0.0, .8, 0.0, 0.0, 0.0, .08, .12, 1.6, .12)
-                    material(litProg, Palette.lamp, mode = 2)
-                    prim(box, parent, .06, 1.7, 0.0, 0.0, 0.0, 0.0, .24, .3, .24)
-                }
-            }
+            prim(torusA, parent, 0.0, GATE_HALF, 0.0, PI / 2, 0.0, 0.0, 1.0, 1.0, 1.0)   // torusA's radius is GATE_HALF
         }
     }
 
-    private fun drawHoles(s: Simulation) {
+    /** The black holes: a plain black body and a tilted accretion veil (three faint glows turning slowly), exactly as before. */
+    private fun drawBlackHoles(s: Simulation) {
         if (s.mode != GameMode.FREEROAM || s.warp >= 0) return
         val t = s.elapsed
         var i = 0
         for (h in holesAround(s.x, s.z, s.universe)) {
             if (hypot(h.x - s.x, h.z - s.z) >= HOLE_SEE) continue
-            if (i >= HOLE_SLOTS) break
-            val y = groundHeight(h.x, h.z) + HOLE_HEIGHT + sin(t * .6 + i) * .12
-            // The body: pure black and untouched by fog, so it reads from far away.
-            material(litProg, floatArrayOf(0f, 0f, 0f), mode = 2, fogOn = 0f)
-            place(parent, h.x, y, h.z, 0.0, 0.0, 0.0, HOLE_RADIUS)
-            uploadOne(holeBody, parent)
-            // A tilted accretion veil: three faint, soft glows turning slowly.
-            Mat.compose(parent, 0, h.x, y, h.z, 1.2 + sin(t * .2 + i) * .12, 0.0, .35 + sin(t * .15 + i * 2) * .1, Mat.XYZ, 1.0, 1.0, 1.0)
-            val rings = arrayOf(Triple(10.0, Palette.lavender, .16f), Triple(13.0, Palette.purple, .11f), Triple(17.0, Palette.secret, .07f))
-            for ((r, ring) in rings.withIndex()) {
-                val spin = t * (.9 - r * .28) * (if (r % 2 == 1) -1 else 1)
-                additiveVeil(ring.second, ring.third, ringTex, parent, ring.first, ring.first, rz = spin, fogOn = 0f)
+            if (i >= Visuals.BlackHole.MAX_VISIBLE) break
+            val y = groundHeight(h.x, h.z) + HOLE_HEIGHT + sin(t * .6 + i) * Visuals.BlackHole.BOB
+            if (Visuals.BlackHole.BODY) {
+                // The body: pure black and untouched by fog, so it reads from far away.
+                material(litProg, floatArrayOf(0f, 0f, 0f), mode = 2, fogOn = 0f)
+                place(parent, h.x, y, h.z, 0.0, 0.0, 0.0, HOLE_RADIUS)
+                uploadOne(holeBody, parent)
+            }
+            if (Visuals.BlackHole.VEILS) {
+                // A tilted accretion veil: three faint, soft glows turning slowly.
+                Mat.compose(parent, 0, h.x, y, h.z, 1.2 + sin(t * .2 + i) * .12, 0.0, .35 + sin(t * .15 + i * 2) * .1, Mat.XYZ, 1.0, 1.0, 1.0)
+                val rings = arrayOf(Triple(10.0, Palette.lavender, .16f), Triple(13.0, Palette.purple, .11f), Triple(17.0, Palette.secret, .07f))
+                for ((r, ring) in rings.withIndex()) {
+                    val spin = t * (.9 - r * .28) * (if (r % 2 == 1) -1 else 1)
+                    additiveVeil(ring.second, ring.third, ringTex, parent, ring.first, ring.first, rz = spin, fogOn = 0f)
+                }
             }
             i++
         }
     }
 
-    // ---- the wormhole's relics ----
-    private fun relic(idx: Int, par: FloatArray) {
-        val kind = idx % 6
-        val hue = Palette.odd[(idx * 3 + idx / 6) % 8]
-        val alt = Palette.odd[(idx * 5 + 2) % 8]
-        fun basic(c: FloatArray) = material(litProg, c, mode = 2)
-        fun rockMat(em: FloatArray?, ek: Float, rough: Float, metal: Float = 0f) = material(litProg, Palette.rock, em, ek, rough = rough, metal = metal)
-        when (kind) {
-            0 -> { rockMat(hue, .35f, .35f, .2f); prim(box, par, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 4.4, .35)
-                basic(hue); prim(box, par, .07, .1, .2, 0.0, 0.0, 0.0, .06, 3.2, .02) }
-            1 -> { basic(hue); prim(torusA, par, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
-                basic(alt); prim(torusB, par, 0.0, 0.0, 0.0, PI / 2, 0.0, 0.0, 1.0, 1.0, 1.0) }
-            2 -> { material(litProg, Palette.rock, rough = .9f); prim(cyl, par, 0.0, -.8, 0.0, 0.0, 0.0, 0.0, .12, 1.6, .12)
-                basic(hue); prim(box, par, .06, .1, 0.0, 0.0, 0.0, 0.0, .24, .3, .24) }
-            3 -> {
-                for (m in 0 until 12) { val a = m / 12.0 * PI * 2; basic(Palette.odd[(m + idx) % 8]); prim(orb, par, cos(a) * 2.4, 0.0, sin(a) * 2.4, 0.0, 0.0, 0.0, .26, .26, .26) }
-                for (m in 0 until 6) { val a = m / 6.0 * PI * 2 + .3; basic(Palette.odd[(m * 2 + idx + 3) % 8]); prim(orb, par, cos(a) * 1.2, 0.0, sin(a) * 1.2, 0.0, 0.0, 0.0, .16, .16, .16) }
-            }
-            4 -> {
-                rockMat(null, 0f, .5f, .2f); prim(cyl, par, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, .28, 6.0, .28)
-                rockMat(hue, .5f, .4f); prim(box, par, 0.0, -2.0, 0.0, 0.0, 0.0, 0.0, .9, .7, .9)
-                basic(alt); prim(orb, par, 0.0, -.7, 0.0, 0.0, 0.0, 0.0, .6, .6, .6)
-                basic(hue); prim(torusC, par, 0.0, .6, 0.0, PI / 2, 0.0, 0.0, 1.0, 1.0, 1.0)
-                rockMat(alt, .5f, .4f); prim(cone, par, 0.0, 1.8, 0.0, 0.0, 0.0, 0.0, 1.1, 1.2, 1.1)
-                basic(hue); prim(ico0, par, 0.0, 3.3, 0.0, 0.0, 0.0, 0.0, .4, .4, .4)
-            }
-            else -> {
-                for (side in intArrayOf(-1, 1)) { rockMat(hue, .9f, .4f, .2f); prim(box, par, side * 2.2, 0.0, 0.0, 0.0, 0.0, 0.0, .4, 4.6, .4) }
-                rockMat(hue, .9f, .4f, .2f); prim(box, par, 0.0, 2.4, 0.0, 0.0, 0.0, 0.0, 5.2, .4, .4)
-                additiveVeil(alt, .16f, whiteTex, par, 4.4, 4.4)
-            }
-        }
-    }
-
-    private fun relicGlow(idx: Int, px: Double, py: Double, pz: Double, scale: Double) {
-        val kind = idx % 6
-        val hue = Palette.odd[(idx * 3 + idx / 6) % 8]
-        val w = if (kind == 2) 3.2 else 7.0
-        val h = if (kind == 0 || kind == 4) 8.0 else if (kind == 2) 3.2 else 7.0
-        bHole.add(px, py, pz, w * scale, h * scale, hue, .38)
+    /** The warp's dots (the relics of the wormhole are gone; the dots stay, as before). */
+    private fun drawWarpSpores(s: Simulation) {
+        if (!Visuals.BlackHole.WARP_SPORES) return
+        val w = warpEnvelope(s)
+        if (w <= .002) return
+        if (wormBase.isEmpty()) wormBase = paintSpores(WORM_COUNTS, 0)
+        emitSpores(WORM_COUNTS, wormBase, s, s.elapsed, w, 0, .85) { _, _ -> 1.0 }
     }
 
     /** Euler rotation (z, then y, then x) with the sines and cosines supplied, so a whole sheet or ring computes them once. */
@@ -1065,7 +990,6 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     }
 
     private fun wrap(anchor: Double, centre: Double) = centre + ((((anchor - centre) % WINDOW) + WINDOW * 1.5) % WINDOW) - WINDOW / 2
-    private fun smooth01(x: Double): Double { val k = min(1.0, max(0.0, x)); return k * k * (3 - 2 * k) }
     private fun bounce(u: Double, h: Double): Double = when {
         u < .45 -> { val k = u / .45; h * (1 - k * k) }
         u < .75 -> { val k = (u - .45) / .3; h * .35 * 4 * k * (1 - k) }
@@ -1094,7 +1018,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             if (n * 3 + 2 >= base.size) return
             val f = (light * w).toFloat()
             col[0] = base[n * 3] * f; col[1] = base[n * 3 + 1] * f; col[2] = base[n * 3 + 2] * f
-            bHole.add(x, y, z, sz, sz, col, 1.0)
+            bWarpSpores.add(x, y, z, sz, sz, col, 1.0)
             n++
         }
         val off = seed * 1000.0
@@ -1134,65 +1058,6 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 val rise = if (r % 2 == 1) (k.toDouble() / RING_N - .5) * 5 else sin(k * .9 + t * 2) * .35
                 v[0] = cos(a) * rad; v[1] = rise; v[2] = sin(a) * rad; eulerApplyCs(v, cx, sx, cy, sy, cz, sz)
                 put(ax + v[0], ay + v[1], az + v[2], (.8 + sin(t * 3 + k) * .2) * shown)
-            }
-        }
-    }
-
-    private fun drawRelics(s: Simulation, cam: CameraPose) {
-        val t = s.elapsed
-        val w = warpEnvelope(s)
-        val fwx = cam.tx - cam.ex; val fwz = cam.tz - cam.ez
-        val fl = hypot(fwx, fwz).coerceAtLeast(1e-6)
-        fun visible(x: Double, z: Double): Boolean {
-            val dx = x - cam.ex; val dz = z - cam.ez
-            return hypot(dx, dz) < FOG_END + 12 && (dx * fwx + dz * fwz) / fl > -14
-        }
-        bindMaps(barkTex, barkN, barkR)
-        if (w > .002) {
-            for (i in 0 until SWARM) {
-                val x = wrap(rnd(i.toDouble(), 1.0) * 4000, s.x); val z = wrap(rnd(i.toDouble(), 2.0) * 4000, s.z)
-                val gy = groundHeight(x, z)
-                val lift = if (rnd(i.toDouble(), 3.0) < .3) -1 + rnd(i.toDouble(), 4.0) * 1.5
-                else if (rnd(i.toDouble(), 4.0) < .4) 1.5 + rnd(i.toDouble(), 5.0) * 4 else 5 + rnd(i.toDouble(), 6.0) * 13
-                val scale = max(.001, (1 + rnd(i.toDouble(), 13.0) * 2.6) * w)
-                if (visible(x, z)) {
-                    Mat.compose(parent, 0, x, gy + lift, z,
-                        rnd(i.toDouble(), 7.0) * 6.3 + t * (rnd(i.toDouble(), 8.0) - .5) * .5,
-                        rnd(i.toDouble(), 9.0) * 6.3 + t * (rnd(i.toDouble(), 10.0) - .5) * .7,
-                        rnd(i.toDouble(), 11.0) * 6.3 + t * (rnd(i.toDouble(), 12.0) - .5) * .4, Mat.XYZ, scale, scale, scale)
-                    relic(i, parent)
-                }
-                relicGlow(i, x, gy + lift, z, scale)
-            }
-        }
-        if (w > .002) {
-            if (wormBase.isEmpty()) wormBase = paintSpores(WORM_COUNTS, 0)
-            emitSpores(WORM_COUNTS, wormBase, s, t, w, 0, .85) { _, _ -> 1.0 }
-        }
-        // Remnants: what the wormholes leave behind in the universe they open into, arriving piece by piece.
-        if (s.mode == GameMode.FREEROAM && s.universe > 0 && s.warp < 0) {
-            val ut = universeTime(s); val u = s.universe
-            if (remSeed != u) { remSeed = u; remBase = paintSpores(REM_COUNTS, u) }
-            for (i in 0 until REMNANTS) {
-                val key = (u * 101 + i).toDouble()
-                val alive = rnd(key, 71.0) < min(.8, .3 + u * .1)
-                val grown = if (alive) smooth01((ut - rnd(key, 72.0) * REMNANT_SPAN) / 4) else 0.0
-                if (grown <= .001) continue
-                val x = wrap(rnd(key, 73.0) * 4000, s.x); val z = wrap(rnd(key, 74.0) * 4000, s.z)
-                val gy = groundHeight(x, z)
-                val lift = if (rnd(key, 75.0) < .55) -.5 + rnd(key, 76.0) * 2 else 2 + rnd(key, 77.0) * 9
-                val scale = max(.001, (.8 + rnd(key, 84.0) * 1.8) * grown)
-                if (visible(x, z)) {
-                    Mat.compose(parent, 0, x, gy + lift, z,
-                        rnd(key, 78.0) * 6.3 + t * (rnd(key, 79.0) - .5) * .2,
-                        rnd(key, 80.0) * 6.3 + t * (rnd(key, 81.0) - .5) * .3,
-                        rnd(key, 82.0) * 6.3 + t * (rnd(key, 83.0) - .5) * .15, Mat.XYZ, scale, scale, scale)
-                    relic(i + 7, parent)
-                }
-                relicGlow(i + 7, x, gy + lift, z, scale)
-            }
-            emitSpores(REM_COUNTS, remBase, s, t, .8, u, .6) { group, index ->
-                smooth01((ut - rnd((u * 977 + group * 31 + index).toDouble(), 85.0) * REMNANT_SPAN) / 5)
             }
         }
     }
@@ -1292,105 +1157,103 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
 
     // ---- sprites ----
     private fun buildSprites(s: Simulation, e: GameEngine) {
-        bGlow.clear(); bGlowFog.clear(); bMist.clear()
-        // bHole also carries the relics' glow queued earlier in this frame, so it is cleared after drawing.
+        bForestLights.clear(); bPollenGlow.clear(); bPollenCore.clear(); bMist.clear(); bOrbHalo.clear(); bHoleGlow.clear()
         val t = s.elapsed
-        val ember = surviveStage(s) == SurviveStage.RED
-        val haloDay = 1.0 - dayLevel * .25     // the lights' halos stay visible by day
-        // Distant forest lights: green, purple and lavender glows that stutter out one by one in survive mode.
+        if (Visuals.ForestLights.ON) buildForestLights(s, e, t)
+        if (Visuals.Pollen.ON) buildPollen(s, e, t)
+        if (Visuals.OrbHalo.ON) buildOrbHalos(e)
+        if (Visuals.Mist.ON) buildMist(s, t)
+        if (Visuals.BlackHole.GLOW) buildBlackHoleGlow(s, t)
+    }
+
+    /** Distant forest lights: green, purple and lavender glows that stutter out one by one in survive mode. */
+    private fun buildForestLights(s: Simulation, e: GameEngine, t: Double) {
+        val v = Visuals.ForestLights
+        val haloDay = 1.0 - dayLevel * v.DAY_DIM     // the lights' halos stay visible by day
         val cols = arrayOf(Palette.green, Palette.purple, Palette.lavender, Palette.purple, Palette.lavender)
         for (light in forestLightsFor(s.mode, s.x, s.z)) {
-            val lx = light.x; val lz = light.z; val lg = groundHeight(lx, lz) + 4.2
+            val lx = light.x; val lz = light.z; val lg = groundHeight(lx, lz) + v.HEIGHT
             for (i in 0 until 5) {
                 val own = min(1.0, max(0.0, e.dieRef * 1.6 - i * .15))
                 // The stutter-out keeps its rhythm, but each beat eases on and off instead of cutting.
                 val flick = if (own > 0 && own < 1) .1 + .9 * smoothRange(sin(s.elapsed * (26 + i * 7)), -.1, .45) else 1.0
                 val high = i > 2
-                val size = (if (high) 30.0 else if (i == 0) 24.0 else 20.0) * (1 + sin(t * .4 + i) * .08)
+                val size = (if (high) v.SIZE_HIGH else if (i == 0) v.SIZE_FIRST else v.SIZE_SIDE) * (1 + sin(t * .4 + i) * .08)
                 val px = if (high) lx + (if (i == 3) -3.5 else 3.5) + sin(t * .2 + i) * 2 else lx + (if (i == 0) -5.0 else if (i == 1) 5.0 else 0.0) + sin(t * .16 + i) * 1.5
                 val py = if (high) lg + 13.5 + sin(t * .24 + i) * 1.4 else lg
-                val far = if (s.mode == GameMode.FREEROAM) farFade(lx, lz, s, 60.0, 100.0) else 1.0
-                bGlow.add(px, py, lz, size, size, cols[i], (if (high) .14 else .66) * (1 - own) * flick * haloDay * far, py - groundHeight(px, lz))
+                val far = if (s.mode == GameMode.FREEROAM) farFade(lx, lz, s, v.FAR_FADE_START, v.FAR_FADE_END) else 1.0
+                bForestLights.add(px, py, lz, size, size, cols[i], (if (high) v.ALPHA_HIGH else v.ALPHA_LOW) * (1 - own) * flick * haloDay * far, py - groundHeight(px, lz))
             }
         }
-        // Sparse forest pollen shares the existing additive glow batch and texture: no extra
-        // texture, buffer, draw call or render pass. Ground height is cached at spawn time.
+    }
+
+    /** Sparse forest pollen. Ground height is cached at spawn time. */
+    private fun buildPollen(s: Simulation, e: GameEngine, t: Double) {
+        val v = Visuals.Pollen
+        val ember = surviveStage(s) == SurviveStage.RED
+        val rangeSq = v.RANGE * v.RANGE
         for (si in 0 until e.spores.size) {
             val sp = e.spores[si]
             val dx = sp.x - s.x
             val dz = sp.z - s.z
             val distSq = dx * dx + dz * dz
-            if (distSq > 48.0 * 48.0) continue
-            val nearFade = min(1.0, distSq / 9.0)
-            val farFade = max(0.0, 1.0 - distSq / (48.0 * 48.0))
-            val flutter = sin(t * .38 + sp.phase)
-            val bob = flutter * .16
-            val pulse = .94 + .06 * flutter
+            if (distSq > rangeSq) continue
+            val nearFade = min(1.0, distSq / (v.NEAR_FADE_DIST * v.NEAR_FADE_DIST))
+            val farFade = max(0.0, 1.0 - distSq / rangeSq)
+            val flutter = sin(t * v.FLUTTER_SPEED + sp.phase)
+            val bob = flutter * v.BOB
+            val pulse = 1.0 - v.PULSE + v.PULSE * flutter
             val color = if (ember) Palette.ember
-                else if (sp.strength > .78) Palette.pollenWarm else Palette.pollen
+                else if (sp.strength > v.WARM_STRENGTH) Palette.pollenWarm else Palette.pollen
             val fade = sp.strength * pulse * nearFade * farFade
             val py = sp.groundY + sp.h + bob
             // Night: a clearly glowing mote. The additive halo is large and bright, and it
             // only dims slightly by day because additive light washes out on a bright sky.
-            val size = .34 + sp.strength * .22
-            val alpha = .7 * fade * (1.0 - dayLevel * .3)
-            bGlow.add(sp.x, py, sp.z, size, size, color, alpha, sp.h + bob)
+            val size = v.GLOW_SIZE_BASE + sp.strength * v.GLOW_SIZE_GAIN
+            bPollenGlow.add(sp.x, py, sp.z, size, size, color, v.GLOW_ALPHA * fade * (1.0 - dayLevel * v.GLOW_DAY_DIM), sp.h + bob)
             // Day: additive light barely shows on a bright background, so each mote also gets a
             // small alpha-blended amber core that is strongest by day and stays faintly lit at night.
-            val coreSize = .11 + sp.strength * .07
+            val coreSize = v.CORE_SIZE_BASE + sp.strength * v.CORE_SIZE_GAIN
             val coreColor = if (ember) Palette.ember else Palette.pollenDay
-            bMist.add(sp.x, py, sp.z, coreSize, coreSize, coreColor, fade * (.45 + .5 * dayLevel), sp.h + bob)
+            bPollenCore.add(sp.x, py, sp.z, coreSize, coreSize, coreColor, fade * (v.CORE_ALPHA_NIGHT + v.CORE_ALPHA_DAY * dayLevel), sp.h + bob)
         }
-        if (orbSeen.size > 24) orbSeen.keys.retainAll(e.orbs.map { it.p.id }.toSet())
-        // Orb auras.
-        for ((i, o) in e.orbs.withIndex()) {
-            val col = orbColor(o.p.type)
-            val taken = o.taken
-            val k = if (taken != null) min(1.0, (t - taken) / .25) else 0.0
-            val size = if (taken != null) max(.001, 2.8 * (1 - k)) else 2.8 + sin(t * 1.7 + i) * .28
-            val a = if (taken != null) .5 * (1 - k) else .6 + sin(t * 1.7 + i) * .12
-            val base = groundHeight(o.p.x, o.p.z) + 1.15
-            val flow = min(1.0, k * 1.5)
-            val px = if (taken != null) o.p.x + (e.camera.ex - o.p.x) * flow * .6 else o.p.x
-            val pz = if (taken != null) o.p.z + (e.camera.ez - o.p.z) * flow * .6 else o.p.z
-            val py = if (taken != null) base + (e.camera.ey - .35 - base) * flow else base + sin(t * 1.3 + i * 2) * .08
-            bGlowFog.add(px, py, pz, size, size, col, a * (1.0 - dayLevel * .12) * orbIn(o, t), py - groundHeight(px, pz))
+    }
+
+    /** Power-up halos: a steady soft glow around each sphere (picked-up ones are gone). */
+    private fun buildOrbHalos(e: GameEngine) {
+        val v = Visuals.OrbHalo
+        for (o in e.orbs) {
+            if (o.taken != null) continue
+            val py = groundHeight(o.p.x, o.p.z) + v.HEIGHT
+            bOrbHalo.add(o.p.x, py, o.p.z, v.SIZE, v.SIZE, orbColor(o.p.type), v.ALPHA * (1.0 - dayLevel * v.DAY_DIM), v.HEIGHT)
         }
-        // Low drifting mist ahead (ordinary alpha blending, not additive).
-        for (i in 0 until 4) {
-            val d = 10 + i * 6
+    }
+
+    /** A dim violet halo around each black hole that carries through the fog, and a few orbiting sparks. */
+    private fun buildBlackHoleGlow(s: Simulation, t: Double) {
+        if (s.mode != GameMode.FREEROAM) return
+        var hi = 0
+        for (h in holesAround(s.x, s.z, s.universe)) {
+            if (hypot(h.x - s.x, h.z - s.z) >= HOLE_SEE) continue
+            if (hi >= Visuals.BlackHole.MAX_VISIBLE || s.warp >= 0) break
+            val hy = groundHeight(h.x, h.z) + HOLE_HEIGHT + sin(t * .6 + hi) * Visuals.BlackHole.BOB
+            bHoleGlow.add(h.x, hy, h.z, 22.0, 22.0, Palette.purple, .3)
+            for (k in 0 until 9) {
+                val a = t * (1.4 - k * .13) + k * 1.7; val rad = 3.3 + (k % 4) * .7
+                bHoleGlow.add(h.x + cos(a) * rad, hy + sin(a * .9 + k) * .5, h.z + sin(a) * rad, .55, .55, Palette.lavender, .8)
+            }
+            hi++
+        }
+    }
+
+    /** Low drifting mist ahead (ordinary alpha blending, not additive). */
+    private fun buildMist(s: Simulation, t: Double) {
+        val v = Visuals.Mist
+        for (i in 0 until v.COUNT) {
+            val d = v.DISTANCE_FIRST + i * v.DISTANCE_STEP
             val a = s.heading + sin(t * .05 + i * 2.1) * .5 + (if (i % 2 == 1) .35 else -.35)
             val mx = s.x - sin(a) * d; val mz = s.z - cos(a) * d
-            bMist.add(mx, groundHeight(mx, mz) + .7 + i * .15, mz, 14.0 + i * 3, 3.2, Palette.moon, .07)
-        }
-        if (s.mode == GameMode.FREEROAM) {
-            for ((i, sec) in e.secrets.withIndex()) {
-                val found = s.found.contains(sec.id)
-                val pulse = (if (found) 1.4 else 1.0) * (.8 + sin(t * 1.6 + i) * .2)
-                val gyS = groundHeight(sec.x, sec.z)
-                when (sec.type) {
-                    SecretType.MONOLITH -> bGlowFog.add(sec.x, gyS + 2.4, sec.z, 5.0, 7.0, Palette.secret, min(1.0, .35 * pulse) * (1.0 - dayLevel * .12) * farFade(sec.x, sec.z, s, 45.0, 75.0), 2.4)
-                    SecretType.RING -> for (m in 0 until 11) {
-                        val a = m / 11.0 * PI * 2 + t * .25
-                        bGlowFog.add(sec.x + cos(a) * 2.6, gyS + .3, sec.z + sin(a) * 2.6, .9, .9, Palette.green, min(1.0, .7 * pulse) * (1.0 - dayLevel * .12) * farFade(sec.x, sec.z, s, 45.0, 75.0), .3)
-                    }
-                    SecretType.LANTERN -> bGlowFog.add(sec.x + .06, gyS + 1.7, sec.z, 3.2, 3.2, Palette.lamp, min(1.0, .75 * pulse * (.85 + sin(t * 9 + i) * .15)) * (1.0 - dayLevel * .12) * farFade(sec.x, sec.z, s, 45.0, 75.0), 1.7)
-                }
-            }
-            for (g in e.gates) bGlow.add(g.x, groundHeight(g.x, g.z) + 3, g.z, 16.0, 16.0, Palette.ember, .32 * haloDay * farFade(g.x, g.z, s, 50.0, 90.0), 3.0)
-            var hi = 0
-            for (h in holesAround(s.x, s.z, s.universe)) {
-                if (hypot(h.x - s.x, h.z - s.z) >= HOLE_SEE) continue
-                if (hi >= HOLE_SLOTS || s.warp >= 0) break
-                val hy = groundHeight(h.x, h.z) + HOLE_HEIGHT + sin(t * .6 + hi) * .12
-                // A dim violet halo that carries through the fog, and a few orbiting sparks.
-                bHole.add(h.x, hy, h.z, 22.0, 22.0, Palette.purple, .3)
-                for (k in 0 until 9) {
-                    val a = t * (1.4 - k * .13) + k * 1.7; val rad = 3.3 + (k % 4) * .7
-                    bHole.add(h.x + cos(a) * rad, hy + sin(a * .9 + k) * .5, h.z + sin(a) * rad, .55, .55, Palette.lavender, .8)
-                }
-                hi++
-            }
+            bMist.add(mx, groundHeight(mx, mz) + v.LIFT + i * v.LIFT_STEP, mz, v.WIDTH_BASE + i * v.WIDTH_STEP, v.HEIGHT, Palette.moon, v.ALPHA)
         }
     }
 
@@ -1420,7 +1283,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             b.data.limit(b.data.capacity())
             GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
         }
-        if (b === bHole) b.clear()
+        if (b === bWarpSpores) b.clear()   // filled while drawing the world, before the sprites
     }
 
     /**
