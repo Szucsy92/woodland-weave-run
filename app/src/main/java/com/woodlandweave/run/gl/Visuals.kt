@@ -26,9 +26,9 @@ object Visuals {
     }
 
     /**
-     * The relics (secrets): the monolith, a grey stone pillar (no taller than eye height) with a matte coloured ring on its face, and the
+     * The relics (secrets): the monolith, a grey stone pillar (no taller than eye height) with three matte coloured stripes round it, and the
      * fairy ring, six glass spheres of different colours. Until found a relic only glows softly (and a cluster of spores drifts around it);
-     * when found, the monolith's ring lights up, a swirl of spores rises around it and the relic dissolves for this run.
+     * when found, the monolith's stripes light up, a swirl of spores rises around it and the relic dissolves for this run.
      */
     object Relic {
         const val ON = true
@@ -37,15 +37,16 @@ object Visuals {
         const val VANISH_TIME = 2.4       // seconds from "found" to gone
         const val SHRINK_FROM = .55       // fraction of VANISH_TIME after which the stone shrinks away
 
-        // monolith (eye height is 1.6 m)
-        const val MONO_H = 1.5
-        const val MONO_W = .55
-        const val MONO_D = .42
-        const val RING_R = .2             // radius of the ring on the stone's face
-        const val RING_Y = 1.0            // its height on the stone
+        // monolith (eye height is 1.6 m, so the pillar is as tall as the eye and no taller; it grew wider and deeper instead)
+        const val MONO_H = 1.6
+        const val MONO_W = .95
+        const val MONO_D = .75
+        const val STRIPES = 3             // horizontal stripes, evenly spaced, running round all four sides
+        const val STRIPE_H = .12          // height of one stripe
+        const val STRIPE_OUT = .012       // how far a stripe stands out of the stone
         const val LIGHT_UP = .5           // seconds for the ring to light up once found
         const val LIT_EMISSIVE = 1.7
-        const val GLOW_SIZE = 6.0
+        const val GLOW_SIZE = 8.0
         const val GLOW_ALPHA = .32
         const val FOUND_GLOW_BOOST = .35
         const val GLOW_PULSE = .18

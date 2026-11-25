@@ -1218,7 +1218,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         }
     }
 
-    /** A grey stone pillar, 1.5 m (below eye height), with a matte coloured ring on its face; the ring lights up once the monolith is found. */
+    /** A grey stone pillar, as tall as the eye (1.6 m), with three matte coloured stripes round all four sides; the stripes light up once it is found. */
     private fun drawMonolith(sec: Secret, gy: Double, age: Double, u: Double) {
         val v = Visuals.Relic
         val k = 1.0 - sstep(u, v.SHRINK_FROM, 1.0)    // the stone shrinks away while the spores swirl
@@ -1229,8 +1229,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val col = Palette.relic[relicTintIndex(sec)]
         val lit = if (age < 0) 0f else (min(1.0, age / v.LIGHT_UP) * v.LIT_EMISSIVE).toFloat()   // 0 = a plain painted ring
         material(litProg, col, col, lit, mode = 0, rough = .75f)
-        val rs = v.RING_R / .8                          // torusC has radius .8
-        prim(torusC, parent, 0.0, v.RING_Y * k, (v.MONO_D * .5 + .004) * k, 0.0, 0.0, 0.0, rs * k, rs * k, rs * .5 * k)
+        // Each stripe is a thin box a hair bigger than the pillar, so it wraps all four sides. They sit at 1/4, 2/4 and 3/4 of the height.
+        for (i in 1..v.STRIPES) {
+            val y = v.MONO_H * i / (v.STRIPES + 1)
+            prim(box, parent, 0.0, y * k, 0.0, 0.0, 0.0, 0.0, (v.MONO_W + 2 * v.STRIPE_OUT) * k, v.STRIPE_H * k, (v.MONO_D + 2 * v.STRIPE_OUT) * k)
+        }
     }
 
     /** Six glass spheres of six colours turning slowly around the centre. */
