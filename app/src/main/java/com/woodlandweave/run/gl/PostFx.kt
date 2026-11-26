@@ -356,6 +356,11 @@ class PostFx {
     private fun depthPrepass(pp: PostParams): Boolean {
         if (prepassProg == 0 || prepassFbo == 0 || prepassTex == 0 || depthTex == 0 || !linear) return false
         val f = effective
+        // Nothing to do when both depth of field and the beams are off: skip the whole scene-resolution pass. The effect
+        // pass then reads the resolved scene directly (same rule as for a failed prepass) and its own DOF/beam uniforms are 0.
+        val dofK = if (f.dof && pp.lite < 2) f.dofStrength * pp.tune.dof else 0f
+        val shaftsOn = f.shafts && (!f.shadows || pp.shadowTex0 != 0) && pp.tune.shafts > 0.01f
+        if (dofK <= 0.001f && !shaftsOn) return false
         while (GL.glGetError() != GL.GL_NO_ERROR) { /* isolate prepass errors */ }
         GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, prepassFbo)
         GL.glViewport(0, 0, w, h)
@@ -379,9 +384,8 @@ class PostFx {
         GL.glUniform3f(loc(prepassProg, "uMoonDir"), pp.moonDir[0], pp.moonDir[1], pp.moonDir[2])
         GL.glUniform3f(loc(prepassProg, "uMoonCol"), pp.moonCol[0], pp.moonCol[1], pp.moonCol[2])
         GL.glUniform1f(loc(prepassProg, "uMotion"), 0f)
-        GL.glUniform1f(loc(prepassProg, "uDofK"), if (f.dof && pp.lite < 2) f.dofStrength * pp.tune.dof else 0f)
+        GL.glUniform1f(loc(prepassProg, "uDofK"), dofK)
         GL.glUniform1f(loc(prepassProg, "uFocus"), f.focus)
-        val shaftsOn = f.shafts && (!f.shadows || pp.shadowTex0 != 0) && pp.tune.shafts > 0.01f
         GL.glUniform1f(loc(prepassProg, "uShaftSteps"), if (shaftsOn) (if (pp.lite >= 1) kotlin.math.floor(f.shaftSteps * 0.6f) else f.shaftSteps.toFloat()) else 0f)
         GL.glUniform1f(loc(prepassProg, "uShaftMax"), f.shaftMax)
         GL.glUniform1f(loc(prepassProg, "uFogDens"), f.fogDensity * pp.tune.shafts * pp.shaftScale)
