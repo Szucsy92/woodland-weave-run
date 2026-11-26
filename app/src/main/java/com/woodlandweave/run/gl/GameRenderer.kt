@@ -178,7 +178,6 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private val SHADOW_FADE_START = 100f
     private var shadowTreeBodies: Array<Mesh?> = arrayOfNulls(3 * SHAPES)
     private val SHADOW_FADE_END = 118f
-    private val one: FloatBuffer = GlUtil.floatBuffer(16)
     private val BLACK = floatArrayOf(0f, 0f, 0f)
     private val forestLightColors = arrayOf(Palette.green, Palette.purple, Palette.lavender, Palette.purple, Palette.lavender)
     private val holeRingColors = arrayOf(Palette.lavender, Palette.purple, Palette.secret)
@@ -906,8 +905,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
 
     // ---- single primitives ----
     private fun uploadOne(mesh: Mesh, m: FloatArray) {
-        one.position(0); one.put(m, 0, 16); one.position(0)
-        mesh.draw(one, 1)
+        mesh.drawOne(m)
     }
 
     private fun prim(mesh: Mesh, par: FloatArray, lx: Double, ly: Double, lz: Double, rx: Double, ry: Double, rz: Double, sx: Double, sy: Double, sz: Double) {

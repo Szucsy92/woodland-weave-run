@@ -1341,11 +1341,55 @@ class Mesh(data: MeshData, private val instanceCapacity: Int) {
         GL.glDeleteVertexArrays(1, vao, 0)
         GL.glDeleteBuffers(2, vbo, 0)
         GL.glDeleteBuffers(1, instVbo, 0)
+        if (singleVao != 0) { GL.glDeleteVertexArrays(1, intArrayOf(singleVao), 0); singleVao = 0 }
+    }
+
+    // A second VAO over the same vertex and index buffers with the four instance attributes switched OFF: a single instance
+    // is then passed as constant vertex attributes (the matrix columns) and drawn without any instance buffer, so there is no
+    // per-draw buffer re-specification at all. Created on first use.
+    private var singleVao = 0
+
+    private fun bindSingleVao() {
+        if (singleVao == 0) {
+            val id = IntArray(1)
+            GL.glGenVertexArrays(1, id, 0)
+            singleVao = id[0]
+            GL.glBindVertexArray(singleVao)
+            GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vbo[0])
+            GL.glEnableVertexAttribArray(0); GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, false, 32, 0)
+            GL.glEnableVertexAttribArray(1); GL.glVertexAttribPointer(1, 3, GL.GL_FLOAT, false, 32, 12)
+            GL.glEnableVertexAttribArray(2); GL.glVertexAttribPointer(2, 2, GL.GL_FLOAT, false, 32, 24)
+            GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, vbo[1])
+        } else {
+            GL.glBindVertexArray(singleVao)
+        }
+    }
+
+    /** Draws one instance from a 4x4 column-major matrix (16 floats at [offset]). */
+    fun drawOne(m: FloatArray, offset: Int = 0) {
+        bindSingleVao()
+        for (k in 0..3) GL.glVertexAttrib4fv(3 + k, m, offset + k * 4)
+        GL.glDrawElements(GL.GL_TRIANGLES, indexCount, GL.GL_UNSIGNED_SHORT, 0)
+        GL.glBindVertexArray(0)
+    }
+
+    private fun drawOne(matrices: FloatBuffer) {
+        bindSingleVao()
+        for (k in 0..3) { matrices.position(k * 4); GL.glVertexAttrib4fv(3 + k, matrices) }
+        matrices.position(0)
+        GL.glDrawElements(GL.GL_TRIANGLES, indexCount, GL.GL_UNSIGNED_SHORT, 0)
+        GL.glBindVertexArray(0)
     }
 
     fun draw(matrices: FloatBuffer, count: Int) {
         if (count <= 0) return
         val n = minOf(count, instanceCapacity)
+        if (n == 1) {
+            matrices.position(0); matrices.limit(16)
+            drawOne(matrices)
+            matrices.limit(matrices.capacity())
+            return
+        }
         matrices.position(0); matrices.limit(n * 16)
         GL.glBindVertexArray(vao[0])
         GL.glBindBuffer(GL.GL_ARRAY_BUFFER, instVbo[0])
