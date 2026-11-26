@@ -790,7 +790,7 @@ vec4 shaftTerm(vec2 uv, float d) {
   phase = phase * 0.72 + 0.075;
   // Loop-invariant tint, computed once instead of in every step.
   vec3 shaftLum = vec3(dot(uMoonCol, vec3(0.2126, 0.7152, 0.0722)));
-  vec3 shaftTint = mix(shaftLum, uMoonCol, 1.7);
+  vec3 shaftTint = mix(shaftLum, uMoonCol, 1.28);
   float T = 1.0; vec3 sc = vec3(0.0);
   for (int i = 0; i < 48; i++) {
     if (i >= N) break;
