@@ -248,6 +248,8 @@ void main() {
   }
   if (uMode == 1) { o = vec4(finish(uColor, depth), texture(uTex, vUv).a * uAlpha); return; }
   if (uMode == 2) { o = vec4(finish(uColor, depth), uAlpha); return; }
+  // Ground that the fog already covers completely: it is fog colour whatever the light does, so skip all of its lighting.
+  if (uMode == 3 && uFogOn > 0.5 && depth >= uFogFar) { o = vec4(finish(vec3(0.0), depth), uAlpha); return; }
   vec3 n = normalize(vN);
   if (!gl_FrontFacing) n = -n;
   // Specular anti-aliasing like three.js: rougher where the geometric normal changes quickly.
@@ -286,34 +288,17 @@ void main() {
     // The colour maps are SRGB8_ALPHA8 textures: the sampler already returns filtered linear light.
     albedo *= textureGrad(uTex, tuv, gx, gy).rgb;
     rough *= textureGrad(uRoughTex, tuv, gx, gy).g;
-    vec3 mn = textureGrad(uNorm, tuv, gx, gy).xyz * 2.0 - 1.0;
-    mn.xy *= uNormalScale;
-    n = perturb(n, vW, vec2(puv.x, -puv.y), mn);
+    // Ground: the normal map fades out with distance (it is lost in the fog anyway) and is not even sampled once gone.
+    float nw = uMode == 3 ? 1.0 - smoothstep(18.0, 34.0, dist) : 1.0;
+    if (nw > 0.001) {
+      vec3 mn = textureGrad(uNorm, tuv, gx, gy).xyz * 2.0 - 1.0;
+      mn.xy *= uNormalScale * nw;
+      n = perturb(n, vW, vec2(puv.x, -puv.y), mn);
+    }
   }
   vec3 emissive = uEmissive;
   float outA = uAlpha;
-  if (uMode == 3) {
-    // Mossy patches, darker damp earth and leaf litter baked into the ground colour.
-    float mossN = sin(vW.x * .21 + sin(vW.z * .17) * 2.) * sin(vW.z * .19 - sin(vW.x * .13) * 1.7);
-    float litN = sin(vW.x * 1.3 + vW.z * .7) * sin(vW.z * 1.1 - vW.x * .5);
-    float moss = smoothstep(.25, .75, mossN);
-    // smoothstep requires edge0 < edge1; invert the result for the damp-area mask.
-    float damp = 1.0 - smoothstep(-.6, .2, mossN);
-    albedo = mix(albedo, albedo * vec3(.72, 1.18, .74), moss * .6);
-    albedo *= 1. - damp * .3;
-    albedo = mix(albedo, albedo * vec3(1.25, 1.02, .78), smoothstep(.55, .95, litN) * .35);
-#ifdef Q_ENV
-    // Puddles: dark, glassy, flat water that mirrors the sky.
-    float pn = sin(vW.x * .37 + sin(vW.z * .29) * 2.3) * sin(vW.z * .33 - sin(vW.x * .21) * 1.9) + .5 * sin(vW.x * 1.7 + vW.z * 1.3) * sin(vW.z * 1.9 - vW.x * 1.1);
-    float pud = smoothstep(.55, .85, pn);
-    albedo *= 1. - pud * .55;
-    float wet = clamp(damp * .52 + pud * .95, 0.0, 1.0);
-    // Wet ground darkens slightly and tightens the GGX highlight; puddles flatten their normal.
-    albedo *= 1.0 - wet * .16;
-    rough = mix(rough, max(.055, rough * .30), wet);
-    n = normalize(mix(n, vec3(0., 1., 0.), pud * .92));
-#endif
-  } else if (uMode == 4 && !branchSurface) {
+  if (uMode == 4 && !branchSurface) {
     // Contact darkening and moss at the trunk foot, plus a soft wet-bark rim glint near the runner.
     float foot = 1. - smoothstep(.72, 2.8, vLY);
     float rootCrease = foot * (0.5 + 0.5 * sin(vW.x * 3.7 + vW.z * 2.9));
