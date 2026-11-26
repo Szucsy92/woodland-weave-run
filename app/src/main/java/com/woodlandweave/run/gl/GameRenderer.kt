@@ -1215,7 +1215,10 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 val dx = p.x - cam.ex; val dz = p.z - cam.ez
                 val dist = sqrt(dx * dx + dz * dz)
                 if (pass == 0 && dist <= reach && (dx * fwx + dz * fwz) / fl >= -12) continue   // already in the visible set
-                if (dist > extraReach || (pass == 0 && s.cleared.contains(p.id))) continue
+                // A shockwave-cleared tree must not be reintroduced by the shadow-only ring.
+                // Visible trees already use their dissolving/transformed instances above; this
+                // excludes the duplicate/original shadow caster from both collection passes.
+                if (dist > extraReach || s.cleared.contains(p.id)) continue
                 if ((dx * lx + dz * lz) / (ll * dist.coerceAtLeast(1e-6)) < .2) continue   // only trees on the light's side matter
                 if (abs(-dx * lz + dz * lx) / ll > sideMax) continue
                 for (i in p.kinds.indices) {
