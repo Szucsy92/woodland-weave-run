@@ -118,10 +118,10 @@ Uncollected power-ups contribute compact coloured point lights to the lit scene.
 - Not compiled or run in the environment this was written in: build with CI and check on a device.
 
 ## Fine-tune controls (Medium / High)
-- Settings -> Graphics (tap the row to open it) has three grouped, zero-centred sliders instead of one slider per effect:
-  **Image & contrast** (bloom + filmic look; Medium and High), **Light & atmosphere** (shadows + light shafts; High) and
-  **Focus & motion** (depth of field + motion blur; High). Each runs from -100 (group off) through 0 (the look the renderer is tuned
-  for, `FX_NEUTRAL` in `Quality.kt`) to +100 (doubled). "Reset to 0" puts all three back.
+- Settings -> Graphics (tap the row to open it) has grouped, zero-centred sliders instead of one slider per effect:
+  **Image & contrast** (bloom + filmic look; Medium and High), **Light & atmosphere** (shadows + light shafts; High),
+  **Depth of field** (High) and **Motion blur** (High) as two separate sliders. Each runs from -100 (group off) through 0 (the look the renderer is tuned
+  for, `FX_NEUTRAL` in `Quality.kt`) to +100 (doubled). "Reset to 0" puts all four back.
 - The sharpness slider and the occlusion (SSAO) slider are gone: contrast-adaptive sharpening (`Features.sharpen`) and SSAO
   (`Features.ssao`) are off, and their `FxTuning` values stay 0.
 - Colours, sky, fog, key-light balance and beams are the "light balance refined" set above; the sliders only scale effects around it.

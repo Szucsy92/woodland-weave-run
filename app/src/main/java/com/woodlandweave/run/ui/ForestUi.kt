@@ -548,9 +548,11 @@ private fun GraphicsBlock(s: Settings, a: Actions, onDrag: (FxDrag?) -> Unit) {
                         val strength = fxStrength(value)
                         a.setFx("shadows", strength); a.setFx("shafts", strength)
                     }
-                    FxSlider("Focus & motion", fxOffset(s.fx.dof, s.fx.motion), onDrag) { value ->
-                        val strength = fxStrength(value)
-                        a.setFx("dof", strength); a.setFx("motion", strength)
+                    FxSlider("Depth of field", fxOffset(s.fx.dof, s.fx.dof), onDrag) { value ->
+                        a.setFx("dof", fxStrength(value))
+                    }
+                    FxSlider("Motion blur", fxOffset(s.fx.motion, s.fx.motion), onDrag) { value ->
+                        a.setFx("motion", fxStrength(value))
                     }
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
                         Text(
