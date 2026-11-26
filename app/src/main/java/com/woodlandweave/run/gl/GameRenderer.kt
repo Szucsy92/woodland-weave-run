@@ -56,8 +56,10 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val CROWN_FAR_KINDS = intArrayOf(K_CROWN_FAR, K_CROWN_FAR_1, K_CROWN_FAR_2)
         const val TREE_PARTS = 3
         const val XMAS_FLAKES = 240
-        const val XMAS_BULBS_PER_TREE = 16
-        const val XMAS_BULBS_MAX = 480
+        const val XMAS_BULBS_PER_TREE = 16    // the spiral up the crown
+        const val XMAS_RING_BULBS = 10        // the low string hanging under the crown, all the way round
+        const val XMAS_BULBS_MAX = 780        // 30 trees x (16 + 10)
+        const val XMAS_SPOTS_MAX = 450        // coloured light patches on the snow: 10 under the ring + 4 from the spiral, 30 trees
         const val WINDOW = 100.0
         const val SHEET_N = 11
         const val RING_N = 56
@@ -135,7 +137,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var clockStamp = 0L; private var clockValue = 0.0
     private var fogFar = FOG_END.toFloat()
 
-    private class Sprites(val capacity: Int, val texture: () -> Int, val additive: Boolean, val fog: Boolean) {
+    private class Sprites(val capacity: Int, val texture: () -> Int, val additive: Boolean, val fog: Boolean, val flat: Boolean = false) {
         val data: FloatBuffer = GlUtil.floatBuffer(capacity * 10)
         var count = 0
         fun clear() { data.clear(); count = 0 }
@@ -161,8 +163,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private val bRelicGlow = bHoleGlow
     private val bGateGlow = bHoleGlow
     private val bWarpSpores = Sprites(1600, { warpSporeTex }, true, false)     // the dots of the warp
+    // Christmas: soft coloured patches lying flat on the snow under the bulbs. Alpha-blended (not additive), so the colour still
+    // shows on bright snow, where added light would only wash out to white.
+    private val bSnowGlow = Sprites(XMAS_SPOTS_MAX, { forestLightTex }, false, false, true)
     // One array for the whole run: the per-frame arrayOf() it replaces was a small allocation every frame.
-    private val spriteBatches = arrayOf(bMist, bPollenCore, bForestLights, bPollenGlow, bOrbHalo, bHoleGlow, bWarpSpores)
+    private val spriteBatches = arrayOf(bSnowGlow, bMist, bPollenCore, bForestLights, bPollenGlow, bOrbHalo, bHoleGlow, bWarpSpores)
     // The key-light shadow map is re-rendered every SHADOW_EVERY-th frame (the light is fixed and the map snaps to whole texels, so a
     // one-frame-old map is still exactly consistent with itself); the first frame after it (re)appears is always rendered.
     private var shadowTick = 0
@@ -1233,7 +1238,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
 
     // ---- sprites ----
     private fun buildSprites(s: Simulation, e: GameEngine) {
-        bForestLights.clear(); bPollenGlow.clear(); bPollenCore.clear(); bMist.clear(); bOrbHalo.clear(); bHoleGlow.clear()
+        bForestLights.clear(); bPollenGlow.clear(); bPollenCore.clear(); bMist.clear(); bOrbHalo.clear(); bHoleGlow.clear(); bSnowGlow.clear()
         val t = s.elapsed
         if (Visuals.ForestLights.ON) buildForestLights(s, e, t)
         if (xmas) { buildSnow(s, t); buildXmasLights(s, t) } else if (Visuals.Pollen.ON) buildPollen(s, e, t)
@@ -1493,12 +1498,23 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         }
     }
 
-    /** A string of coloured bulbs spiralling up every pine (species 1), twinkling. Additive glows in the forest-lights batch. */
+    /** A soft coloured patch of light on the snow at ([x], [z]): a flat sprite just above the ground. */
+    private fun snowSpot(x: Double, z: Double, size: Double, a: Double, c: FloatArray) {
+        bSnowGlow.add(x, groundHeight(x, z) + .1, z, size, size, c, a)
+    }
+
+    /**
+     * Two strings of coloured bulbs on every pine (species 1), twinkling: one spiralling up the crown and one hanging in swags under it,
+     * all the way round, so there are lights below the foliage too. Each bulb throws a coloured patch of light on the snow: the low
+     * ring right under it, the spiral further out (its light falls past the edge of the crown).
+     * Additive glows in the forest-lights batch, solid bulbs in the pollen-core batch, flat patches in the snow-glow batch.
+     */
     private fun buildXmasLights(s: Simulation, t: Double) {
         var n = 0
         val haloDay = 1.0 - dayLevel * .35
+        val spotDay = 1.0 - dayLevel * .2
         for (tree in s.trees) {
-            if (n + XMAS_BULBS_PER_TREE > XMAS_BULBS_MAX) break
+            if (n + XMAS_BULBS_PER_TREE + XMAS_RING_BULBS > XMAS_BULBS_MAX) break
             val dx = tree.x - s.x; val dz = tree.z - s.z
             val d = hypot(dx, dz)
             if (d > 38.0) continue
@@ -1523,6 +1539,27 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 val bulb = .2 + d * .01
                 bPollenCore.add(bx, by, bz, bulb, bulb, Palette.bulbs[k % 4], (.75 + .25 * tw) * fade)
                 n++
+                // Every fourth bulb of the spiral (the higher ones) lights the snow beyond the crown: the higher, the further out.
+                if (k % 4 == 2) {
+                    val out = 1.0 + (ly - 6.9) * .13
+                    snowSpot(tree.x + cos(ang) * r * out, tree.z + sin(ang) * r * out, 5.0, .14 * tw * fade * spotDay, Palette.bulbs[k % 4])
+                }
+            }
+            // The low string: hangs in swags just under the lowest tier of the crown (its underside is at about 7.4), evenly round the tree.
+            val ringR = 3.9 * bodyXZ
+            for (k in 0 until XMAS_RING_BULBS) {
+                val ang = k * (2 * PI / XMAS_RING_BULBS) + phase * .3
+                val ly = 6.85 - .32 * (k % 2)                      // every other bulb hangs lower: a swag between the hooks
+                val col = Palette.bulbs[(k + 1) % 4]
+                val tw = .7 + .3 * sin(t * 2.0 + k * 2.1 + phase)
+                val bx = tree.x + cos(ang) * ringR; val by = base + ly * bodyY; val bz = tree.z + sin(ang) * ringR
+                val glow = .38 + d * .016
+                bForestLights.add(bx, by, bz, glow, glow, col, .85 * tw * haloDay * fade)
+                val bulb = .2 + d * .01
+                bPollenCore.add(bx, by, bz, bulb, bulb, col, (.75 + .25 * tw) * fade)
+                n++
+                // The patch lies a little outside the ring: the crown above shades the middle, the light spills out from under its edge.
+                snowSpot(tree.x + cos(ang) * ringR * 1.2, tree.z + sin(ang) * ringR * 1.2, 3.8, .30 * tw * fade * spotDay, col)
             }
         }
     }
@@ -1616,6 +1653,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private fun drawSprites(b: Sprites) {
         if (b.count > 0) {
             GL.glUniform1f(loc(spriteProg, "uFogOn"), if (b.fog) 1f else 0f)
+            GL.glUniform1f(loc(spriteProg, "uFlat"), if (b.flat) 1f else 0f)
+            // Flat patches lie a hand's breadth over the displaced ground: pulled slightly towards the camera so no hump cuts them.
+            if (b.flat) { GL.glEnable(GL.GL_POLYGON_OFFSET_FILL); GL.glPolygonOffset(-2f, -4f) }
             GL.glEnable(GL.GL_BLEND)
             if (b.additive) GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE) else GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
             GL.glDepthMask(false)
@@ -1627,6 +1667,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             GL.glBindVertexArray(0)
             b.data.limit(b.data.capacity())
             GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
+            if (b.flat) GL.glDisable(GL.GL_POLYGON_OFFSET_FILL)
         }
         if (b === bWarpSpores) b.clear()   // filled while drawing the world, before the sprites
     }

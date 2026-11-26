@@ -469,16 +469,18 @@ layout(location=1) in vec2 aSize;
 layout(location=2) in vec4 aCol;
 layout(location=3) in float aGround;   // height of the centre above the ground (0 = no ground fade)
 uniform mat4 uVP; uniform vec3 uRight, uUp, uCam, uFwd;
+uniform float uFlat;   // 1: the sprite lies flat on the ground (horizontal quad) instead of facing the camera
 out vec2 vUv; out vec4 vCol; out float vDepth; out float vFade; out float vWY; out float vGY; out float vSoft;
 void main() {
   vec2 c = vec2(float(gl_VertexID & 1) * 2.0 - 1.0, float(gl_VertexID >> 1) * 2.0 - 1.0);
-  vec3 w = aPos + uRight * c.x * aSize.x * 0.5 + uUp * c.y * aSize.y * 0.5;
+  vec3 w = uFlat > 0.5 ? aPos + vec3(c.x * aSize.x * 0.5, 0.0, c.y * aSize.y * 0.5)
+                       : aPos + uRight * c.x * aSize.x * 0.5 + uUp * c.y * aSize.y * 0.5;
   vUv = vec2(c.x * 0.5 + 0.5, 0.5 - c.y * 0.5); vCol = aCol;
   // three.js sprites fog on the view depth of their centre.
   vDepth = dot(aPos - uCam, uFwd);
   // Passing through a light must not flash or pop: a sprite dissolves over its whole radius as the camera enters it
   // (and returns the same way on the far side).
-  float nearR = clamp(aSize.x * 0.5, 0.3, 18.0);
+  float nearR = uFlat > 0.5 ? 0.6 : clamp(aSize.x * 0.5, 0.3, 18.0);   // a patch on the ground does not dissolve as you run over it
   float nt = clamp((distance(uCam, aPos) - nearR * 0.12) / (nearR * 0.88), 0.0, 1.0);
   vFade = nt * nt * nt * (nt * (nt * 6.0 - 15.0) + 10.0);
   // Glows that reach into the ground fade out softly towards it instead of ending in a hard edge.
