@@ -26,11 +26,6 @@ class EffectState {
 /** Port of ForestEffects.tsx's per-frame logic: what drives blur, glitch, lens kicks, frost and the rest. */
 class EffectsModel {
     private companion object {
-        const val LENS_PICKUP = .95 * 1.1
-        const val LENS_RING = .5 * 1.1
-        const val LENS_END = .45
-        /** Fisheye kicks (pickup, expiry, black hole in/out, gate pass) are 25% weaker; the gate membrane has its own distortion. */
-        const val LENS_SCALE = .75
         /** The tree-hit colour split: how strong it peaks, and how quickly (seconds) the other kicks die away. */
         const val GLITCH_PEAK = 2.6
         const val GLITCH_FALL = 2.2      // how sharply it dies away: higher = quicker
@@ -42,6 +37,16 @@ class EffectsModel {
     private var hueNow = 0.0
     private var hadPower = false
     private var powerEndedAt = -99.0
+
+    /**
+     * The gate's lens kick, used for EVERY lens event (pickup, expiry, black hole in / out, gate pass): the zoom at the centre of the
+     * ring (GateRing.LENS_MAGNIFY) as a springy damped oscillation, identical shape, size and timing everywhere, no 25% reduction.
+     */
+    private fun gateSpring(age: Double, aspect: Double): Double {
+        val m = Visuals.GateRing.LENS_MAGNIFY
+        val edge = (aspect * .5).pow(2.0) + .25
+        return m / ((1 - m) * edge * 1.6) * exp(-age * 2.4) * cos(age * 11)
+    }
 
     /** The one colour-split punch: k runs from 1 (the moment of the event) to 0. The tree hit and every other kick use it. */
     private fun punch(k: Double) = k.pow(GLITCH_FALL) * GLITCH_PEAK
@@ -91,16 +96,16 @@ class EffectsModel {
             val a = s.powerUpTime
             val ring = if (s.powerUp == PowerUpType.SHOCKWAVE) min(SHOCKWAVE_RINGS - 1, floor(a / SHOCKWAVE_GAP).toInt()) else 0
             val age = a - ring * SHOCKWAVE_GAP
-            lens = (if (ring == 0) LENS_PICKUP else LENS_RING) * exp(-age * 3.2) * cos(age * 14)
+            lens = gateSpring(age, out.aspect)
             hadPower = true
         } else {
             if (hadPower) { hadPower = false; powerEndedAt = clock }
             val age = clock - powerEndedAt
-            if (age >= 0 && age < 2) lens = LENS_END * exp(-age * 3.2) * cos(age * 14)
+            if (age >= 0 && age < GATE_KICK_TIME) lens = gateSpring(age, out.aspect)
         }
         var flash = 0.0
         if (s.warp >= 0 && s.warp < 1.6) {
-            lens += 2.2 * exp(-s.warp * 2.2) * cos(s.warp * 11)
+            lens += gateSpring(s.warp, out.aspect)
             flash += max(0.0, 1 - s.warp / .3) * .6
         }
         // Passing a survive gate (in or out): the same elastic fisheye as the black hole / a pickup, a damped spring.
@@ -109,13 +114,11 @@ class EffectsModel {
         val aspect = out.aspect
         var gateLens = 0.0
         if (s.gateKick >= 0 && s.gateKick < GATE_KICK_TIME) {
-            val m = Visuals.GateRing.LENS_MAGNIFY
-            val edge = (aspect * .5).pow(2.0) + .25
-            gateLens = m / ((1 - m) * edge * 1.6) * exp(-s.gateKick * 2.4) * cos(s.gateKick * 11)
+            gateLens = gateSpring(s.gateKick, aspect)
             flash += max(0.0, 1 - s.gateKick / .25) * .25
         }
         if (s.warpOut >= 0) {
-            lens += 1.9 * exp(-s.warpOut * 2.6) * cos(s.warpOut * 12)
+            lens += if (s.warpOut < GATE_KICK_TIME) gateSpring(s.warpOut, out.aspect) else 0.0
             flash += exp(-s.warpOut * 3.4) * min(1.0, (WARP_EXIT_TIME - s.warpOut) / .5) * .9
         }
         val warp = warpEnvelope(s)
@@ -151,7 +154,7 @@ class EffectsModel {
         if (lastFound != null) glitch += kick(s.elapsed - lastFound)
         glitch += warp * .12
         clock += min(delta, .1)
-        out.blur = blur; out.glitch = glitch; out.lens = lens * LENS_SCALE + gateLens; out.warp = warp; out.flash = flash
+        out.blur = blur; out.glitch = glitch; out.lens = lens + gateLens; out.warp = warp; out.flash = flash
         out.hue = hueNow; out.time = clock
     }
 }
