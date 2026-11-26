@@ -1513,6 +1513,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         var n = 0
         val haloDay = 1.0 - dayLevel * .35
         val spotDay = 1.0 - dayLevel * .2
+        // Reuse scratch buffers: the same shockwave matrix that moves the tree mesh also
+        // moves every bulb and its ground-light patch.
+        val shockMatrix = FloatArray(16)
+        val point = FloatArray(4)
+        val moved = FloatArray(4)
         for (tree in s.trees) {
             if (n + XMAS_BULBS_PER_TREE + XMAS_RING_BULBS > XMAS_BULBS_MAX) break
             val dx = tree.x - s.x; val dz = tree.z - s.z
@@ -1525,13 +1530,59 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val base = groundHeight(tree.x, tree.z) - 1.1
             val fade = 1.0 - smoothRange(d, 26.0, 38.0)
             val phase = hash(sx, sz, 905) * 6.28
+
+            // fillInstances() applies this exact transform to the tree's mesh after a
+            // shockwave hit. Previously the decorative sprites stayed at the old position.
+            var shockActive = false
+            val hitAt = s.clearedAt[tree.id]
+            if (s.cleared.contains(tree.id) && hitAt != null) {
+                val age = s.elapsed - hitAt
+                if (age >= SHOCKWAVE_DISSOLVE) continue
+                if (age >= 0.0) {
+                    val k = min(1.0, age / SHOCKWAVE_DISSOLVE)
+                    val seed = tree.id.length * 31 + tree.id.last().code
+                    val fx = -sin(s.heading); val fz = -cos(s.heading)
+                    val push = k.pow(1.4) * (34 + hash(seed, 7, 404) * 16)
+                    val lift = sin(min(1.0, k * 2.6) * PI * .5) *
+                        (1.6 + hash(seed, 8, 405) * 2.2) * min(1.0, k * 1.8)
+                    val tip = min(1.0, k * 1.8) * (.7 + hash(seed, 9, 406) * .7)
+                    val sk = 1 - smoothRange(k, .8, 1.0)
+                    val prop = cache[tree.id]
+                    val bx = prop?.m?.get(12)?.toDouble() ?: tree.x
+                    val by = prop?.m?.get(13)?.toDouble() ?: base
+                    val bz = prop?.m?.get(14)?.toDouble() ?: tree.z
+                    val lat = (bx - s.x) * cos(s.heading) - (bz - s.z) * sin(s.heading)
+                    val out = max(-1.0, min(1.0, lat / 9)) * push * .3
+                    Matrix.setIdentityM(shockMatrix, 0)
+                    Matrix.translateM(shockMatrix, 0,
+                        (bx + fx * push + cos(s.heading) * out).toFloat(), (by + lift).toFloat(),
+                        (bz + fz * push - sin(s.heading) * out).toFloat())
+                    Matrix.rotateM(shockMatrix, 0, Math.toDegrees(tip).toFloat(),
+                        fz.toFloat(), 0f, (-fx).toFloat())
+                    Matrix.scaleM(shockMatrix, 0, sk.toFloat(), sk.toFloat(), sk.toFloat())
+                    Matrix.translateM(shockMatrix, 0, (-bx).toFloat(), (-by).toFloat(), (-bz).toFloat())
+                    shockActive = true
+                }
+            }
+            fun followShock(x: Double, y: Double, z: Double): FloatArray {
+                if (!shockActive) {
+                    moved[0] = x.toFloat(); moved[1] = y.toFloat(); moved[2] = z.toFloat()
+                } else {
+                    point[0] = x.toFloat(); point[1] = y.toFloat(); point[2] = z.toFloat(); point[3] = 1f
+                    Matrix.multiplyMV(moved, 0, shockMatrix, 0, point, 0)
+                }
+                return moved
+            }
+
             for (k in 0 until XMAS_BULBS_PER_TREE) {
                 val f = k / (XMAS_BULBS_PER_TREE - 1.0)
                 val ly = 6.9 + f * 12.2
                 val r = max(.3, 4.2 - (ly - 7.8) * .2545) * .94 * bodyXZ
                 val ang = k * 2.4 + phase
                 val tw = .7 + .3 * sin(t * 2.3 + k * 1.7 + phase)
-                val bx = tree.x + cos(ang) * r; val by = base + ly * bodyY; val bz = tree.z + sin(ang) * r
+                val rawX = tree.x + cos(ang) * r; val rawY = base + ly * bodyY; val rawZ = tree.z + sin(ang) * r
+                val pos = followShock(rawX, rawY, rawZ)
+                val bx = pos[0].toDouble(); val by = pos[1].toDouble(); val bz = pos[2].toDouble()
                 // A small glow (the old big ones overlapped into one streak) plus a solid, alpha-blended bulb: additive light alone
                 // washes out on the white snow, so only the red one was seen; the solid bulb keeps every colour visible.
                 val glow = (.38 + d * .016) * (1.15 - f * .35)
@@ -1542,7 +1593,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 // Every fourth bulb of the spiral (the higher ones) lights the snow beyond the crown: the higher, the further out.
                 if (k % 4 == 2) {
                     val out = 1.0 + (ly - 6.9) * .13
-                    snowSpot(tree.x + cos(ang) * r * out, tree.z + sin(ang) * r * out, 5.0, .14 * tw * fade * spotDay, Palette.bulbs[k % 4])
+                    val spot = followShock(tree.x + cos(ang) * r * out, groundHeight(tree.x, tree.z) + .1, tree.z + sin(ang) * r * out)
+                    snowSpot(spot[0].toDouble(), spot[2].toDouble(), 5.0, .14 * tw * fade * spotDay, Palette.bulbs[k % 4])
                 }
             }
             // The low string: hangs in swags just under the lowest tier of the crown (its underside is at about 7.4), evenly round the tree.
@@ -1552,14 +1604,16 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 val ly = 6.85 - .32 * (k % 2)                      // every other bulb hangs lower: a swag between the hooks
                 val col = Palette.bulbs[(k + 1) % 4]
                 val tw = .7 + .3 * sin(t * 2.0 + k * 2.1 + phase)
-                val bx = tree.x + cos(ang) * ringR; val by = base + ly * bodyY; val bz = tree.z + sin(ang) * ringR
+                val pos = followShock(tree.x + cos(ang) * ringR, base + ly * bodyY, tree.z + sin(ang) * ringR)
+                val bx = pos[0].toDouble(); val by = pos[1].toDouble(); val bz = pos[2].toDouble()
                 val glow = .38 + d * .016
                 bForestLights.add(bx, by, bz, glow, glow, col, .85 * tw * haloDay * fade)
                 val bulb = .2 + d * .01
                 bPollenCore.add(bx, by, bz, bulb, bulb, col, (.75 + .25 * tw) * fade)
                 n++
                 // The patch lies a little outside the ring: the crown above shades the middle, the light spills out from under its edge.
-                snowSpot(tree.x + cos(ang) * ringR * 1.2, tree.z + sin(ang) * ringR * 1.2, 3.8, .30 * tw * fade * spotDay, col)
+                val spot = followShock(tree.x + cos(ang) * ringR * 1.2, groundHeight(tree.x, tree.z) + .1, tree.z + sin(ang) * ringR * 1.2)
+                snowSpot(spot[0].toDouble(), spot[2].toDouble(), 3.8, .30 * tw * fade * spotDay, col)
             }
         }
     }
