@@ -602,6 +602,7 @@ void main() {
         fun f(v: Double) = String.format(java.util.Locale.US, "%.3f", v)
         return """#version 300 es
 precision highp float;
+precision highp int;
 #define RINGS $rings
 #define GAP ${f(gap)}
 #define WSPEED ${f(speed)}
@@ -635,6 +636,11 @@ uniform vec2 uNF, uTanAspect;
 uniform mat4 uInvVP, uVP;
 uniform vec3 uCamPos, uMoonDir, uMoonCol;
 uniform float uAoK, uShaftSteps, uShaftMax, uFogDens, uDofK, uFocus, uMotion;
+// The beams are marched into a small target (a quarter of the pixels), filtered, and composited from it: uShaftTex holds the
+// in-scattered light in rgb and the transmittance in a; uShaftLow is 1 when it holds this frame's beams.
+uniform sampler2D uShaftTex;
+uniform vec2 uShaftTexel;
+uniform float uShaftLow;
 #ifdef Q_SHAFTS
 uniform mat4 uLightVP0;
 uniform sampler2DShadow uShadowC0;
@@ -748,7 +754,7 @@ float shadowMarch(vec3 wp) {
   return baseVis * foliage;
 }
 // Light shafts: march the view ray through height fog, asking the shadow map where the moon reaches.
-vec3 shafts(vec3 c, vec2 uv, float d) {
+vec4 shaftTerm(vec2 uv, float d) {
   vec3 ro = uCamPos;
   vec3 rd = worldAt(uv, d) - ro;
   float len = length(rd);
@@ -790,9 +796,56 @@ vec3 shafts(vec3 c, vec2 uv, float d) {
   }
   // Lift the integrated scattering rather than hardening the shadow mask: beams read clearly,
   // while their edges and distance still dissolve naturally into the forest fog.
-  return c * T + sc * 1.82;
+  return vec4(sc * 1.82, T);
+}
+vec3 shafts(vec3 c, vec2 uv, float d) {
+  vec4 s = shaftTerm(uv, d);
+  return c * s.a + s.rgb;
 }
 #endif
+// ---- Beams at a quarter of the pixels -------------------------------------------------------------------------------
+// The march gives every pixel a different start offset from a 4x4 Bayer matrix (hpn), so over any 4x4 block all 16 offsets occur.
+// Left as it is, that matrix shows as a fine lattice; averaged over exactly one 4x4 block it cancels, and what is left is the
+// beam sampled 16 times as finely, with no lattice and no grain. The average is weighted by depth, so beams do not bleed over
+// the edges of trunks. Depth is capped: beyond the beam length every distance looks the same.
+float shaftZ(float d) { return min(linZ(d), 48.0); }
+float shaftWeight(float za, float zb) { return exp(-abs(za - zb) / max(0.15 * zb, 0.5)); }
+// Pass 2 (target-sized): the depth-weighted 4x4 average of the marched beams.
+vec4 shaftBlur() {
+  ivec2 sz = textureSize(uShaftTex, 0);
+  ivec2 pc = ivec2(gl_FragCoord.xy);
+  float zc = shaftZ(texture(uDepth, (vec2(pc) + 0.5) * uShaftTexel).r);
+  vec4 acc = vec4(0.0); float ws = 0.0;
+  for (int j = -2; j <= 1; j++) {
+    for (int i = -2; i <= 1; i++) {
+      ivec2 p = clamp(pc + ivec2(i, j), ivec2(0), sz - 1);
+      float zt = shaftZ(texture(uDepth, (vec2(p) + 0.5) * uShaftTexel).r);
+      float w = shaftWeight(zt, zc) + 1e-4;
+      acc += texelFetch(uShaftTex, p, 0) * w; ws += w;
+    }
+  }
+  return acc / ws;
+}
+// Pass 3 (scene resolution): bilinear upsample of the filtered beams, each of the four neighbours weighted by how close its
+// depth is to this pixel's depth.
+vec4 shaftUp(vec2 uv, float d) {
+  ivec2 sz = textureSize(uShaftTex, 0);
+  vec2 st = uv / uShaftTexel - 0.5;
+  ivec2 p0 = ivec2(floor(st));
+  vec2 f = st - vec2(p0);
+  float zc = shaftZ(d);
+  vec4 acc = vec4(0.0); float ws = 0.0;
+  for (int j = 0; j < 2; j++) {
+    for (int i = 0; i < 2; i++) {
+      ivec2 p = clamp(p0 + ivec2(i, j), ivec2(0), sz - 1);
+      float zt = shaftZ(texture(uDepth, (vec2(p) + 0.5) * uShaftTexel).r);
+      float wb = (i == 0 ? 1.0 - f.x : f.x) * (j == 0 ? 1.0 - f.y : f.y);
+      float w = wb * shaftWeight(zt, zc) + 1e-4;
+      acc += texelFetch(uShaftTex, p, 0) * w; ws += w;
+    }
+  }
+  return acc / ws;
+}
 #endif
 float sdRoundBox(vec2 p, vec2 half_, float r) {
   vec2 q = abs(p) - half_ + r;
@@ -816,6 +869,18 @@ vec3 backdrop(vec2 uv, float sigmaDp) {
   return acc / wsum;
 }
 void main() {
+#if defined(Q_SHAFTMARCH) && (defined(Q_SHAFTS) || defined(Q_SHAFTS_LITE))
+  {
+    // Pass 1: the march, into the small target. The depth is read at exactly the point the filter and the upsample use for this texel.
+    vec2 suv = (floor(gl_FragCoord.xy) + 0.5) * uShaftTexel;
+    o = shaftTerm(suv, texture(uDepth, suv).r);
+    return;
+  }
+#endif
+#if defined(Q_SHAFTBLUR) && defined(Q_DEPTH)
+  o = shaftBlur();
+  return;
+#endif
   vec2 d = vUv - 0.5;
   float asp = resolution.x / resolution.y;
   vec2 q = d * vec2(asp, 1.0);
@@ -898,8 +963,12 @@ void main() {
   // Run the expensive depth-of-field gather and volumetric ray march at scene resolution.
   if (uDofK > 0.001) c = dofGather(uv, c);
   float preDepth = texture(uDepth, uv).r;
+  if (uShaftLow > 0.5) {
+    vec4 s = shaftUp(uv, preDepth);
+    c = c * s.a + s.rgb;
+  }
 #if defined(Q_SHAFTS) || defined(Q_SHAFTS_LITE)
-  if (uShaftSteps > 0.5) c = shafts(c, uv, preDepth);
+  else if (uShaftSteps > 0.5) c = shafts(c, uv, preDepth);   // fallback: march here, as before
 #endif
   o = vec4(c, 1.0);
   return;
