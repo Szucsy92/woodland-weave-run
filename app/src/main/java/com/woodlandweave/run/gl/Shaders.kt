@@ -838,6 +838,7 @@ vec4 shaftBlur() {
 // Pass 3 (target-sized): blend with last frame's beams. The previous frame's texel is found by projecting this texel's world
 // point through last frame's matrix; it is used only if it saw a surface at about the same depth (so it never smears over
 // edges that were hidden), and less the further it had to move (fast turns keep fewer old frames).
+#ifdef Q_SHAFTBLUR
 void shaftResolve() {
   ivec2 pc = ivec2(gl_FragCoord.xy);
   vec2 uv = (vec2(pc) + 0.5) * uShaftTexel;
@@ -858,6 +859,7 @@ void shaftResolve() {
   o = res;
   oZ = vec4(shaftZ(dRaw), 0.0, 0.0, 1.0);
 }
+#endif   // Q_SHAFTBLUR: oZ exists only in that program
 // Pass 4 (scene resolution): bilinear upsample of the filtered beams, each of the four neighbours weighted by how close its
 // depth is to this pixel's depth.
 vec4 shaftUp(vec2 uv, float d) {
