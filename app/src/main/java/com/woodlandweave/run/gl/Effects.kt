@@ -27,9 +27,9 @@ class EffectState {
 class EffectsModel {
     private companion object {
         /** The tree-hit colour split: how strong it peaks, and how quickly (seconds) the other kicks die away. */
-        const val GLITCH_PEAK = 2.6
+        const val GLITCH_PEAK = 1.8
         const val GLITCH_FALL = 2.2      // how sharply it dies away: higher = quicker
-        const val GLITCH_KICK_TIME = .32
+        const val GLITCH_KICK_TIME = .24   // 75% of the former .32 s: quicker
     }
 
     private var frost = 0.0
@@ -51,6 +51,9 @@ class EffectsModel {
     /** The one colour-split punch: k runs from 1 (the moment of the event) to 0. The tree hit and every other kick use it. */
     private fun punch(k: Double) = k.pow(GLITCH_FALL) * GLITCH_PEAK
 
+    /** The same punch for every event, `age` seconds after it happened. */
+    private fun kick(age: Double) = if (age >= 0 && age < GLITCH_KICK_TIME) punch(1 - age / GLITCH_KICK_TIME) else 0.0
+
     fun update(s: Simulation, delta: Double, out: EffectState, holeFor: (Simulation) -> FloatArray?, gateFor: (Simulation) -> FloatArray? = { null }) {
         val lying = s.phase == Phase.FALLING || s.phase == Phase.FALLEN
         val awake = s.phase == Phase.AWAKENING
@@ -64,7 +67,8 @@ class EffectsModel {
         }
         // A tree hit: a sharp punch that decays (the old sine envelope started at 0 and was smeared away by the blur).
         val hitK = if (s.impact > 0) (s.impact / IMPACT_DURATION).coerceIn(0.0, 1.0) else 0.0
-        var glitch = punch(hitK) + occasional +
+        // The tree hit runs through the first 75% of its time only (the same quicker punch as the other events).
+        var glitch = punch(((hitK - .25) / .75).coerceIn(0.0, 1.0)) + occasional +
             (if (awake) sin(s.phaseTime * 8).pow(2.0) * (1 - s.phaseTime / 1.15) * .35 else 0.0)
 
         // Pause warp: blur and glitch swell while time slows, hold softly while frozen, drain as the run resumes.
@@ -81,14 +85,8 @@ class EffectsModel {
         blur = max(blur + arrive, pb)
         glitch += pg + arrive * .15
 
-        // Power-ups: a glitch surge on pickup, a faint shimmer while active and a last flutter as it fades.
-        s.powerUp?.let { type ->
-            val a = s.powerUpTime; val left = POWERUP_DURATION - a
-            val surge = if (a < .5) sin((a / .5) * PI) * .7 else 0.0
-            val fade = if (left < .6) sin((left / .6) * PI) * .45 else 0.0
-            glitch += if (type == PowerUpType.FREEZER) surge * .3
-            else (if (type == PowerUpType.SHOCKWAVE) surge * .5 else surge) + fade + .05
-        }
+        // Power-ups: the common punch on pickup (and on expiry, below), plus a faint shimmer while active.
+        if (s.powerUp != null) glitch += kick(s.powerUpTime) + .05
 
         // Elastic fisheye on pickup: a damped spring (bulge, overshoot, settle).
         var lens = 0.0
@@ -102,6 +100,7 @@ class EffectsModel {
             if (hadPower) { hadPower = false; powerEndedAt = clock }
             val age = clock - powerEndedAt
             if (age >= 0 && age < GATE_KICK_TIME) lens = gateSpring(age, out.aspect)
+            glitch += kick(age)
         }
         var flash = 0.0
         if (s.warp >= 0 && s.warp < 1.6) {
@@ -148,7 +147,6 @@ class EffectsModel {
             if (r >= 0 && r < .45) glitch += sin((r / .45) * PI) * 1.1
         }
         // The same smooth purple/green colour split as a tree hit: black hole in and out, passing a gate, finding a secret.
-        fun kick(age: Double) = if (age >= 0 && age < GLITCH_KICK_TIME) punch(1 - age / GLITCH_KICK_TIME) else 0.0
         glitch += kick(s.warp) + kick(s.warpOut) + kick(s.gateKick)
         val lastFound = s.foundAt.values.maxOrNull()
         if (lastFound != null) glitch += kick(s.elapsed - lastFound)

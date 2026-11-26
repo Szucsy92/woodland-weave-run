@@ -1015,7 +1015,7 @@ void main() {
     if (glitch >= 0.001) {
       // Colour split: a purple copy to one side, a green copy to the other, taken from the sharp picture (not the blur, which
       // used to smear the split away). Smooth offset only - no row tearing / pixel glitch.
-      float gk = min(glitch, 2.6);
+      float gk = min(glitch, 1.8);
       vec2 sp = vec2(gk * 0.022, gk * 0.004);
       vec3 pu = tap(uv + sp), gr = tap(uv - sp);
       vec3 sharp = vec3(pu.r, gr.g, pu.b);
