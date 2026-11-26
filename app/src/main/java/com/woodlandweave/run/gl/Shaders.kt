@@ -639,6 +639,7 @@ uniform float uAoK, uShaftSteps, uShaftMax, uFogDens, uDofK, uFocus, uMotion;
 // The beams are marched into a small target (a quarter of the pixels), filtered, and composited from it: uShaftTex holds the
 // in-scattered light in rgb and the transmittance in a; uShaftLow is 1 when it holds this frame's beams.
 uniform sampler2D uShaftTex;
+uniform sampler2D uShaftZ;   // per beam texel: the (capped, linear) depth its beam was marched to
 uniform vec2 uShaftTexel;
 uniform float uShaftLow;
 // Temporal accumulation of the beams: every frame marches with a different start offset (uShaftJit), and the result is blended
@@ -652,8 +653,8 @@ uniform sampler2DShadow uShadowC0;
 #endif
 #endif
 layout(location = 0) out vec4 o;
-#ifdef Q_SHAFTBLUR
-layout(location = 1) out vec4 oZ;   // the resolve pass also writes the depth its beams belong to
+#if defined(Q_SHAFTBLUR) || defined(Q_SHAFTMARCH)
+layout(location = 1) out vec4 oZ;   // the march and the resolve pass also write the depth their beams belong to
 #endif
 vec3 srgbToLinear(vec3 c) {
   vec3 lo = c / 12.92;
@@ -818,6 +819,17 @@ vec3 shafts(vec3 c, vec2 uv, float d) {
 // beam sampled 16 times as finely, with no lattice and no grain. The average is weighted by depth, so beams do not bleed over
 // the edges of trunks. Depth is capped: beyond the beam length every distance looks the same.
 float shaftZ(float d) { return min(linZ(d), 48.0); }
+// The farthest raw depth in the scene pixels that one beam texel covers.
+float shaftFarDepth(ivec2 pc) {
+  ivec2 sd = textureSize(uDepth, 0);
+  ivec2 b = ivec2(floor(vec2(pc) * vec2(sd) * uShaftTexel));
+  ivec2 m = sd - 1;
+  float a = texelFetch(uDepth, min(b, m), 0).r;
+  float c = texelFetch(uDepth, min(b + ivec2(1, 0), m), 0).r;
+  float d = texelFetch(uDepth, min(b + ivec2(0, 1), m), 0).r;
+  float e = texelFetch(uDepth, min(b + ivec2(1, 1), m), 0).r;
+  return max(max(a, c), max(d, e));
+}
 // How alike two depths are, by ratio (so a thin distant tree and the fog behind it, 20 m apart, still count as neighbours).
 float shaftWeight(float za, float zb) { return exp(-2.5 * abs(log(za / zb))); }
 // Re-expresses a beam value (rgb = in-scattered light, a = transmittance) measured for a ray that ends at depth zt as one for
@@ -835,12 +847,12 @@ vec4 shaftAtDepth(vec4 v, float zt, float zc) {
 vec4 shaftBlur() {
   ivec2 sz = textureSize(uShaftTex, 0);
   ivec2 pc = ivec2(gl_FragCoord.xy);
-  float zc = shaftZ(texture(uDepth, (vec2(pc) + 0.5) * uShaftTexel).r);
+  float zc = texelFetch(uShaftZ, pc, 0).r;
   vec4 acc = vec4(0.0); float ws = 0.0;
   for (int j = -2; j <= 1; j++) {
     for (int i = -2; i <= 1; i++) {
       ivec2 p = clamp(pc + ivec2(i, j), ivec2(0), sz - 1);
-      float zt = shaftZ(texture(uDepth, (vec2(p) + 0.5) * uShaftTexel).r);
+      float zt = texelFetch(uShaftZ, p, 0).r;
       float w = shaftWeight(zt, zc) + 1e-4;
       acc += shaftAtDepth(texelFetch(uShaftTex, p, 0), zt, zc) * w; ws += w;
     }
@@ -854,8 +866,8 @@ vec4 shaftBlur() {
 void shaftResolve() {
   ivec2 pc = ivec2(gl_FragCoord.xy);
   vec2 uv = (vec2(pc) + 0.5) * uShaftTexel;
-  float dRaw = texture(uDepth, uv).r;
-  float zNow = shaftZ(dRaw);
+  float dRaw = shaftFarDepth(pc);
+  float zNow = texelFetch(uShaftZ, pc, 0).r;
   vec4 res = texelFetch(uShaftTex, pc, 0);
   if (uShaftHistOn > 0.5) {
     vec4 pcl = uPrevVP * vec4(worldAt(uv, dRaw), 1.0);
@@ -886,7 +898,7 @@ vec4 shaftUp(vec2 uv, float d) {
   for (int j = 0; j < 2; j++) {
     for (int i = 0; i < 2; i++) {
       ivec2 p = clamp(p0 + ivec2(i, j), ivec2(0), sz - 1);
-      float zt = shaftZ(texture(uDepth, (vec2(p) + 0.5) * uShaftTexel).r);
+      float zt = texelFetch(uShaftZ, p, 0).r;
       float wb = (i == 0 ? 1.0 - f.x : f.x) * (j == 0 ? 1.0 - f.y : f.y);
       float w = wb * shaftWeight(zt, zc) + 1e-4;
       acc += shaftAtDepth(texelFetch(uShaftTex, p, 0), zt, zc) * w; ws += w;
@@ -919,9 +931,13 @@ vec3 backdrop(vec2 uv, float sigmaDp) {
 void main() {
 #if defined(Q_SHAFTMARCH) && (defined(Q_SHAFTS) || defined(Q_SHAFTS_LITE))
   {
-    // Pass 1: the march, into the small target. The depth is read at exactly the point the filter and the upsample use for this texel.
-    vec2 suv = (floor(gl_FragCoord.xy) + 0.5) * uShaftTexel;
-    o = shaftTerm(suv, texture(uDepth, suv).r);
+    // Pass 1: the march, into the small target, to the FARTHEST depth under the texel. The beam of a nearer pixel in the same
+    // texel (the edge of a thin trunk) is then a prefix of this one and can be scaled down from it (shaftAtDepth); the other way
+    // round, the part of the beam behind the trunk would be missing and the background there would show through dark.
+    ivec2 pc = ivec2(gl_FragCoord.xy);
+    float dFar = shaftFarDepth(pc);
+    o = shaftTerm((vec2(pc) + 0.5) * uShaftTexel, dFar);
+    oZ = vec4(shaftZ(dFar), 0.0, 0.0, 1.0);
     return;
   }
 #endif
