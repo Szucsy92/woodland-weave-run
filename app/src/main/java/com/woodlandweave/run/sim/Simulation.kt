@@ -36,6 +36,8 @@ enum class Difficulty { EASY, NORMAL, HARD }
 enum class GameMode { CLASSIC, SURVIVE, FREEROAM }
 enum class PowerUpType { FREEZER, GHOST, SHOCKWAVE }
 enum class ForestMood { MANUAL, AUTO }
+/** The Christmas theme: AUTO turns it on from 24 December to 31 December by itself; ON / OFF force it (for testing). */
+enum class ChristmasMode { AUTO, ON, OFF }
 enum class SecretType { SPIRAL, RING, LANTERN }
 enum class SurviveStage { LIT, DYING, DARK, RED }
 

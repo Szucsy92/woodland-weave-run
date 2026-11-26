@@ -55,6 +55,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val CROWN_KINDS = intArrayOf(K_CROWN, K_CROWN_1, K_CROWN_2)
         val CROWN_FAR_KINDS = intArrayOf(K_CROWN_FAR, K_CROWN_FAR_1, K_CROWN_FAR_2)
         const val TREE_PARTS = 3
+        const val XMAS_FLAKES = 240
+        const val XMAS_BULBS_PER_TREE = 16
+        const val XMAS_BULBS_MAX = 480
         const val WINDOW = 100.0
         const val SHEET_N = 11
         const val RING_N = 56
@@ -145,12 +148,12 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         }
     }
     // One batch, one texture and one block of numbers (Visuals) per element. `fog` mirrors three.js's SpriteMaterial.fog of the web build.
-    private val bForestLights = Sprites(200, { forestLightTex }, true, false)
+    private val bForestLights = Sprites(200 + XMAS_BULBS_MAX, { forestLightTex }, true, false)
     // Same texture, additive, no fog: the pollen glow and the relic motes are ONE batch (one draw). Additive blending does not depend on
     // draw order, so the picture is the same; each element still fills it from its own block of numbers in Visuals.
     private val bPollenGlow = Sprites(32 + Visuals.Relic.MAX * (Visuals.Relic.CLUSTER_COUNT + Visuals.Relic.SWIRL_COUNT), { pollenGlowTex }, true, false)
     private val bRelicMotes = bPollenGlow
-    private val bPollenCore = Sprites(32, { pollenCoreTex }, false, true)
+    private val bPollenCore = Sprites(XMAS_FLAKES, { pollenCoreTex }, false, true)
     private val bMist = Sprites(8, { mistTex }, false, true)
     private val bOrbHalo = Sprites(16, { orbHaloTex }, true, true)
     // Same texture, additive, no fog: a black hole's halo and sparks, the relics' glow and the gates' glow are ONE batch (one draw).
@@ -423,6 +426,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val e = engine; val s = e.sim; val cam = e.camera
         if (builtVersion != e.worldVersion) { rebuildProps(); builtVersion = e.worldVersion }
         animT += dt
+        xmas = christmasOn(e.settings.christmas)
         val tune = e.settings.fx
         pp.tune = tune
         pp.sharpen = feat.sharpen * tune.sharp
@@ -498,6 +502,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         // Deepen the atmospheric veil: richer hues, lower luminance, less milky daylight.
         fog = floatArrayOf(fog[0] * .80f, fog[1] * .78f, fog[2] * .82f)
         sky = floatArrayOf(sky[0] * .88f, sky[1] * .86f, sky[2] * .92f)
+        if (xmas) { fog = Palette.mix(fog, Palette.xmasFog, .32f); sky = Palette.mix(sky, Palette.xmasSky, .28f) }
         groundC = Palette.mix(fog, Palette.pursuer, red * .55f)
         // Ambient fill prevents crushed shadows without flattening the directional sunlight.
         hemi = .48f + k * .19f + tw * .045f + dl * .08f + red * 1.4f
@@ -566,7 +571,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             GL.glUniformMatrix4fv(loc(p, "uVP"), 1, false, vp, 0)
             u3(p, "uCam", cam.ex.toFloat(), cam.ey.toFloat(), cam.ez.toFloat())
             u3(p, "uFwd", camFwdX, camFwdY, camFwdZ); u1(p, "uEncode", encode)
-            u1(p, "uTime", animT.toFloat())
+            u1(p, "uTime", animT.toFloat()); u1(p, "uSnow", if (xmas) 1f else 0f)
             val sm = shadow
             // A sampler2DShadow left on its default unit 0 shares it with the sampler2D uTex: GLES then raises
             // INVALID_OPERATION and drops every draw. Always point it at its own unit, shadows on or off.
@@ -1231,7 +1236,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         bForestLights.clear(); bPollenGlow.clear(); bPollenCore.clear(); bMist.clear(); bOrbHalo.clear(); bHoleGlow.clear()
         val t = s.elapsed
         if (Visuals.ForestLights.ON) buildForestLights(s, e, t)
-        if (Visuals.Pollen.ON) buildPollen(s, e, t)
+        if (xmas) { buildSnow(s, t); buildXmasLights(s, t) } else if (Visuals.Pollen.ON) buildPollen(s, e, t)
         if (Visuals.OrbHalo.ON) buildOrbHalos(e)
         if (Visuals.Mist.ON) buildMist(s, t)
         if (Visuals.BlackHole.GLOW) buildBlackHoleGlow(s, t)
@@ -1448,6 +1453,72 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 val py = if (high) lg + 13.5 + sin(t * .24 + i) * 1.4 else lg
                 val far = if (s.mode == GameMode.FREEROAM) farFade(lx, lz, s, v.FAR_FADE_START, v.FAR_FADE_END) else 1.0
                 bForestLights.add(px, py, lz, size, size, cols[i], (if (high) v.ALPHA_HIGH else v.ALPHA_LOW) * (1 - own) * flick * haloDay * far, py - groundHeight(px, lz))
+            }
+        }
+    }
+
+    // ---- Christmas: 24-31 December (or forced in the settings) ----
+    private var xmas = false
+    private var xmasAuto = false
+    private var xmasCheckAt = 0L
+
+    private fun christmasOn(mode: ChristmasMode): Boolean = when (mode) {
+        ChristmasMode.ON -> true
+        ChristmasMode.OFF -> false
+        ChristmasMode.AUTO -> {
+            val now = System.currentTimeMillis()
+            if (now >= xmasCheckAt) {   // the date is looked at once a minute, not every frame
+                val c = java.util.Calendar.getInstance()
+                xmasAuto = c.get(java.util.Calendar.MONTH) == java.util.Calendar.DECEMBER && c.get(java.util.Calendar.DAY_OF_MONTH) >= 24
+                xmasCheckAt = now + 60_000
+            }
+            xmasAuto
+        }
+    }
+
+    /** Snow instead of pollen: flakes on a fixed lattice that wraps around the player; the position is a function of time (no state). */
+    private fun buildSnow(s: Simulation, t: Double) {
+        val box = 36.0; val tall = 15.0; val range = box * .5
+        val gy = groundHeight(s.x, s.z)
+        for (i in 0 until XMAS_FLAKES) {
+            val hx = hash(i, 7, 901); val hz = hash(i, 7, 902); val hy = hash(i, 7, 903); val hs = hash(i, 7, 904)
+            val x = s.x + (((hx * box - s.x) % box) + box) % box - range + sin(t * .7 + hy * 6.28) * .5
+            val z = s.z + (((hz * box - s.z) % box) + box) % box - range + cos(t * .6 + hs * 6.28) * .5
+            val y = gy + tall - ((t * (1.1 + hs * .9) + hy * tall) % tall)
+            val dx = x - s.x; val dz = z - s.z
+            val d2 = dx * dx + dz * dz
+            val a = min(1.0, d2 / 4.0) * (1.0 - d2 / (range * range)).coerceIn(0.0, 1.0)
+            val size = .09 + hs * .09
+            bPollenCore.add(x, y, z, size, size, Palette.snow, .9 * a, y - gy)
+        }
+    }
+
+    /** A string of coloured bulbs spiralling up every pine (species 1), twinkling. Additive glows in the forest-lights batch. */
+    private fun buildXmasLights(s: Simulation, t: Double) {
+        var n = 0
+        val haloDay = 1.0 - dayLevel * .35
+        for (tree in s.trees) {
+            if (n + XMAS_BULBS_PER_TREE > XMAS_BULBS_MAX) break
+            val dx = tree.x - s.x; val dz = tree.z - s.z
+            val d = hypot(dx, dz)
+            if (d > 38.0) continue
+            val sx = floor(tree.x).toInt(); val sz = floor(tree.z).toInt()
+            if (min(2, floor(hash(sx, sz, 200) * 3).toInt()) != 1) continue   // pines only
+            val bodyXZ = tree.scale * (.88 + hash(sx, sz, 313) * .26)
+            val bodyY = tree.scale * (.86 + hash(sx, sz, 314) * .30)
+            val base = groundHeight(tree.x, tree.z) - 1.1
+            val fade = 1.0 - smoothRange(d, 26.0, 38.0)
+            val phase = hash(sx, sz, 905) * 6.28
+            for (k in 0 until XMAS_BULBS_PER_TREE) {
+                val f = k / (XMAS_BULBS_PER_TREE - 1.0)
+                val ly = 6.9 + f * 12.2
+                val r = max(.3, 4.2 - (ly - 7.8) * .2545) * .94 * bodyXZ
+                val ang = k * 2.4 + phase
+                val tw = .7 + .3 * sin(t * 2.3 + k * 1.7 + phase)
+                val size = (.9 + d * .035) * (1.15 - f * .35)
+                bForestLights.add(tree.x + cos(ang) * r, base + ly * bodyY, tree.z + sin(ang) * r, size, size,
+                    Palette.bulbs[k % 4], .85 * tw * haloDay * fade)
+                n++
             }
         }
     }

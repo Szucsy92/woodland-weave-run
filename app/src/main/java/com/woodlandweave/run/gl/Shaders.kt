@@ -119,7 +119,7 @@ uniform vec4 uOcc[30];      // trunks that can block a light: xz, radius (6 per 
 uniform float uLodBias;
 uniform vec4 uLocalColor[4]; // rgb = light colour, w = radius
 uniform float uLampSoft;
-uniform float uAlpha, uMaps, uFogNear, uFogFar, uHemi, uLampI, uRedI, uNormalScale, uRough, uLights, uRed, uFogOn, uEncode, uMetal;
+uniform float uAlpha, uMaps, uFogNear, uFogFar, uHemi, uLampI, uRedI, uNormalScale, uRough, uLights, uRed, uFogOn, uEncode, uMetal, uSnow;
 uniform int uMode;
 uniform vec2 uUvScale;
 uniform vec2 uTreeFade;   // radial distances: trees are fully solid up to x and fully dissolved at y
@@ -333,6 +333,14 @@ void main() {
     float pfar = smoothstep(3., 9., dist) * (1. - smoothstep(26., 40., dist));
     vec3 pTint = mix(vec3(.2, .55, .34), vec3(.5, .32, .7), .5 + .5 * sin(vW.x * .27 + vW.z * .19));
     emissive += mix(pTint, vec3(.95, .12, .06), uRed) * prim * (.18 + .3 * pfar) * mix(uLights, .8, uRed);
+  }
+  // Christmas: snow on everything that faces up (the whole ground, the tops of the crowns, bushes and branches).
+  if (uSnow > 0.001 && (uMode == 3 || uMode == 4 || uMode == 5 || uMode == 6)) {
+    float up = uMode == 3 ? .86 : smoothstep(.12, .55, n.y) * (uMode == 4 ? .7 : .92);
+    up *= uSnow;
+    albedo = mix(albedo, vec3(.88, .93, 1.), up);
+    rough = mix(rough, .7, up);
+    emissive *= 1. - up * .7;
   }
   float alpha = pow(min(max(rough, 0.0525) + geometryRoughness, 1.0), 2.0);
   vec3 col = albedo / PI * (mix(uGroundC, uSky, n.y * 0.5 + 0.5) * uHemi);

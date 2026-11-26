@@ -66,6 +66,7 @@ class MainActivity : ComponentActivity() {
             setDifficulty = { v -> lifecycleScope.launch { repo.setDifficulty(v) } },
             setMode = { v -> lifecycleScope.launch { repo.setMode(v) } },
             setMood = { v -> lifecycleScope.launch { repo.setMood(v) } },
+            setChristmas = { v -> lifecycleScope.launch { repo.setChristmas(v) } },
             setTimeOfDay = { v -> lifecycleScope.launch { repo.setTimeOfDay(v) } },
             setQuality = { v -> lifecycleScope.launch { repo.setQuality(v) } },
             setFx = { k, v -> lifecycleScope.launch { repo.setFx(k, v) } },

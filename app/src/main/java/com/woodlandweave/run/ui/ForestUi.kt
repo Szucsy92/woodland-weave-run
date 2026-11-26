@@ -95,6 +95,7 @@ class Actions(
     val setDifficulty: (Difficulty) -> Unit,
     val setMode: (GameMode) -> Unit,
     val setMood: (ForestMood) -> Unit,
+    val setChristmas: (ChristmasMode) -> Unit,
     val setTimeOfDay: (Float) -> Unit,
     val setQuality: (Quality) -> Unit,
     val setFx: (String, Float) -> Unit,
@@ -506,6 +507,9 @@ private fun SettingsContent(ui: UiState, a: Actions, updates: UpdateController, 
                     Seg(listOf(Difficulty.EASY to "Easy", Difficulty.NORMAL to "Normal", Difficulty.HARD to "Hard"), s.difficulty, a.setDifficulty)
                 }
                 TimeOfDayRow(s, a)
+                SettingRow("Christmas", hint = "Auto: 24-31 December.") {
+                    Seg(listOf(ChristmasMode.AUTO to "Auto", ChristmasMode.ON to "On", ChristmasMode.OFF to "Off"), s.christmas, a.setChristmas)
+                }
                 GraphicsBlock(s, a, onFxDrag)
                 SettingRow("Controls") { Seg(listOf(false to "Tilt", true to "Touch"), s.touch, a.setTouch) }
                 SettingRow("Orientation") { Seg(listOf(false to "Landscape", true to "Any"), s.anyOrientation, a.setAnyOrientation) }
