@@ -82,9 +82,9 @@ class Features(val quality: Quality, val depthOk: Boolean = true) {
     // Every tier has the beams (when the device can resolve depth). High marches 28 steps through the shadow map; Low and
     // Medium march a few steps and take the beam shape from the world-fixed canopy openings alone (Q_SHAFTS_LITE).
     val shafts = depthOk
-    // Samples every 1.2 m, anchored in the world: thin beams between the trunks stay put while the runner moves.
-    // The DOF/shaft pre-pass runs at scene resolution, so 28 steps cost less than the old 20-step full-screen march.
-    val shaftSteps = if (r >= 2) 28 else 9
+    // The beams are marched at a quarter of the pixels with a different start offset every frame and averaged over frames
+    // (see PostFx.shaftLowPass), so 20 steps (a sample every 1.7 m) look finer than the old 28 fixed ones.
+    val shaftSteps = if (r >= 2) 20 else 9
     val shaftMax = 34f
     val fogDensity = 0.015f
     val dof = r >= 2

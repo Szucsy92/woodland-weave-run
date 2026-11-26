@@ -818,7 +818,19 @@ vec3 shafts(vec3 c, vec2 uv, float d) {
 // beam sampled 16 times as finely, with no lattice and no grain. The average is weighted by depth, so beams do not bleed over
 // the edges of trunks. Depth is capped: beyond the beam length every distance looks the same.
 float shaftZ(float d) { return min(linZ(d), 48.0); }
-float shaftWeight(float za, float zb) { return exp(-abs(za - zb) / max(0.15 * zb, 0.5)); }
+// How alike two depths are, by ratio (so a thin distant tree and the fog behind it, 20 m apart, still count as neighbours).
+float shaftWeight(float za, float zb) { return exp(-2.5 * abs(log(za / zb))); }
+// Re-expresses a beam value (rgb = in-scattered light, a = transmittance) measured for a ray that ends at depth zt as one for
+// a ray that ends at depth zc along nearly the same direction: the optical depth scales with the length (T' = T^(zc/zt)) and the
+// scattered light with the fog in front (1 - T). This is what lets a texel that belongs to the fog behind a thin trunk
+// give the trunk its own, shorter beam, instead of the trunk being fogged with the wrong amount (dark, speckled).
+vec4 shaftAtDepth(vec4 v, float zt, float zc) {
+  float a = min(zt, uShaftMax); float b = min(zc, uShaftMax);
+  float fogT = 1.0 - v.a;
+  if (fogT < 0.02 || abs(a - b) < 0.04 * a) return v;
+  float Tn = pow(max(v.a, 1e-3), clamp(b / a, 0.1, 8.0));
+  return vec4(v.rgb * ((1.0 - Tn) / fogT), Tn);
+}
 // Pass 2 (target-sized): the depth-weighted 4x4 average of the marched beams.
 vec4 shaftBlur() {
   ivec2 sz = textureSize(uShaftTex, 0);
@@ -830,7 +842,7 @@ vec4 shaftBlur() {
       ivec2 p = clamp(pc + ivec2(i, j), ivec2(0), sz - 1);
       float zt = shaftZ(texture(uDepth, (vec2(p) + 0.5) * uShaftTexel).r);
       float w = shaftWeight(zt, zc) + 1e-4;
-      acc += texelFetch(uShaftTex, p, 0) * w; ws += w;
+      acc += shaftAtDepth(texelFetch(uShaftTex, p, 0), zt, zc) * w; ws += w;
     }
   }
   return acc / ws;
@@ -843,16 +855,18 @@ void shaftResolve() {
   ivec2 pc = ivec2(gl_FragCoord.xy);
   vec2 uv = (vec2(pc) + 0.5) * uShaftTexel;
   float dRaw = texture(uDepth, uv).r;
+  float zNow = shaftZ(dRaw);
   vec4 res = texelFetch(uShaftTex, pc, 0);
   if (uShaftHistOn > 0.5) {
     vec4 pcl = uPrevVP * vec4(worldAt(uv, dRaw), 1.0);
     if (pcl.w > 0.01) {
       vec2 puv = pcl.xy / pcl.w * 0.5 + 0.5;
       if (puv.x > 0.0 && puv.y > 0.0 && puv.x < 1.0 && puv.y < 1.0) {
-        float ok = shaftWeight(texture(uShaftHistZ, puv).r, min(pcl.w, 48.0));
+        float zh = texture(uShaftHistZ, puv).r;
+        float ok = shaftWeight(zh, min(pcl.w, 48.0));
         float disp = length(puv - uv) / uShaftTexel.x;
         float a = 0.9 * ok * ok / (1.0 + 0.12 * disp);
-        res = mix(res, texture(uShaftHist, puv), a);
+        res = mix(res, shaftAtDepth(texture(uShaftHist, puv), zh, zNow), a);
       }
     }
   }
@@ -875,7 +889,7 @@ vec4 shaftUp(vec2 uv, float d) {
       float zt = shaftZ(texture(uDepth, (vec2(p) + 0.5) * uShaftTexel).r);
       float wb = (i == 0 ? 1.0 - f.x : f.x) * (j == 0 ? 1.0 - f.y : f.y);
       float w = wb * shaftWeight(zt, zc) + 1e-4;
-      acc += texelFetch(uShaftTex, p, 0) * w; ws += w;
+      acc += shaftAtDepth(texelFetch(uShaftTex, p, 0), zt, zc) * w; ws += w;
     }
   }
   return acc / ws;

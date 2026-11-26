@@ -463,6 +463,7 @@ class PostFx {
         GL.glUniform2f(loc(p, "uShaftTexel"), 1f / shaftW, 1f / shaftH)
         GL.glUniform1i(loc(p, "uShadowC0"), 4)   // the shadow sampler must not share unit 0 with a sampler2D, even though it is not read here
         GL.glUniform1f(loc(p, "uShaftMode"), 0f)
+        GL.glUniform1f(loc(p, "uShaftMax"), f.shaftMax)
         GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
         // 3. Blend with last frame's beams, into the other history pair.
         val src = histCur; val dst = 1 - histCur
