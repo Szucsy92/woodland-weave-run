@@ -220,9 +220,11 @@ vec3 perturb(vec3 n, vec3 pos, vec2 uv, vec3 m) {
   float sc = det == 0.0 ? 0.0 : inversesqrt(det);
   return normalize(T * (m.x * sc) + B * (m.y * sc) + n * m.z);
 }
+// Extra fog for trees at the far edge of the draw range (see main): fully fogged by the time they start to dissolve.
+float gTreeFog = 0.0;
 // three.js Fog is smoothstep(near, far, depth) on the view-space depth (not the radial distance).
 vec3 finish(vec3 col, float depth) {
-  float f = smoothstep(uFogNear, uFogFar, depth) * uFogOn;
+  float f = max(smoothstep(uFogNear, uFogFar, depth), gTreeFog) * uFogOn;
   col = mix(col, uFog, f);
   // Linear HDR target: keep highlights above 1 (the effect pass encodes). Fallback RGBA8 target: encode here.
   if (uEncode > 0.5) return linearToSrgb(clamp(col, 0.0, 1.0));
@@ -237,6 +239,10 @@ void main() {
   // dither instead of popping in as solid fog-coloured shapes that suddenly hide the distant lights behind them.
   // The whole trunk and crown thins out together; the holes close up as the tree comes nearer.
   if (uMode == 4 || uMode == 5) {
+    // The screen-door holes must show fog-coloured trees against fog: a tree that is still only partly fogged (the fog is
+    // measured on the forward depth, so one at the side of the view is nearer to full fog than it looks) shows as a dark mesh of dots
+    // on the bright haze. So the fog is pushed to full over the 10 m before the dissolve starts, by the radial distance.
+    gTreeFog = smoothstep(uTreeFade.x - 10.0, uTreeFade.x, dist);
     float cover = 1.0 - smoothstep(uTreeFade.x, uTreeFade.y, dist);
     if (cover < 1.0 && cover <= fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))))) discard;
   }
