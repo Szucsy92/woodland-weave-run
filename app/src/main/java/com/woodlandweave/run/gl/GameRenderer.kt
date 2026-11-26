@@ -446,8 +446,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         // Twilight weight: 0 at full night / full day, 1 half way (dawn or dusk).
         val dusk = (1f - kotlin.math.abs(2f * k - 1f)).coerceIn(0f, 1f)
         val tw = ((dusk - .2f) / .6f).coerceIn(0f, 1f).let { it * it * (3f - 2f * it) }
-        val warmSky = floatArrayOf(1.00f, 0.30f, 0.075f)
-        val warmFog = floatArrayOf(0.48f, 0.12f, 0.045f)
+        val warmSky = floatArrayOf(1.00f, 0.17f, 0.34f)
+        val warmFog = floatArrayOf(0.46f, 0.06f, 0.24f)
         lampDay = if (feat.rank >= 1) 1f - .2f * k else 1f
         // Keep exposure nearly constant across the cycle: the eye should read the changing light, not an artificial brightness pump.
         pp.exposureScale = .96f + .035f * k + .012f * dusk
@@ -493,11 +493,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val l = .2126f * c[0] + .7152f * c[1] + .0722f * c[2]
             return FloatArray(3) { l + (c[it] - l) * amount }
         }
-        fog = saturate(fog, 1.20f)
-        sky = saturate(sky, 1.22f)
+        fog = saturate(fog, 1.38f)
+        sky = saturate(sky, 1.42f)
         // Deepen the atmospheric veil: richer hues, lower luminance, less milky daylight.
-        fog = floatArrayOf(fog[0] * .84f, fog[1] * .82f, fog[2] * .83f)
-        sky = floatArrayOf(sky[0] * .90f, sky[1] * .88f, sky[2] * .91f)
+        fog = floatArrayOf(fog[0] * .80f, fog[1] * .78f, fog[2] * .82f)
+        sky = floatArrayOf(sky[0] * .88f, sky[1] * .86f, sky[2] * .92f)
         groundC = Palette.mix(fog, Palette.pursuer, red * .55f)
         // Ambient fill prevents crushed shadows without flattening the directional sunlight.
         hemi = .48f + k * .19f + tw * .045f + dl * .08f + red * 1.4f

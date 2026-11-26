@@ -18,7 +18,7 @@ object Palette {
 
     fun srgb(hex: Int) = floatArrayOf(((hex shr 16) and 255) / 255f, ((hex shr 8) and 255) / 255f, (hex and 255) / 255f)
 
-    val fog = lin(0x0b1424); val moon = lin(0x829ff0); val lamp = lin(0xffe6b8)
+    val fog = lin(0x081030); val moon = lin(0x7a92ff); val lamp = lin(0xffe6b8)
     val green = lin(0x24d975); val purple = lin(0x883cdb); val lavender = lin(0xc8b8e0); val lemon = lin(0xf6ff4f)
     val trunk = lin(0xb8a58c); val ground = lin(0x9aa896); val crown = lin(0x17251c)
     val rock = lin(0x3a4048); val plant = lin(0x22301f)
@@ -30,9 +30,9 @@ object Palette {
     val fairy = intArrayOf(0x2b6cff, 0x2ee88a, 0xb04dff, 0xff7a3d, 0xf6ff4f, 0xff6bd6).map { lin(it) }
     val spiralTrio = intArrayOf(0xff6bd6, 0x6bffe1, 0xffd36b).map { lin(it) }
     // More saturated daytime atmosphere: emerald foliage haze and a clearer blue sky.
-    val dayFog = lin(0x557f68); val daySky = lin(0x6da9d8); val dayFogLight = lin(0x83ad83); val daySkyLight = lin(0x9bc9ed); val dayMoon = lin(0xe5edff); val ghostGlow = lin(0xeaf6ff)
+    val dayFog = lin(0x2f8f6e); val daySky = lin(0x3d8ce6); val dayFogLight = lin(0x58bd8c); val daySkyLight = lin(0x62b0fa); val dayMoon = lin(0xe5edff); val ghostGlow = lin(0xeaf6ff)
     // Distinct, vivid key-light colours: golden sunrise, warm bright noon, orange-red sunset.
-    val sunDawn = lin(0xffff72); val sunDay = lin(0xffffd0); val sunDusk = lin(0xff5428)
+    val sunDawn = lin(0xffb43a); val sunDay = lin(0xffeeb0); val sunDusk = lin(0xff3a78)
 
     fun mix(a: FloatArray, b: FloatArray, t: Float) = FloatArray(3) { a[it] + (b[it] - a[it]) * t }
 
