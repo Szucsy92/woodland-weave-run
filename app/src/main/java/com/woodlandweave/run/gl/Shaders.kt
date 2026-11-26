@@ -298,7 +298,19 @@ void main() {
   }
   vec3 emissive = uEmissive;
   float outA = uAlpha;
-  if (uMode == 4 && !branchSurface) {
+  if (uMode == 3) {
+#ifdef Q_ENV
+    // Puddles: dark, glassy, flat water that mirrors the sky.
+    float pn = sin(vW.x * .37 + sin(vW.z * .29) * 2.3) * sin(vW.z * .33 - sin(vW.x * .21) * 1.9) + .5 * sin(vW.x * 1.7 + vW.z * 1.3) * sin(vW.z * 1.9 - vW.x * 1.1);
+    float pud = smoothstep(.55, .85, pn);
+    albedo *= 1. - pud * .55;
+    float wet = pud * .95;
+    // Wet ground darkens slightly and tightens the GGX highlight; puddles flatten their normal.
+    albedo *= 1.0 - wet * .16;
+    rough = mix(rough, max(.055, rough * .30), wet);
+    n = normalize(mix(n, vec3(0., 1., 0.), pud * .92));
+#endif
+  } else if (uMode == 4 && !branchSurface) {
     // Contact darkening and moss at the trunk foot, plus a soft wet-bark rim glint near the runner.
     float foot = 1. - smoothstep(.72, 2.8, vLY);
     float rootCrease = foot * (0.5 + 0.5 * sin(vW.x * 3.7 + vW.z * 2.9));

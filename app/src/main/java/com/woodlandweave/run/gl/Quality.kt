@@ -9,7 +9,7 @@ package com.woodlandweave.run.gl
  *  MEDIUM  bloom, smooth round shapes (canopy, rocks, bushes, rings and posts are no longer faceted polygons),
  *          and a more lifelike trunk and roots. Nothing else changes.
  *  HIGH    + everything MEDIUM has, plus filmic tone mapping, key-light shadows, SSAO, volumetric light shafts,
- *          wet sheen, a light tree sway, film grain, depth of field and a speed-proportional motion blur.
+ *          wet sheen and puddles, a light tree sway, film grain, depth of field and a speed-proportional motion blur.
  */
 enum class Quality(val label: String) {
     LOW("Low"), MEDIUM("Medium"), HIGH("High");

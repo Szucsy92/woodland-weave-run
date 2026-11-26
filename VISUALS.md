@@ -16,7 +16,7 @@ runs the highest tier the device can really handle instead of crashing (`PostFx.
 | Key-light shadow map (2048, 4-tap hardware PCF, 92 m wide, centred on the runner; coarse trunks, roots, branches, rocks, bushes), replaces the contact-shadow decals | | | yes |
 | SSAO (half-res, 8 samples, bilateral blur) | | | yes |
 | Volumetric light shafts (shadow-map + canopy-gap raymarch, 28 world-anchored steps) | | | yes |
-| Wet sheen (sky/ground mirror) | | | yes |
+| Wet sheen (sky/ground mirror) and puddles on the ground | | | yes |
 | Light whole-tree sway (a smooth world-space gust field) | | | yes |
 | Depth of field (far background only) | | | yes |
 | Motion blur, proportional to speed (none when slow, up to 2% radial smear at a sprint) | | | yes |
