@@ -641,12 +641,20 @@ uniform float uAoK, uShaftSteps, uShaftMax, uFogDens, uDofK, uFocus, uMotion;
 uniform sampler2D uShaftTex;
 uniform vec2 uShaftTexel;
 uniform float uShaftLow;
+// Temporal accumulation of the beams: every frame marches with a different start offset (uShaftJit), and the result is blended
+// with last frame's beams (uShaftHist, with the depth each texel belonged to in uShaftHistZ) reprojected through uPrevVP.
+uniform sampler2D uShaftHist, uShaftHistZ;
+uniform mat4 uPrevVP;
+uniform float uShaftMode, uShaftHistOn, uShaftTemporal, uShaftJit;
 #ifdef Q_SHAFTS
 uniform mat4 uLightVP0;
 uniform sampler2DShadow uShadowC0;
 #endif
 #endif
-out vec4 o;
+layout(location = 0) out vec4 o;
+#ifdef Q_SHAFTBLUR
+layout(location = 1) out vec4 oZ;   // the resolve pass also writes the depth its beams belong to
+#endif
 vec3 srgbToLinear(vec3 c) {
   vec3 lo = c / 12.92;
   vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));
@@ -765,7 +773,8 @@ vec4 shaftTerm(vec2 uv, float d) {
   // the runner moves the sample points do not slide through the beams. Sliding samples are what made thin beams flicker,
   // swim and jump: with the old spacing (a function of the scene depth behind each pixel) every step moved every beam.
   float dtFix = uShaftMax / float(N);
-  float ph = fract(-dot(ro, rd) / dtFix);
+  // Temporal mode: the offset changes every frame instead (and is averaged over frames), so no fixed layers are left in the beams.
+  float ph = uShaftTemporal > 0.5 ? uShaftJit : fract(-dot(ro, rd) / dtFix);
   float j = hpn(gl_FragCoord.xy);   // static per-pixel offset over a whole step: the world anchor stays, the banding (dashed lines) goes
   float cosT = dot(rd, uMoonDir);
   float g = 0.64;   // tighter source lobe: clearer light origin, without turning shafts into hard cones
@@ -826,7 +835,30 @@ vec4 shaftBlur() {
   }
   return acc / ws;
 }
-// Pass 3 (scene resolution): bilinear upsample of the filtered beams, each of the four neighbours weighted by how close its
+// Pass 3 (target-sized): blend with last frame's beams. The previous frame's texel is found by projecting this texel's world
+// point through last frame's matrix; it is used only if it saw a surface at about the same depth (so it never smears over
+// edges that were hidden), and less the further it had to move (fast turns keep fewer old frames).
+void shaftResolve() {
+  ivec2 pc = ivec2(gl_FragCoord.xy);
+  vec2 uv = (vec2(pc) + 0.5) * uShaftTexel;
+  float dRaw = texture(uDepth, uv).r;
+  vec4 res = texelFetch(uShaftTex, pc, 0);
+  if (uShaftHistOn > 0.5) {
+    vec4 pcl = uPrevVP * vec4(worldAt(uv, dRaw), 1.0);
+    if (pcl.w > 0.01) {
+      vec2 puv = pcl.xy / pcl.w * 0.5 + 0.5;
+      if (puv.x > 0.0 && puv.y > 0.0 && puv.x < 1.0 && puv.y < 1.0) {
+        float ok = shaftWeight(texture(uShaftHistZ, puv).r, min(pcl.w, 48.0));
+        float disp = length(puv - uv) / uShaftTexel.x;
+        float a = 0.9 * ok * ok / (1.0 + 0.12 * disp);
+        res = mix(res, texture(uShaftHist, puv), a);
+      }
+    }
+  }
+  o = res;
+  oZ = vec4(shaftZ(dRaw), 0.0, 0.0, 1.0);
+}
+// Pass 4 (scene resolution): bilinear upsample of the filtered beams, each of the four neighbours weighted by how close its
 // depth is to this pixel's depth.
 vec4 shaftUp(vec2 uv, float d) {
   ivec2 sz = textureSize(uShaftTex, 0);
@@ -878,7 +910,7 @@ void main() {
   }
 #endif
 #if defined(Q_SHAFTBLUR) && defined(Q_DEPTH)
-  o = shaftBlur();
+  if (uShaftMode > 0.5) shaftResolve(); else o = shaftBlur();
   return;
 #endif
   vec2 d = vUv - 0.5;

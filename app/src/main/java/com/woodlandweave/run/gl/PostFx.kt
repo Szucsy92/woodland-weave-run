@@ -53,6 +53,10 @@ class PostFx {
     private var shaftProg = 0; private var shaftBlurProg = 0
     private var shaftFbo = IntArray(2); private var shaftTex = IntArray(2)
     private var shaftW = 2; private var shaftH = 2
+    // Temporal accumulation: two history pairs (beams, and the depth they belong to), written alternately; [histCur] holds the latest.
+    private var histFbo = IntArray(2); private var histTex = IntArray(2); private var histZ = IntArray(2)
+    private var histCur = 0; private var histValid = false; private var jitterSeq = 0
+    private val prevVp = FloatArray(16)
     private var shaftLowBroken = false   // a GL error in the small passes: the beams are marched at full size again, as before
     private var ssaoProg = 0; private var aoBlurProg = 0; private var bloomDownProg = 0; private var bloomUpProg = 0
     private var msaaFbo = 0; private var colorRb = 0; private var depthRb = 0
@@ -77,6 +81,7 @@ class PostFx {
         locs.clear()
         program = 0; prepassProg = 0; prepassFbo = 0; prepassTex = 0
         shaftProg = 0; shaftBlurProg = 0; shaftFbo = IntArray(2); shaftTex = IntArray(2); shaftLowBroken = false
+        histFbo = IntArray(2); histTex = IntArray(2); histZ = IntArray(2); histCur = 0; histValid = false
         ssaoProg = 0; aoBlurProg = 0; bloomDownProg = 0; bloomUpProg = 0
         msaaFbo = 0; colorRb = 0; depthRb = 0; resolveFbo = 0; resolveTex = 0; depthTex = 0
         aoFbo = IntArray(2); aoTex = IntArray(2); bloomFbo = IntArray(0); bloomTex = IntArray(0)
@@ -198,8 +203,7 @@ class PostFx {
             GL.glDeleteFramebuffers(1, intArrayOf(prepassFbo), 0)
             GL.glDeleteTextures(1, intArrayOf(prepassTex), 0)
         }
-        if (shaftTex[0] != 0 || shaftTex[1] != 0) { GL.glDeleteFramebuffers(2, shaftFbo, 0); GL.glDeleteTextures(2, shaftTex, 0) }
-        shaftFbo = IntArray(2); shaftTex = IntArray(2)
+        destroyShaftTargets()
         if (aoTex[0] != 0) { GL.glDeleteFramebuffers(2, aoFbo, 0); GL.glDeleteTextures(2, aoTex, 0) }
         if (bloomTex.isNotEmpty() && bloomTex[0] != 0) { GL.glDeleteFramebuffers(bloomFbo.size, bloomFbo, 0); GL.glDeleteTextures(bloomTex.size, bloomTex, 0) }
         msaaFbo = 0; colorRb = 0; depthRb = 0; resolveFbo = 0; resolveTex = 0; depthTex = 0
@@ -274,6 +278,36 @@ class PostFx {
         return GL.glCheckFramebufferStatus(GL.GL_FRAMEBUFFER) == GL.GL_FRAMEBUFFER_COMPLETE
     }
 
+    private fun destroyShaftTargets() {
+        if (shaftTex[0] != 0 || shaftTex[1] != 0) { GL.glDeleteFramebuffers(2, shaftFbo, 0); GL.glDeleteTextures(2, shaftTex, 0) }
+        if (histTex[0] != 0 || histTex[1] != 0) {
+            GL.glDeleteFramebuffers(2, histFbo, 0); GL.glDeleteTextures(2, histTex, 0); GL.glDeleteTextures(2, histZ, 0)
+        }
+        shaftFbo = IntArray(2); shaftTex = IntArray(2)
+        histFbo = IntArray(2); histTex = IntArray(2); histZ = IntArray(2)
+        histCur = 0; histValid = false
+    }
+
+    /** One history pair: the beams and the depth they belong to, as two colour attachments of one framebuffer. */
+    private fun histTarget(i: Int): Boolean {
+        val t = IntArray(2); val f = IntArray(1)
+        GL.glGenTextures(2, t, 0); GL.glGenFramebuffers(1, f, 0)
+        histTex[i] = t[0]; histZ[i] = t[1]; histFbo[i] = f[0]
+        for (k in 0..1) {
+            GL.glBindTexture(GL.GL_TEXTURE_2D, t[k])
+            GL.glTexStorage2D(GL.GL_TEXTURE_2D, 1, GL.GL_RGBA16F, shaftW, shaftH)
+            GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
+            GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
+            GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE)
+            GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
+        }
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, f[0])
+        GL.glFramebufferTexture2D(GL.GL_FRAMEBUFFER, GL.GL_COLOR_ATTACHMENT0, GL.GL_TEXTURE_2D, t[0], 0)
+        GL.glFramebufferTexture2D(GL.GL_FRAMEBUFFER, GL.GL_COLOR_ATTACHMENT1, GL.GL_TEXTURE_2D, t[1], 0)
+        GL.glDrawBuffers(2, intArrayOf(GL.GL_COLOR_ATTACHMENT0, GL.GL_COLOR_ATTACHMENT1), 0)
+        return GL.glCheckFramebufferStatus(GL.GL_FRAMEBUFFER) == GL.GL_FRAMEBUFFER_COMPLETE
+    }
+
     /** Bloom chain and AO targets for the current tier. */
     private fun buildExtraTargets() {
         while (GL.glGetError() != GL.GL_NO_ERROR) { /* drop stale errors */ }
@@ -300,10 +334,10 @@ class PostFx {
         }
         if (prepassProg != 0 && shaftProg != 0 && shaftBlurProg != 0 && linear && depthTex != 0) {
             shaftW = max(2, w / 2); shaftH = max(2, h / 2)
-            val ok = smallTex(GL.GL_RGBA16F, shaftW, shaftH, shaftFbo, shaftTex, 0) && smallTex(GL.GL_RGBA16F, shaftW, shaftH, shaftFbo, shaftTex, 1)
+            val ok = smallTex(GL.GL_RGBA16F, shaftW, shaftH, shaftFbo, shaftTex, 0) && smallTex(GL.GL_RGBA16F, shaftW, shaftH, shaftFbo, shaftTex, 1) &&
+                histTarget(0) && histTarget(1)
             if (!ok) {
-                if (shaftTex[0] != 0 || shaftTex[1] != 0) { GL.glDeleteFramebuffers(2, shaftFbo, 0); GL.glDeleteTextures(2, shaftTex, 0) }
-                shaftFbo = IntArray(2); shaftTex = IntArray(2)
+                destroyShaftTargets()
                 GL.glDeleteProgram(shaftProg); GL.glDeleteProgram(shaftBlurProg)
                 shaftProg = 0; shaftBlurProg = 0
             }
@@ -389,7 +423,7 @@ class PostFx {
      * Returns false (and the prepass marches the beams itself, as before) if the small targets are missing or a GL call fails.
      */
     private fun shaftLowPass(pp: PostParams, f: Features, steps: Float): Boolean {
-        if (shaftLowBroken || shaftProg == 0 || shaftBlurProg == 0 || shaftTex[0] == 0 || shaftTex[1] == 0 || depthTex == 0) return false
+        if (shaftLowBroken || shaftProg == 0 || shaftBlurProg == 0 || shaftTex[0] == 0 || shaftTex[1] == 0 || histTex[0] == 0 || histTex[1] == 0 || depthTex == 0) return false
         while (GL.glGetError() != GL.GL_NO_ERROR) { /* isolate the small passes' errors */ }
         GL.glViewport(0, 0, shaftW, shaftH)
         GL.glDisable(GL.GL_DEPTH_TEST); GL.glDisable(GL.GL_BLEND)
@@ -405,6 +439,11 @@ class PostFx {
         GL.glUniform3f(loc(p, "uMoonDir"), pp.moonDir[0], pp.moonDir[1], pp.moonDir[2])
         GL.glUniform3f(loc(p, "uMoonCol"), pp.moonCol[0], pp.moonCol[1], pp.moonCol[2])
         GL.glUniform2f(loc(p, "uShaftTexel"), 1f / shaftW, 1f / shaftH)
+        // A different start offset every frame (golden-ratio sequence); the temporal blend averages them out.
+        val jit = ((jitterSeq and 0xFFFFF) * 0.6180339887498949 % 1.0).toFloat()
+        jitterSeq++
+        GL.glUniform1f(loc(p, "uShaftTemporal"), 1f)
+        GL.glUniform1f(loc(p, "uShaftJit"), jit)
         GL.glUniform1f(loc(p, "uShaftSteps"), steps)
         GL.glUniform1f(loc(p, "uShaftMax"), f.shaftMax)
         GL.glUniform1f(loc(p, "uFogDens"), f.fogDensity * pp.tune.shafts * pp.shaftScale)
@@ -422,10 +461,25 @@ class PostFx {
         tex(6, shaftTex[0]); GL.glUniform1i(loc(p, "uShaftTex"), 6)
         GL.glUniform2f(loc(p, "uNF"), pp.near, pp.far)
         GL.glUniform2f(loc(p, "uShaftTexel"), 1f / shaftW, 1f / shaftH)
+        GL.glUniform1i(loc(p, "uShadowC0"), 4)   // the shadow sampler must not share unit 0 with a sampler2D, even though it is not read here
+        GL.glUniform1f(loc(p, "uShaftMode"), 0f)
+        GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
+        // 3. Blend with last frame's beams, into the other history pair.
+        val src = histCur; val dst = 1 - histCur
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, histFbo[dst])
+        tex(6, shaftTex[1]); GL.glUniform1i(loc(p, "uShaftTex"), 6)
+        tex(7, histTex[src]); GL.glUniform1i(loc(p, "uShaftHist"), 7)
+        tex(8, histZ[src]); GL.glUniform1i(loc(p, "uShaftHistZ"), 8)
+        GL.glUniformMatrix4fv(loc(p, "uInvVP"), 1, false, pp.invVp, 0)
+        GL.glUniformMatrix4fv(loc(p, "uPrevVP"), 1, false, prevVp, 0)
+        GL.glUniform1f(loc(p, "uShaftHistOn"), if (histValid) 1f else 0f)
+        GL.glUniform1f(loc(p, "uShaftMode"), 1f)
         GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
         GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
         GL.glActiveTexture(GL.GL_TEXTURE0)
-        if (GL.glGetError() != GL.GL_NO_ERROR) { shaftLowBroken = true; return false }
+        if (GL.glGetError() != GL.GL_NO_ERROR) { shaftLowBroken = true; histValid = false; return false }
+        histCur = dst; histValid = true
+        System.arraycopy(pp.vp, 0, prevVp, 0, 16)
         return true
     }
 
@@ -437,6 +491,7 @@ class PostFx {
         // pass then reads the resolved scene directly (same rule as for a failed prepass) and its own DOF/beam uniforms are 0.
         val dofK = if (f.dof && pp.lite < 2) f.dofStrength * pp.tune.dof else 0f
         val shaftsOn = f.shafts && (!f.shadows || pp.shadowTex0 != 0) && pp.tune.shafts > 0.01f
+        if (!shaftsOn) histValid = false   // the beams were skipped: the history is stale
         if (dofK <= 0.001f && !shaftsOn) return false
         val shaftSteps = if (shaftsOn) (if (pp.lite >= 1) kotlin.math.floor(f.shaftSteps * 0.6f) else f.shaftSteps.toFloat()) else 0f
         val low = shaftsOn && shaftLowPass(pp, f, shaftSteps)
@@ -470,7 +525,7 @@ class PostFx {
         GL.glUniform1f(loc(prepassProg, "uShaftSteps"), if (low) 0f else shaftSteps)
         GL.glUniform1f(loc(prepassProg, "uShaftLow"), if (low) 1f else 0f)
         if (low) {
-            tex(6, shaftTex[1]); GL.glUniform1i(loc(prepassProg, "uShaftTex"), 6)
+            tex(6, histTex[histCur]); GL.glUniform1i(loc(prepassProg, "uShaftTex"), 6)
             GL.glUniform2f(loc(prepassProg, "uShaftTexel"), 1f / shaftW, 1f / shaftH)
         }
         GL.glUniform1f(loc(prepassProg, "uShaftMax"), f.shaftMax)
