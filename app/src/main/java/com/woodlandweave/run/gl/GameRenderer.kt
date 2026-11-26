@@ -153,7 +153,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     // draw order, so the picture is the same; each element still fills it from its own block of numbers in Visuals.
     private val bPollenGlow = Sprites(32 + Visuals.Relic.MAX * (Visuals.Relic.CLUSTER_COUNT + Visuals.Relic.SWIRL_COUNT), { pollenGlowTex }, true, false)
     private val bRelicMotes = bPollenGlow
-    private val bPollenCore = Sprites(XMAS_FLAKES, { pollenCoreTex }, false, true)
+    private val bPollenCore = Sprites(XMAS_FLAKES + XMAS_BULBS_MAX, { pollenCoreTex }, false, true)
     private val bMist = Sprites(8, { mistTex }, false, true)
     private val bOrbHalo = Sprites(16, { orbHaloTex }, true, true)
     // Same texture, additive, no fog: a black hole's halo and sparks, the relics' glow and the gates' glow are ONE batch (one draw).
@@ -1515,9 +1515,13 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 val r = max(.3, 4.2 - (ly - 7.8) * .2545) * .94 * bodyXZ
                 val ang = k * 2.4 + phase
                 val tw = .7 + .3 * sin(t * 2.3 + k * 1.7 + phase)
-                val size = (.9 + d * .035) * (1.15 - f * .35)
-                bForestLights.add(tree.x + cos(ang) * r, base + ly * bodyY, tree.z + sin(ang) * r, size, size,
-                    Palette.bulbs[k % 4], .85 * tw * haloDay * fade)
+                val bx = tree.x + cos(ang) * r; val by = base + ly * bodyY; val bz = tree.z + sin(ang) * r
+                // A small glow (the old big ones overlapped into one streak) plus a solid, alpha-blended bulb: additive light alone
+                // washes out on the white snow, so only the red one was seen; the solid bulb keeps every colour visible.
+                val glow = (.38 + d * .016) * (1.15 - f * .35)
+                bForestLights.add(bx, by, bz, glow, glow, Palette.bulbs[k % 4], .85 * tw * haloDay * fade)
+                val bulb = .2 + d * .01
+                bPollenCore.add(bx, by, bz, bulb, bulb, Palette.bulbs[k % 4], (.75 + .25 * tw) * fade)
                 n++
             }
         }
