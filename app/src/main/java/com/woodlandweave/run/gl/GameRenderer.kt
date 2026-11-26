@@ -84,6 +84,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private val locs = android.util.SparseArray<HashMap<String, Int>>()
     private lateinit var meshes: Array<Mesh>
     private lateinit var box: Mesh; private lateinit var orb: Mesh; private lateinit var holeBody: Mesh
+    // Coarser spheres for far away: the power-up orbs (80 / 320 / 1280 triangles) and the black hole body (320 / 1280).
+    private lateinit var orbMid: Mesh; private lateinit var orbLo: Mesh; private lateinit var holeMid: Mesh
     private lateinit var cyl: Mesh; private lateinit var cone: Mesh; private lateinit var ico0: Mesh
     private lateinit var quad: Mesh
     private lateinit var torusA: Mesh; private lateinit var torusB: Mesh; private lateinit var torusC: Mesh
@@ -179,6 +181,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var shadowTreeBodies: Array<Mesh?> = arrayOfNulls(3 * SHAPES)
     private val SHADOW_FADE_END = 118f
     private val BLACK = floatArrayOf(0f, 0f, 0f)
+    /** The gate lattice holds at most 8 gates around the runner (3x3 cells, the origin cell is empty): all rings go out in one instanced draw. */
+    private val GATE_MAX = 8
+    private val gateBuf: FloatBuffer = GlUtil.floatBuffer(GATE_MAX * 16)
     private val forestLightColors = arrayOf(Palette.green, Palette.purple, Palette.lavender, Palette.purple, Palette.lavender)
     private val holeRingColors = arrayOf(Palette.lavender, Palette.purple, Palette.secret)
 
@@ -232,9 +237,10 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             Mesh(Geo.flatQuad(), 1), // reserved mesh slot
         ) + Array(3 * (SHAPES - 1)) { Mesh(Geo.treeBody(false, variant = it / (SHAPES - 1), shape = it % (SHAPES - 1) + 1), MAX_PROPS) }
         box = Mesh(Geo.box(1f, 1f, 1f), 4); orb = Mesh(Geo.icosphere(3), 4); holeBody = Mesh(Geo.icosphere(3), 4)
+        orbMid = Mesh(Geo.icosphere(2), 4); orbLo = Mesh(Geo.icosphere(1), 4); holeMid = Mesh(Geo.icosphere(2), 4)
         cyl = Mesh(Geo.cylinder(.5f, .5f, 1f, 8, 1), 4); cone = Mesh(Geo.cylinder(0f, .5f, 1f, 5, 1), 4)
         ico0 = Mesh(Geo.icosphere(0), 4); quad = Mesh(Geo.quadXY(), 4)
-        torusA = Mesh(Geo.torus(2.4f, .14f, 8, 40), 4); torusB = Mesh(Geo.torus(1.5f, .08f, 6, 28), 4); torusC = Mesh(Geo.torus(.8f, .1f, 6, 24), 4)
+        torusA = Mesh(Geo.torus(2.4f, .14f, 8, 40), GATE_MAX); torusB = Mesh(Geo.torus(1.5f, .08f, 6, 28), 4); torusC = Mesh(Geo.torus(.8f, .1f, 6, 24), 4)
 
         val (gp, gi) = Geo.groundGrid()
         val vao = IntArray(1); val vb = IntArray(2)
@@ -868,10 +874,10 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val oldRound = arrayListOf(cyl, torusA, torusB, torusC)
         if (f.smoothMeshes) {
             cyl = Mesh(Geo.cylinder(.5f, .5f, 1f, 20, 1), 4)
-            torusA = Mesh(Geo.torus(2.4f, .14f, 16, 80), 4); torusB = Mesh(Geo.torus(1.5f, .08f, 12, 64), 4); torusC = Mesh(Geo.torus(.8f, .1f, 12, 48), 4)
+            torusA = Mesh(Geo.torus(2.4f, .14f, 16, 80), GATE_MAX); torusB = Mesh(Geo.torus(1.5f, .08f, 12, 64), 4); torusC = Mesh(Geo.torus(.8f, .1f, 12, 48), 4)
         } else {
             cyl = Mesh(Geo.cylinder(.5f, .5f, 1f, 8, 1), 4)
-            torusA = Mesh(Geo.torus(2.4f, .14f, 8, 40), 4); torusB = Mesh(Geo.torus(1.5f, .08f, 6, 28), 4); torusC = Mesh(Geo.torus(.8f, .1f, 6, 24), 4)
+            torusA = Mesh(Geo.torus(2.4f, .14f, 8, 40), GATE_MAX); torusB = Mesh(Geo.torus(1.5f, .08f, 6, 28), 4); torusC = Mesh(Geo.torus(.8f, .1f, 6, 24), 4)
         }
         for (m in oldRound) m.release()
     }
@@ -904,6 +910,18 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     }
 
     // ---- single primitives ----
+    private fun distSq(x: Double, y: Double, z: Double): Double {
+        val c = engine.camera
+        val dx = x - c.ex; val dy = y - c.ey; val dz = z - c.ez
+        return dx * dx + dy * dy + dz * dz
+    }
+
+    /** A power-up sphere is under 1 m across: beyond 20 m the 320-triangle sphere, beyond 55 m the 80-triangle one is indistinguishable. */
+    private fun orbMesh(x: Double, y: Double, z: Double): Mesh {
+        val d2 = distSq(x, y, z)
+        return if (d2 < 20.0 * 20.0) orb else if (d2 < 55.0 * 55.0) orbMid else orbLo
+    }
+
     private fun uploadOne(mesh: Mesh, m: FloatArray) {
         mesh.drawOne(m)
     }
@@ -944,7 +962,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             GL.glEnable(GL.GL_CULL_FACE); GL.glCullFace(GL.GL_BACK)
             material(litProg, col, col, Visuals.OrbSphere.EMISSIVE, alpha = Visuals.OrbSphere.ALPHA, rough = Visuals.OrbSphere.ROUGH)
             place(parent, o.p.x, py, o.p.z, 0.0, 0.0, 0.0, Visuals.OrbSphere.SIZE)
-            uploadOne(orb, parent)
+            uploadOne(orbMesh(o.p.x, py, o.p.z), parent)
             GL.glDisable(GL.GL_CULL_FACE); GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
         }
         drawRelics(s, e)
@@ -952,12 +970,19 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         if (!Visuals.GateRing.ON || s.mode != GameMode.FREEROAM) return
         material(litProg, Palette.ember, mode = 2, fogOn = 0f)   // no fog on the ring itself: it must stay visible in the mist
         val k = GATE_HALF / Visuals.GateRing.TORUS_R              // torusA is built with radius TORUS_R; scale it to the gate
+        var n = 0
         for (g in e.gates) {
+            if (n >= GATE_MAX) break
             place(parent, g.x, groundHeight(g.x, g.z), g.z, 0.0, g.angle, 0.0)
             // The torus already lies in the local XY plane, so with no tilt it stands upright (the runner goes through it along the
             // gate's normal, as in passGate). Its lowest point (tube included) floats GateRing.GAP above the ground.
-            prim(torusA, parent, 0.0, GATE_HALF + Visuals.GateRing.TORUS_TUBE * k + Visuals.GateRing.GAP, 0.0, 0.0, 0.0, 0.0, k, k, k)
+            Mat.compose(tmpL, 0, 0.0, GATE_HALF + Visuals.GateRing.TORUS_TUBE * k + Visuals.GateRing.GAP, 0.0, 0.0, 0.0, 0.0, Mat.XYZ, k, k, k)
+            Matrix.multiplyMM(tmpM, 0, parent, 0, tmpL, 0)
+            gateBuf.position(n * 16); gateBuf.put(tmpM, 0, 16)
+            n++
         }
+        gateBuf.position(0)
+        torusA.draw(gateBuf, n)   // one draw for every gate (draw() ignores n == 0)
     }
 
     /** The power-up spheres: glass with slowly morphing, rippling veils inside (see Shaders.ORB_FS). */
@@ -981,7 +1006,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             u3(p, "uColor", orbColor(o.p.type))
             val py = groundHeight(o.p.x, o.p.z) + Visuals.OrbSphere.HEIGHT
             place(parent, o.p.x, py, o.p.z, 0.0, 0.0, 0.0, Visuals.OrbSphere.SIZE)
-            uploadOne(orb, parent)
+            uploadOne(orbMesh(o.p.x, py, o.p.z), parent)
         }
         GL.glDisable(GL.GL_CULL_FACE); GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
         GL.glUseProgram(litProg)   // the code that follows sets litProg's uniforms without binding it again
@@ -1000,7 +1025,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 // The body: pure black and untouched by fog, so it reads from far away.
                 material(litProg, BLACK, mode = 2, fogOn = 0f)
                 place(parent, h.x, y, h.z, 0.0, 0.0, 0.0, HOLE_RADIUS)
-                uploadOne(holeBody, parent)
+                uploadOne(if (distSq(h.x, y, h.z) < 50.0 * 50.0) holeBody else holeMid, parent)
             }
             if (Visuals.BlackHole.VEILS) {
                 // A tilted accretion veil: three faint, soft glows turning slowly.
