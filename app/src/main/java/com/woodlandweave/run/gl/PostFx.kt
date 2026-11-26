@@ -49,6 +49,11 @@ class PostFx {
     private var program = 0
     private var prepassProg = 0
     private var prepassFbo = 0; private var prepassTex = 0
+    // The beams are marched and filtered at a quarter of the scene's pixels: [0] = the march, [1] = its depth-weighted 4x4 average.
+    private var shaftProg = 0; private var shaftBlurProg = 0
+    private var shaftFbo = IntArray(2); private var shaftTex = IntArray(2)
+    private var shaftW = 2; private var shaftH = 2
+    private var shaftLowBroken = false   // a GL error in the small passes: the beams are marched at full size again, as before
     private var ssaoProg = 0; private var aoBlurProg = 0; private var bloomDownProg = 0; private var bloomUpProg = 0
     private var msaaFbo = 0; private var colorRb = 0; private var depthRb = 0
     private var resolveFbo = 0; private var resolveTex = 0; private var depthTex = 0
@@ -71,6 +76,7 @@ class PostFx {
     fun create() {
         locs.clear()
         program = 0; prepassProg = 0; prepassFbo = 0; prepassTex = 0
+        shaftProg = 0; shaftBlurProg = 0; shaftFbo = IntArray(2); shaftTex = IntArray(2); shaftLowBroken = false
         ssaoProg = 0; aoBlurProg = 0; bloomDownProg = 0; bloomUpProg = 0
         msaaFbo = 0; colorRb = 0; depthRb = 0; resolveFbo = 0; resolveTex = 0; depthTex = 0
         aoFbo = IntArray(2); aoTex = IntArray(2); bloomFbo = IntArray(0); bloomTex = IntArray(0)
@@ -112,6 +118,19 @@ class PostFx {
         prepassProg = if (feat.needsDepth) GlUtil.programOrNull(Shaders.POST_VS, Shaders.postFs(
             SHOCKWAVE_RINGS, SHOCKWAVE_GAP, SHOCKWAVE_SPEED, feat.postDefines() + "#define Q_PREPASS\n"
         )) else 0
+        if (shaftProg != 0) GL.glDeleteProgram(shaftProg)
+        if (shaftBlurProg != 0) GL.glDeleteProgram(shaftBlurProg)
+        shaftProg = 0; shaftBlurProg = 0
+        if (feat.needsDepth && feat.shafts && !shaftLowBroken) {
+            val base = feat.postDefines()
+            shaftProg = GlUtil.programOrNull(Shaders.POST_VS, Shaders.postFs(SHOCKWAVE_RINGS, SHOCKWAVE_GAP, SHOCKWAVE_SPEED, base + "#define Q_SHAFTMARCH\n"))
+            shaftBlurProg = GlUtil.programOrNull(Shaders.POST_VS, Shaders.postFs(SHOCKWAVE_RINGS, SHOCKWAVE_GAP, SHOCKWAVE_SPEED, base + "#define Q_SHAFTBLUR\n"))
+            if (shaftProg == 0 || shaftBlurProg == 0) {
+                if (shaftProg != 0) GL.glDeleteProgram(shaftProg)
+                if (shaftBlurProg != 0) GL.glDeleteProgram(shaftBlurProg)
+                shaftProg = 0; shaftBlurProg = 0
+            }
+        }
         ssaoProg = 0; aoBlurProg = 0; bloomDownProg = 0; bloomUpProg = 0
         if (feat.bloom) {
             bloomDownProg = GlUtil.programOrNull(Shaders.POST_VS, Shaders.BLOOM_DOWN_FS)
@@ -179,6 +198,8 @@ class PostFx {
             GL.glDeleteFramebuffers(1, intArrayOf(prepassFbo), 0)
             GL.glDeleteTextures(1, intArrayOf(prepassTex), 0)
         }
+        if (shaftTex[0] != 0 || shaftTex[1] != 0) { GL.glDeleteFramebuffers(2, shaftFbo, 0); GL.glDeleteTextures(2, shaftTex, 0) }
+        shaftFbo = IntArray(2); shaftTex = IntArray(2)
         if (aoTex[0] != 0) { GL.glDeleteFramebuffers(2, aoFbo, 0); GL.glDeleteTextures(2, aoTex, 0) }
         if (bloomTex.isNotEmpty() && bloomTex[0] != 0) { GL.glDeleteFramebuffers(bloomFbo.size, bloomFbo, 0); GL.glDeleteTextures(bloomTex.size, bloomTex, 0) }
         msaaFbo = 0; colorRb = 0; depthRb = 0; resolveFbo = 0; resolveTex = 0; depthTex = 0
@@ -277,6 +298,16 @@ class PostFx {
                 prepassProg = 0
             }
         }
+        if (prepassProg != 0 && shaftProg != 0 && shaftBlurProg != 0 && linear && depthTex != 0) {
+            shaftW = max(2, w / 2); shaftH = max(2, h / 2)
+            val ok = smallTex(GL.GL_RGBA16F, shaftW, shaftH, shaftFbo, shaftTex, 0) && smallTex(GL.GL_RGBA16F, shaftW, shaftH, shaftFbo, shaftTex, 1)
+            if (!ok) {
+                if (shaftTex[0] != 0 || shaftTex[1] != 0) { GL.glDeleteFramebuffers(2, shaftFbo, 0); GL.glDeleteTextures(2, shaftTex, 0) }
+                shaftFbo = IntArray(2); shaftTex = IntArray(2)
+                GL.glDeleteProgram(shaftProg); GL.glDeleteProgram(shaftBlurProg)
+                shaftProg = 0; shaftBlurProg = 0
+            }
+        }
         if (f.ssao && ssaoProg != 0 && depthTex != 0) {
             val aw = max(2, w / 2); val ah = max(2, h / 2)
             var ok = true
@@ -352,6 +383,52 @@ class PostFx {
         GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
     }
 
+    /**
+     * The light beams, at a quarter of the scene's pixels: march (the same world-anchored steps and Bayer offsets as before), then a
+     * depth-weighted 4x4 average that cancels the Bayer lattice exactly. The prepass upsamples the result with depth weights.
+     * Returns false (and the prepass marches the beams itself, as before) if the small targets are missing or a GL call fails.
+     */
+    private fun shaftLowPass(pp: PostParams, f: Features, steps: Float): Boolean {
+        if (shaftLowBroken || shaftProg == 0 || shaftBlurProg == 0 || shaftTex[0] == 0 || shaftTex[1] == 0 || depthTex == 0) return false
+        while (GL.glGetError() != GL.GL_NO_ERROR) { /* isolate the small passes' errors */ }
+        GL.glViewport(0, 0, shaftW, shaftH)
+        GL.glDisable(GL.GL_DEPTH_TEST); GL.glDisable(GL.GL_BLEND)
+        // 1. March.
+        var p = shaftProg
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, shaftFbo[0])
+        GL.glUseProgram(p)
+        tex(1, depthTex); GL.glUniform1i(loc(p, "uDepth"), 1)
+        GL.glUniform2f(loc(p, "uNF"), pp.near, pp.far)
+        GL.glUniform2f(loc(p, "uTanAspect"), pp.tanHalf * pp.aspect, pp.tanHalf)
+        GL.glUniformMatrix4fv(loc(p, "uInvVP"), 1, false, pp.invVp, 0)
+        GL.glUniform3f(loc(p, "uCamPos"), pp.camX, pp.camY, pp.camZ)
+        GL.glUniform3f(loc(p, "uMoonDir"), pp.moonDir[0], pp.moonDir[1], pp.moonDir[2])
+        GL.glUniform3f(loc(p, "uMoonCol"), pp.moonCol[0], pp.moonCol[1], pp.moonCol[2])
+        GL.glUniform2f(loc(p, "uShaftTexel"), 1f / shaftW, 1f / shaftH)
+        GL.glUniform1f(loc(p, "uShaftSteps"), steps)
+        GL.glUniform1f(loc(p, "uShaftMax"), f.shaftMax)
+        GL.glUniform1f(loc(p, "uFogDens"), f.fogDensity * pp.tune.shafts * pp.shaftScale)
+        GL.glUniform1i(loc(p, "uShadowC0"), 4)
+        if (f.shadows) {
+            tex(4, pp.shadowTex0)
+            GL.glUniformMatrix4fv(loc(p, "uLightVP0"), 1, false, pp.lightVp0, 0)
+        }
+        GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
+        // 2. Depth-weighted 4x4 average.
+        p = shaftBlurProg
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, shaftFbo[1])
+        GL.glUseProgram(p)
+        tex(1, depthTex); GL.glUniform1i(loc(p, "uDepth"), 1)
+        tex(6, shaftTex[0]); GL.glUniform1i(loc(p, "uShaftTex"), 6)
+        GL.glUniform2f(loc(p, "uNF"), pp.near, pp.far)
+        GL.glUniform2f(loc(p, "uShaftTexel"), 1f / shaftW, 1f / shaftH)
+        GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
+        GL.glActiveTexture(GL.GL_TEXTURE0)
+        if (GL.glGetError() != GL.GL_NO_ERROR) { shaftLowBroken = true; return false }
+        return true
+    }
+
     /** DOF and volumetric shafts are evaluated once at the scene target's resolution, then bilinearly upscaled. */
     private fun depthPrepass(pp: PostParams): Boolean {
         if (prepassProg == 0 || prepassFbo == 0 || prepassTex == 0 || depthTex == 0 || !linear) return false
@@ -361,6 +438,8 @@ class PostFx {
         val dofK = if (f.dof && pp.lite < 2) f.dofStrength * pp.tune.dof else 0f
         val shaftsOn = f.shafts && (!f.shadows || pp.shadowTex0 != 0) && pp.tune.shafts > 0.01f
         if (dofK <= 0.001f && !shaftsOn) return false
+        val shaftSteps = if (shaftsOn) (if (pp.lite >= 1) kotlin.math.floor(f.shaftSteps * 0.6f) else f.shaftSteps.toFloat()) else 0f
+        val low = shaftsOn && shaftLowPass(pp, f, shaftSteps)
         while (GL.glGetError() != GL.GL_NO_ERROR) { /* isolate prepass errors */ }
         GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, prepassFbo)
         GL.glViewport(0, 0, w, h)
@@ -386,12 +465,18 @@ class PostFx {
         GL.glUniform1f(loc(prepassProg, "uMotion"), 0f)
         GL.glUniform1f(loc(prepassProg, "uDofK"), dofK)
         GL.glUniform1f(loc(prepassProg, "uFocus"), f.focus)
-        GL.glUniform1f(loc(prepassProg, "uShaftSteps"), if (shaftsOn) (if (pp.lite >= 1) kotlin.math.floor(f.shaftSteps * 0.6f) else f.shaftSteps.toFloat()) else 0f)
+        // The shadow sampler must never sit on unit 0 beside a sampler2D, even when the beams are not marched in this pass.
+        GL.glUniform1i(loc(prepassProg, "uShadowC0"), 4)
+        GL.glUniform1f(loc(prepassProg, "uShaftSteps"), if (low) 0f else shaftSteps)
+        GL.glUniform1f(loc(prepassProg, "uShaftLow"), if (low) 1f else 0f)
+        if (low) {
+            tex(6, shaftTex[1]); GL.glUniform1i(loc(prepassProg, "uShaftTex"), 6)
+            GL.glUniform2f(loc(prepassProg, "uShaftTexel"), 1f / shaftW, 1f / shaftH)
+        }
         GL.glUniform1f(loc(prepassProg, "uShaftMax"), f.shaftMax)
         GL.glUniform1f(loc(prepassProg, "uFogDens"), f.fogDensity * pp.tune.shafts * pp.shaftScale)
-        if (shaftsOn && f.shadows) {
+        if (shaftsOn && !low && f.shadows) {
             tex(4, pp.shadowTex0)
-            GL.glUniform1i(loc(prepassProg, "uShadowC0"), 4)
             GL.glUniformMatrix4fv(loc(prepassProg, "uLightVP0"), 1, false, pp.lightVp0, 0)
         }
         GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
