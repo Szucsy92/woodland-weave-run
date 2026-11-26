@@ -569,9 +569,14 @@ void main() {
   float fr = pow(1.0 - abs(dot(nrm, -rd)), 2.5);
   // The ribbons: neon lemon-yellow where they are thin, going to white where they are dense.
   vec3 veilCol = mix(vec3(0.82, 1.0, 0.12), vec3(1.0), smoothstep(0.25, 0.9, acc));
-  vec3 emit = (veilCol * acc * 1.6 + mix(uColor, vec3(1.0), 0.25) * fr * 0.9) * uGlow;
+  // The glass is filled with a richer, more saturated version of the orb's colour; the fill dims where a ribbon crosses it,
+  // and the ribbons themselves stay bright (a little tinted), so the flow reads clearly against the colour.
+  vec3 base = clamp(mix(vec3(dot(uColor, vec3(0.299, 0.587, 0.114))), uColor, 1.45), 0.0, 1.0);
+  veilCol = mix(veilCol, mix(base, vec3(1.0), 0.55), 0.3);
+  vec3 body = base * 0.5 * (1.0 - 0.6 * acc);
+  vec3 emit = (veilCol * acc * 1.6 + body + mix(base, vec3(1.0), 0.15) * fr * 0.9) * uGlow;
   float a = clamp(uAlpha * 0.9 + fr * 0.3 + acc * 0.2, 0.0, 0.92);   // a darker glass body, so the ribbons stand out of it
-  vec3 col = emit + uColor * 0.04 * a;
+  vec3 col = emit + base * 0.04 * a;
   float f = smoothstep(uFogNear, uFogFar, distance(vW, uCam));
   col = mix(col, uFog * a, f);
   o = vec4(uEncode > 0.5 ? linearToSrgb(clamp(col, 0.0, 1.0)) : col, a);

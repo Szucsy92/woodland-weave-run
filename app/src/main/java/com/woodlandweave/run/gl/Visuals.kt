@@ -70,14 +70,16 @@ object Visuals {
     }
 
     /**
-     * The gate: a plain ring (a torus of radius GATE_HALF) standing upright in the gate's plane, so the runner passes through it.
+     * The gate: a plain ring (a torus of radius GateRing.RADIUS) standing upright in the gate's plane, so the runner passes through it.
      * The gate itself works with or without it. GAP is how far the lowest point of the ring floats above the ground.
      */
     object GateRing {
         const val ON = true
-        const val GAP = 0.0            // lowest point of the tube above the ground, in metres (0 = the ring may touch the ground)
-        const val TORUS_R = 2.4        // radius of the torusA mesh; the ring is scaled to GATE_HALF / TORUS_R
-        const val TORUS_TUBE = .14     // tube radius of the torusA mesh (scaled the same way)
+        /** Radius of the drawn ring in metres (the pass-through test still uses GATE_HALF). */
+        const val RADIUS = 4.5
+        const val GAP = 0.05           // lowest point of the tube above the ground, in metres: the ring just clears the ground
+        const val TORUS_R = 2.4        // radius of the torusA mesh; the ring is scaled to RADIUS / TORUS_R
+        const val TORUS_TUBE = .056    // tube radius of the torusA mesh (scaled the same way: .056 * 4.5 / 2.4 = about 0.105 m, half the old 0.21 m)
         const val SEE = 130.0          // gates further away than this get no glow and no lens
 
         /** A ring of additive glow sprites that shows through the fog (fog is off for them). */

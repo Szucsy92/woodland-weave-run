@@ -240,7 +240,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         orbMid = Mesh(Geo.icosphere(2), 4); orbLo = Mesh(Geo.icosphere(1), 4); holeMid = Mesh(Geo.icosphere(2), 4)
         cyl = Mesh(Geo.cylinder(.5f, .5f, 1f, 8, 1), 4); cone = Mesh(Geo.cylinder(0f, .5f, 1f, 5, 1), 4)
         ico0 = Mesh(Geo.icosphere(0), 4); quad = Mesh(Geo.quadXY(), 4)
-        torusA = Mesh(Geo.torus(2.4f, .14f, 8, 40), GATE_MAX); torusB = Mesh(Geo.torus(1.5f, .08f, 6, 28), 4); torusC = Mesh(Geo.torus(.8f, .1f, 6, 24), 4)
+        torusA = Mesh(Geo.torus(2.4f, Visuals.GateRing.TORUS_TUBE.toFloat(), 8, 40), GATE_MAX); torusB = Mesh(Geo.torus(1.5f, .08f, 6, 28), 4); torusC = Mesh(Geo.torus(.8f, .1f, 6, 24), 4)
 
         val (gp, gi) = Geo.groundGrid()
         val vao = IntArray(1); val vb = IntArray(2)
@@ -874,10 +874,10 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val oldRound = arrayListOf(cyl, torusA, torusB, torusC)
         if (f.smoothMeshes) {
             cyl = Mesh(Geo.cylinder(.5f, .5f, 1f, 20, 1), 4)
-            torusA = Mesh(Geo.torus(2.4f, .14f, 16, 80), GATE_MAX); torusB = Mesh(Geo.torus(1.5f, .08f, 12, 64), 4); torusC = Mesh(Geo.torus(.8f, .1f, 12, 48), 4)
+            torusA = Mesh(Geo.torus(2.4f, Visuals.GateRing.TORUS_TUBE.toFloat(), 16, 80), GATE_MAX); torusB = Mesh(Geo.torus(1.5f, .08f, 12, 64), 4); torusC = Mesh(Geo.torus(.8f, .1f, 12, 48), 4)
         } else {
             cyl = Mesh(Geo.cylinder(.5f, .5f, 1f, 8, 1), 4)
-            torusA = Mesh(Geo.torus(2.4f, .14f, 8, 40), GATE_MAX); torusB = Mesh(Geo.torus(1.5f, .08f, 6, 28), 4); torusC = Mesh(Geo.torus(.8f, .1f, 6, 24), 4)
+            torusA = Mesh(Geo.torus(2.4f, Visuals.GateRing.TORUS_TUBE.toFloat(), 8, 40), GATE_MAX); torusB = Mesh(Geo.torus(1.5f, .08f, 6, 28), 4); torusC = Mesh(Geo.torus(.8f, .1f, 6, 24), 4)
         }
         for (m in oldRound) m.release()
     }
@@ -969,14 +969,14 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         // The gates exist (and work) in Freeroam; each one is shown as a plain ring.
         if (!Visuals.GateRing.ON || s.mode != GameMode.FREEROAM) return
         material(litProg, Palette.ember, mode = 2, fogOn = 0f)   // no fog on the ring itself: it must stay visible in the mist
-        val k = GATE_HALF / Visuals.GateRing.TORUS_R              // torusA is built with radius TORUS_R; scale it to the gate
+        val k = Visuals.GateRing.RADIUS / Visuals.GateRing.TORUS_R   // torusA is built with radius TORUS_R; scale it to the drawn ring
         var n = 0
         for (g in e.gates) {
             if (n >= GATE_MAX) break
             place(parent, g.x, groundHeight(g.x, g.z), g.z, 0.0, g.angle, 0.0)
             // The torus already lies in the local XY plane, so with no tilt it stands upright (the runner goes through it along the
             // gate's normal, as in passGate). Its lowest point (tube included) floats GateRing.GAP above the ground.
-            Mat.compose(tmpL, 0, 0.0, GATE_HALF + Visuals.GateRing.TORUS_TUBE * k + Visuals.GateRing.GAP, 0.0, 0.0, 0.0, 0.0, Mat.XYZ, k, k, k)
+            Mat.compose(tmpL, 0, 0.0, Visuals.GateRing.RADIUS + Visuals.GateRing.TORUS_TUBE * k + Visuals.GateRing.GAP, 0.0, 0.0, 0.0, 0.0, Mat.XYZ, k, k, k)
             Matrix.multiplyMM(tmpM, 0, parent, 0, tmpL, 0)
             gateBuf.position(n * 16); gateBuf.put(tmpM, 0, 16)
             n++
@@ -1373,8 +1373,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
 
     /** Where the centre of a gate's ring is: the ring's lowest point floats GAP above the ground. */
     private fun gateCentreY(g: Gate): Double {
-        val k = GATE_HALF / Visuals.GateRing.TORUS_R
-        return groundHeight(g.x, g.z) + GATE_HALF + Visuals.GateRing.TORUS_TUBE * k + Visuals.GateRing.GAP
+        val k = Visuals.GateRing.RADIUS / Visuals.GateRing.TORUS_R
+        return groundHeight(g.x, g.z) + Visuals.GateRing.RADIUS + Visuals.GateRing.TORUS_TUBE * k + Visuals.GateRing.GAP
     }
 
     /** A necklace of additive glow sprites around each ring (fog off), so a gate can be seen from far away in the mist. */
@@ -1391,7 +1391,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val lx = cos(g.angle); val lz = -sin(g.angle)      // the ring's sideways axis (the same one passGate uses)
             for (i in 0 until v.GLOW_COUNT) {
                 val th = i * 2 * PI / v.GLOW_COUNT
-                val rx = cos(th) * GATE_HALF; val ry = sin(th) * GATE_HALF
+                val rx = cos(th) * v.RADIUS; val ry = sin(th) * v.RADIUS
                 bGateGlow.add(g.x + lx * rx, cy + ry, g.z + lz * rx, v.GLOW_SIZE, v.GLOW_SIZE, Palette.ember, a)
             }
             n++
@@ -1422,7 +1422,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val vx = g.x - cam.ex; val vz = g.z - cam.ez
         val vl = max(.001, hypot(vx, vz))
         val sx = abs((vx * sin(g.angle) + vz * cos(g.angle)) / vl)
-        val rs = .5 * GATE_HALF / dist3 / tan(Math.toRadians(FOV / 2.0))
+        val rs = .5 * Visuals.GateRing.RADIUS / dist3 / tan(Math.toRadians(FOV / 2.0))
         // Fades in with distance and out again in the last metres, and when the ring is nearly edge-on.
         val strength = (v.LENS_MAGNIFY * ((v.SEE - dist3) / 50.0).coerceIn(0.0, 1.0) * ((dist3 - 1.5) / v.LENS_FADE_NEAR).coerceIn(0.0, 1.0) * (sx / .25).coerceIn(0.0, 1.0))
         return floatArrayOf((px / pw * .5 + .5).toFloat(), (py / pw * .5 + .5).toFloat(), rs.toFloat(), strength.toFloat(), sx.toFloat().coerceAtLeast(.05f))
