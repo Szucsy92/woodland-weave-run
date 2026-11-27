@@ -39,6 +39,8 @@ enum class Cue { FREEZER, GHOST, SHOCKWAVE, RING, END, STUMBLE, GATE, HOLE, WARP
 class ForestAudio(private val context: Context) {
     private companion object {
         const val RATE = 44100
+        /** Length of the equal-power crossfade between the base and the Christmas forest loop. */
+        const val LOOP_XFADE_S = 3f
         const val MUFFLED_HZ = 380f
         const val MENU_HZ = 220f
         const val RUN_HZ = 4000f
@@ -189,6 +191,12 @@ class ForestAudio(private val context: Context) {
             var selectedChristmas = christmas
             var pcm = try { soften(readWav(if (selectedChristmas) R.raw.forest_loop_xmas else R.raw.forest_loop)) } catch (_: Exception) { return }
             var frames = pcm.size / 2
+            // Outgoing loop while a base <-> Christmas crossfade is running (null = no fade in progress).
+            var oldPcm: ShortArray? = null
+            var oldFrames = 0
+            var oldPos = 0
+            var fadeDone = 0
+            val fadeTotal = (RATE * LOOP_XFADE_S).toInt()
             val chunkFrames = 1024
             val out = ShortArray(chunkFrames * 2)
             var track: AudioTrack? = null
@@ -202,16 +210,20 @@ class ForestAudio(private val context: Context) {
                 while (!released && !isInterrupted) {
                     // The setting can change while the app is running; reload the source at the next audio chunk.
                     val requestedChristmas = christmas
-                    if (requestedChristmas != selectedChristmas) {
+                    // A switch that arrives mid-fade waits until the running fade has finished.
+                    if (requestedChristmas != selectedChristmas && oldPcm == null) {
                         val replacement = try {
                             soften(readWav(if (requestedChristmas) R.raw.forest_loop_xmas else R.raw.forest_loop))
                         } catch (_: Exception) { null }
                         if (replacement != null && replacement.size >= 4) {
+                            if (track != null) {
+                                // Audible: keep the old loop running and fade it out while the new one fades in.
+                                oldPcm = pcm; oldFrames = frames; oldPos = pos; fadeDone = 0
+                            }
                             pcm = replacement
                             frames = pcm.size / 2
                             pos = 0
                             selectedChristmas = requestedChristmas
-                            lpL = 0f; lpR = 0f
                         }
                     }
                     if (!canPlay()) {
@@ -236,14 +248,25 @@ class ForestAudio(private val context: Context) {
                     gain += (targetGain - gain) * (1 - exp(-dt / 0.8f))
                     cutoff += (targetHz - cutoff) * (1 - exp(-dt / hzTc))
                     val a = 1f - exp(-2f * PI.toFloat() * cutoff / RATE)
+                    val fadeSrc = oldPcm
                     for (i in 0 until chunkFrames) {
-                        val l = pcm[pos * 2].toFloat()
-                        val r = pcm[pos * 2 + 1].toFloat()
+                        var l = pcm[pos * 2].toFloat()
+                        var r = pcm[pos * 2 + 1].toFloat()
+                        if (fadeSrc != null && fadeDone < fadeTotal) {
+                            // Equal-power crossfade: new loop up with sin, old loop down with cos.
+                            val ft = fadeDone.toFloat() / fadeTotal * (PI.toFloat() / 2)
+                            val up = sin(ft); val down = kotlin.math.cos(ft)
+                            l = l * up + fadeSrc[oldPos * 2] * down
+                            r = r * up + fadeSrc[oldPos * 2 + 1] * down
+                            if (++oldPos >= oldFrames) oldPos = 0
+                            fadeDone++
+                        }
                         lpL += a * (l - lpL); lpR += a * (r - lpR)
                         out[i * 2] = (lpL * gain).toInt().coerceIn(-32768, 32767).toShort()
                         out[i * 2 + 1] = (lpR * gain).toInt().coerceIn(-32768, 32767).toShort()
                         if (++pos >= frames) pos = 0
                     }
+                    if (fadeSrc != null && fadeDone >= fadeTotal) oldPcm = null
                     // A negative result means the route died (headset pulled, audio server restarted): start over cleanly.
                     if (tr.write(out, 0, out.size) < 0) { close(tr); track = null; gain = 0f; sleep(300) }
                 }
