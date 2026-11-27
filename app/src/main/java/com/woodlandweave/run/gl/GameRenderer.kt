@@ -164,7 +164,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private val bMist = Sprites(8, { mistTex }, false, true)
     private val bOrbHalo = Sprites(16, { orbHaloTex }, true, true)
     // Same texture, additive, no fog: a black hole's halo and sparks, the relics' glow and the gates' glow are ONE batch (one draw).
-    private val bHoleGlow = Sprites(64 + Visuals.Relic.MAX * (1 + Visuals.Relic.FAIRY_COUNT) + Visuals.GateRing.GLOW_MAX * Visuals.GateRing.GLOW_COUNT, { holeGlowTex }, true, false)
+    private val bHoleGlow = Sprites(64 + Visuals.Relic.MAX * (1 + Visuals.Relic.FAIRY_COUNT) + Visuals.GateRing.GLOW_MAX * Visuals.GateRing.GLOW_COUNT + Visuals.DayGate.MAX * Visuals.DayGate.GLOW_COUNT, { holeGlowTex }, true, false)
     private val bRelicGlow = bHoleGlow
     private val bGateGlow = bHoleGlow
     private val bWarpSpores = Sprites(1600, { warpSporeTex }, true, false)     // the dots of the warp
@@ -197,6 +197,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     /** The gate lattice holds at most 8 gates around the runner (3x3 cells, the origin cell is empty): all rings go out in one instanced draw. */
     private val GATE_MAX = 8
     private val gateBuf: FloatBuffer = GlUtil.floatBuffer(GATE_MAX * 16)
+    private val dayGateBuf: FloatBuffer = GlUtil.floatBuffer(GATE_MAX * 16)   // the flat rings (same torus mesh, at most Visuals.DayGate.MAX of them)
+    private var daySlide = 0.0   // eased number of half days the sky has been turned by the day gates
     private val forestLightColors = arrayOf(Palette.green, Palette.purple, Palette.lavender, Palette.purple, Palette.lavender)
     private val holeRingColors = arrayOf(Palette.lavender, Palette.purple, Palette.secret)
 
@@ -364,6 +366,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         fun open(x: Double, z: Double) = !free ||
             (engine.secrets.all { hypot(x - it.x, z - it.z) > SECRET_CLEARING } &&
                 engine.gates.all { hypot(x - it.x, z - it.z) > GATE_CLEARING } &&
+                engine.dayGates.all { hypot(x - it.x, z - it.z) > DAYGATE_CLEARING } &&
                 holes.all { hypot(x - it.x, z - it.z) > HOLE_CLEARING })
         for (t in treesAround(cx, cz, levelOf(s.difficulty).treeGap, 0, SHADOW_RADIUS, skipInner = RADIUS)) {
             if (abs(floor(t.x / CELL).toInt() - cx) <= RADIUS && abs(floor(t.z / CELL).toInt() - cz) <= RADIUS) continue   // inside the window: already a real tree (or removed on purpose)
@@ -457,7 +460,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
 
         // Day cycle: fog, moon light and hemisphere drift towards day colours, and towards blood near the pursuer.
         val hours = clockHours()
-        val target = timeOfDayFor(e.settings.mood, e.settings.timeOfDay.toDouble(), hours)
+        // Each pass through a day gate turns the sky half a day on (night <-> day, dawn <-> dusk); it glides over about a second.
+        val slideGoal = s.daySide * .5
+        if (s.daySide == 0 && s.phase != Phase.RUNNING) daySlide = 0.0
+        else daySlide += (slideGoal - daySlide) * min(1.0, dt * 3.5)
+        val target = timeOfDayFor(e.settings.mood, e.settings.timeOfDay.toDouble(), hours) + daySlide
         if (cyc < 0) cyc = target
         else {
             // Ease towards the target the short way round the cycle: a slider drag or a mode switch glides, Auto just follows the clock.
@@ -539,7 +546,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         Matrix.multiplyMM(vp, 0, proj, 0, view, 0)
 
         effectState.aspect = aspectRatio.toDouble()
-        effects.update(s, dt, effectState, { holeScreen(it, cam) }, { gateScreen(it, cam) })
+        effects.update(s, dt, effectState, { holeScreen(it, cam) }, { gateScreen(it, cam) }, { dayGateScreen(it, cam) })
 
         if (ADAPTIVE_SCALE && scaler.tick(dt)) post.setScale(scaler.density / surfaceDensity)
         encode = if (post.linear) 0f else 1f
@@ -1043,6 +1050,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         }
         gateBuf.position(0)
         torusA.draw(gateBuf, n)   // one draw for every gate (draw() ignores n == 0)
+        drawDayGates(e)
     }
 
     /** The power-up spheres: glass with slowly morphing, rippling veils inside (see Shaders.ORB_FS). */
@@ -1291,6 +1299,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         if (Visuals.Mist.ON) buildMist(s, t)
         if (Visuals.BlackHole.GLOW) buildBlackHoleGlow(s, t)
         if (Visuals.GateRing.ON && Visuals.GateRing.GLOW) buildGateGlow(s, e, t)
+        if (Visuals.DayGate.ON) buildDayGateGlow(s, e, t)
         if (Visuals.Relic.ON) buildRelicSprites(s, e, t)
     }
 
@@ -1427,6 +1436,72 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 }
             }
         }
+    }
+
+    /** The day gates: the same torus as the survive gate, lying flat on the ground (turned a quarter turn about x), in its own colour. */
+    private fun drawDayGates(e: GameEngine) {
+        if (!Visuals.DayGate.ON) return
+        material(litProg, Palette.portal, mode = 2, fogOn = 0f)
+        val k = Visuals.GateRing.RADIUS / Visuals.GateRing.TORUS_R
+        var n = 0
+        for (g in e.dayGates) {
+            if (n >= Visuals.DayGate.MAX) break
+            place(parent, g.x, groundHeight(g.x, g.z), g.z)
+            Mat.compose(tmpL, 0, 0.0, Visuals.GateRing.TORUS_TUBE * k + Visuals.GateRing.GAP, 0.0, PI / 2, 0.0, 0.0, Mat.XYZ, k, k, k)
+            Matrix.multiplyMM(tmpM, 0, parent, 0, tmpL, 0)
+            dayGateBuf.position(n * 16); dayGateBuf.put(tmpM, 0, 16)
+            n++
+        }
+        dayGateBuf.position(0)
+        torusA.draw(dayGateBuf, n)
+    }
+
+    /** A necklace of glow sprites around each flat ring, so it can be seen from far away in the mist. */
+    private fun buildDayGateGlow(s: Simulation, e: GameEngine, t: Double) {
+        if (s.mode != GameMode.FREEROAM || s.warp >= 0) return
+        val v = Visuals.DayGate
+        var n = 0
+        for (g in e.dayGates) {
+            if (n >= v.MAX) break
+            val dist = hypot(g.x - s.x, g.z - s.z)
+            if (dist >= v.SEE) continue
+            val cy = groundHeight(g.x, g.z) + .2
+            val a = v.GLOW_ALPHA * (1.0 + sin(t * 1.3 + n * 1.9) * v.GLOW_PULSE) * ((v.SEE - dist) / 40.0).coerceIn(0.0, 1.0)
+            for (i in 0 until v.GLOW_COUNT) {
+                val th = i * 2 * PI / v.GLOW_COUNT
+                bGateGlow.add(g.x + cos(th) * Visuals.GateRing.RADIUS, cy, g.z + sin(th) * Visuals.GateRing.RADIUS, v.GLOW_SIZE, v.GLOW_SIZE, Palette.portal, a)
+            }
+            n++
+        }
+    }
+
+    /**
+     * The nearest day gate on screen, for the upside-down view inside its ring: x, y, radius (in screen heights), strength, the vertical
+     * squash of the flat ring (an ellipse seen at an angle, a line seen edge-on) and the grade (> 0 when the far side is brighter).
+     */
+    private fun dayGateScreen(s: Simulation, cam: CameraPose): FloatArray? {
+        val v = Visuals.DayGate
+        if (!v.ON || s.mode != GameMode.FREEROAM || s.warp >= 0) return null
+        var best: DayGate? = null; var bestD = v.SEE
+        for (g in engine.dayGates) {
+            val d = hypot(g.x - cam.ex, g.z - cam.ez)
+            if (d < bestD) { best = g; bestD = d }
+        }
+        val g = best ?: return null
+        val cy = groundHeight(g.x, g.z) + .2
+        val dist3 = max(.5, sqrt((g.x - cam.ex).pow(2) + (cy - cam.ey).pow(2) + (g.z - cam.ez).pow(2)))
+        val px = vp[0] * g.x + vp[4] * cy + vp[8] * g.z + vp[12]
+        val py = vp[1] * g.x + vp[5] * cy + vp[9] * g.z + vp[13]
+        val pz = vp[2] * g.x + vp[6] * cy + vp[10] * g.z + vp[14]
+        val pw = vp[3] * g.x + vp[7] * cy + vp[11] * g.z + vp[15]
+        if (pw <= 0f || pz / pw >= 1f) return null
+        val rs = .5 * Visuals.GateRing.RADIUS / dist3 / tan(Math.toRadians(FOV / 2.0))
+        // The flat ring seen from above at the angle `elev` is an ellipse that is sin(elev) as tall as it is wide.
+        val sy = ((cam.ey - cy) / dist3).coerceIn(.05, 1.0)
+        val strength = v.VIEW * ((v.SEE - dist3) / 50.0).coerceIn(0.0, 1.0) * ((hypot(g.x - cam.ex, g.z - cam.ez) - Visuals.GateRing.RADIUS * .5) / v.VIEW_FADE_NEAR).coerceIn(0.0, 1.0)
+        // The far side is the other half of the day: its brightness is 1 - ours.
+        val grade = (1.0 - 2.0 * dayLevel)
+        return floatArrayOf((px / pw * .5 + .5).toFloat(), (py / pw * .5 + .5).toFloat(), rs.toFloat(), strength.toFloat(), sy.toFloat(), (if (grade >= 0) 1f else -1f))
     }
 
     /** Where the centre of a gate's ring is: the ring's lowest point floats GAP above the ground. */

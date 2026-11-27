@@ -97,6 +97,23 @@ object Visuals {
     }
 
     /**
+     * The day gate: the same ring as the survive gate, but lying flat on the ground. Through it the other side of the day shows up
+     * side down (in the effect pass); reaching it, the runner falls in and comes out on the far side in the other time of day.
+     */
+    object DayGate {
+        const val ON = true
+        const val SEE = 130.0
+        const val MAX = 4              // day gates drawn at once
+        const val GLOW_COUNT = 22
+        const val GLOW_SIZE = 3.2
+        const val GLOW_ALPHA = .5
+        const val GLOW_PULSE = .15
+        /** How strongly the far side is turned over and graded inside the ring (0..1). */
+        const val VIEW = 1.0
+        const val VIEW_FADE_NEAR = 4.0 // the view fades out over the last metres before the ring
+    }
+
+    /**
      * The black hole, as it always was (body, accretion veil, halo and sparks, the warp's dots, and the warp's screen effects in
      * Effects and the effect shader), except that the wormhole's relics are gone: not drawn in the warp, not left behind in the
      * universes it opens into.

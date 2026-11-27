@@ -52,6 +52,8 @@ class PowerUp(var x: Double, var z: Double, val type: PowerUpType, val id: Strin
 class Secret(val x: Double, val z: Double, val type: SecretType, val id: String)
 class Gate(val x: Double, val z: Double, val angle: Double, val id: String)
 class BlackHole(val x: Double, val z: Double, val id: String)
+/** A ring lying flat on the ground: dive in head first, come out on the far side upright, in the other time of day. */
+class DayGate(val x: Double, val z: Double, val id: String)
 class Spore(
     val x: Double,
     val z: Double,
@@ -118,6 +120,14 @@ const val GATE_DEPTH = 0.9
 const val GATE_CLEARING = 6.5
 const val GATE_REARM = 9.0
 const val GATE_KICK_TIME = 1.6   // the lens kick when a gate is passed (into or out of Survive)
+
+const val DAYGATE_CELL = 320         // one cell of the day-gate lattice, in metres
+const val DAYGATE_CHANCE = 0.22      // the chance that a cell holds a day gate
+const val DAYGATE_RADIUS = 4.5       // the drawn ring (the same radius as the upright gate ring)
+const val DAYGATE_TRIGGER = 4.1      // the dive starts as soon as the runner is this close to the middle (at the ring itself)
+const val DAYGATE_CLEARING = 14.0    // no trees within this of the middle: room on both sides of the ring
+const val DAYGATE_REARM = 12.0       // the same gate works again after the runner has been this far from it
+const val DAYGATE_TIME = 1.25        // the whole fall through the ring, in seconds (the time of day changes half way)
 
 const val HOLE_CELL = 220
 const val HOLE_CHANCE = 0.3
@@ -260,6 +270,66 @@ fun gatesAround(x: Double, z: Double): List<Gate> {
         )
     }
     return out
+}
+
+fun dayGatesAround(x: Double, z: Double): List<DayGate> {
+    val cx = fl(x / DAYGATE_CELL); val cz = fl(z / DAYGATE_CELL)
+    val upright = gatesAround(x, z)
+    val out = ArrayList<DayGate>()
+    for (i in -1..1) for (j in -1..1) {
+        val gx = cx + i; val gz = cz + j
+        if (gx == 0 && gz == 0) continue
+        if (hash(gx, gz, 520) > DAYGATE_CHANCE) continue
+        val px = gx * DAYGATE_CELL + 20 + hash(gx, gz, 521) * (DAYGATE_CELL - 40)
+        val pz = gz * DAYGATE_CELL + 20 + hash(gx, gz, 522) * (DAYGATE_CELL - 40)
+        if (upright.any { hypot(px - it.x, pz - it.z) < 40.0 }) continue   // never on top of a survive gate
+        out += DayGate(px, pz, "d$gx:$gz")
+    }
+    return out
+}
+
+/** Reaching the ring starts the dive: the runner falls forward into the middle and comes out on the far edge, facing back. */
+fun enterDayGate(s: Simulation, gate: DayGate): Boolean {
+    if (s.mode != GameMode.FREEROAM || s.phase != Phase.RUNNING || s.dive >= 0 || s.warp >= 0) return false
+    val dx = s.x - gate.x; val dz = s.z - gate.z
+    val d = hypot(dx, dz)
+    if (s.lastDayGate == gate.id) {
+        if (d > DAYGATE_REARM) s.lastDayGate = ""
+        return false
+    }
+    if (d > DAYGATE_TRIGGER) return false
+    s.lastDayGate = gate.id
+    s.dive = 0.0; s.diveFlipped = false
+    s.diveX0 = s.x; s.diveZ0 = s.z
+    s.diveX1 = 2 * gate.x - s.x; s.diveZ1 = 2 * gate.z - s.z   // straight through the middle to the opposite point of the ring
+    s.diveH0 = s.heading
+    // Heading of the fall (towards the middle); when the runner stands right in the middle, keep the heading it has.
+    s.diveHDir = if (d > 0.05) kotlin.math.atan2(dx, dz) else s.heading
+    s.pushX = 0.0; s.pushZ = 0.0
+    return true
+}
+
+private fun stepDive(s: Simulation, dt: Double) {
+    s.dive += dt
+    val u = min(1.0, s.dive / DAYGATE_TIME)
+    val e = smooth(u)
+    s.x = s.diveX0 + (s.diveX1 - s.diveX0) * e
+    s.z = s.diveZ0 + (s.diveZ1 - s.diveZ0) * e
+    // Turn towards the middle in the first quarter (the shortest way round), hold it for the fall.
+    var delta = (s.diveHDir - s.diveH0) % (2 * PI)
+    if (delta > PI) delta -= 2 * PI else if (delta < -PI) delta += 2 * PI
+    s.heading = s.diveH0 + delta * smooth(min(1.0, u / 0.25))
+    if (!s.diveFlipped && u >= 0.5) {
+        s.diveFlipped = true
+        s.daySide += 1            // the other time of day, from here on
+        s.gateKick = 0.0          // the gate's elastic fisheye kick, at the moment of passing
+    }
+    if (u >= 1.0) {
+        s.dive = -1.0
+        s.heading = s.diveH0 + delta + PI   // standing up again, facing the way we came
+        s.pushX = 0.0; s.pushZ = 0.0
+        s.stumble = 0.0; s.speedMul = 1.0
+    }
 }
 
 fun passGate(s: Simulation, gate: Gate): Boolean {
@@ -417,6 +487,9 @@ class Simulation {
     var gateKick = -1.0   // seconds since the gate was passed; < 0 when idle
     var warp = -1.0; var warpOut = -1.0; var warpHole = ""; var warpFrom = Point(0.0, 0.0)
     var universe = 0; var universeAt = 0.0
+    // Day gates: [dive] is the seconds into the fall through the ring (< 0 when idle); [daySide] counts the passes (each flips day and night).
+    var dive = -1.0; var diveFlipped = false; var daySide = 0; var lastDayGate = ""
+    var diveX0 = 0.0; var diveZ0 = 0.0; var diveX1 = 0.0; var diveZ1 = 0.0; var diveH0 = 0.0; var diveHDir = 0.0
 
     /** Equivalent of `Object.assign(s, makeSimulation(), { ... })`. */
     fun reset(difficulty: Difficulty = this.difficulty, mode: GameMode = this.mode, phase: Phase = Phase.MENU, elapsed: Double = 0.0) {
@@ -430,6 +503,7 @@ class Simulation {
         surviveTime = -1.0; lastGate = ""; found.clear(); foundAt.clear(); gateKick = -1.0
         warp = -1.0; warpOut = -1.0; warpHole = ""; warpFrom = Point(0.0, 0.0)
         universe = 0; universeAt = 0.0
+        dive = -1.0; diveFlipped = false; daySide = 0; lastDayGate = ""
     }
 }
 
@@ -635,6 +709,7 @@ fun stepSimulation(s: Simulation, steering: Double, delta: Double) {
     if (s.phase != Phase.RUNNING) return
     val level = levelOf(s.difficulty)
     val free = s.mode == GameMode.FREEROAM
+    if (s.dive >= 0) { stepDive(s, dt); return }   // falling through a day gate: no steering, no collisions
     val count = ceil(dt / (1.0 / 120)).toInt()
     if (count <= 0) return
     val sub = dt / count

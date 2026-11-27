@@ -632,6 +632,9 @@ uniform float uSharpen;
 uniform vec4 hole;
 uniform vec4 gate;     // the survive gate: screen centre, radius, strength
 uniform float gateSx;  // horizontal squash of the ring seen at an angle
+uniform vec4 dgate;    // the day gate (a ring lying flat): screen centre, radius, strength
+uniform float dgateSy; // vertical squash of the flat ring seen from above at an angle
+uniform float dgateGrade; // > 0: the far side is brighter than this side, < 0: darker
 uniform float reach[RINGS];
 uniform vec2 resolution;
 // Glass panels, in dp with the origin at the bottom left of the screen.
@@ -1013,6 +1016,17 @@ void main() {
   w = min(1.0, w) * wave;
   base += q / max(r, 0.001) * w * 0.008 * vec2(1.0 / asp, 1.0);
   vec2 uv = base;
+  // Day gate: inside the flat ring the picture is turned upside down (mirrored over the ring's middle), faded in softly at the rim.
+  float dgMask = 0.0;
+  if (dgate.w > 0.001) {
+    vec2 dq = q - (dgate.xy - 0.5) * vec2(asp, 1.0);
+    vec2 pd = vec2(dq.x, dq.y / max(dgateSy, 0.05)) / dgate.z;
+    float rr = dot(pd, pd);
+    if (rr < 1.0) {
+      dgMask = dgate.w * (1.0 - smoothstep(0.7, 1.0, rr));
+      uv = mix(uv, vec2(uv.x, 2.0 * dgate.y - uv.y), dgMask);
+    }
+  }
   vec2 split = vec2(glitch * 0.012, glitch * 0.002);
   vec3 c;
   if (blur < 0.001 && glitch < 0.001) {
@@ -1029,6 +1043,13 @@ void main() {
       c = mix(c, sharp, min(gk * 0.9, 0.9));
       c += (vec3(0.55, 0.12, 0.85) * max(pu.r - c.r, 0.0) + vec3(0.1, 0.8, 0.35) * max(gr.g - c.g, 0.0)) * min(gk, 1.5) * 0.6;
     }
+  }
+  if (dgMask > 0.0) {
+    // The other time of day: brighter and warm when this side is dark, darker and cold when this side is bright.
+    float lum = dot(c, vec3(0.3, 0.55, 0.15));
+    vec3 other = dgateGrade > 0.0 ? (mix(vec3(lum), c, 1.15) * vec3(1.35, 1.22, 0.95) + vec3(0.06, 0.05, 0.0))
+                                  : (vec3(lum) * vec3(0.38, 0.55, 1.05) * 0.7 + c * 0.1);
+    c = mix(c, other, dgMask);
   }
 #ifdef Q_FULL
   if (uChroma > 0.0 && blur < 0.001 && glitch < 0.001) {

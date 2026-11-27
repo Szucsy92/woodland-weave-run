@@ -79,6 +79,7 @@ class GameEngine(
     @Volatile var worldCx = 0; @Volatile var worldCz = 0
     var secrets: List<Secret> = emptyList(); private set
     var gates: List<Gate> = emptyList(); private set
+    var dayGates: List<DayGate> = emptyList(); private set
     val orbs = ArrayList<Orb>()
     val spores = ArrayList<Spore>(FOREST_POLLEN_COUNT)
     var redMix = 0.0; private set
@@ -101,6 +102,7 @@ class GameEngine(
     private var lastPowerUp: PowerUpType? = null
     private var lastRing = -1
     private var lastWarp = -1.0
+    private var lastDive = -1.0
     private var lastWarpOut = -1.0
     private var activePower: PowerUpType? = null
     private var leavingPower: PowerUpType? = null
@@ -226,14 +228,16 @@ class GameEngine(
         if (s.mode == GameMode.FREEROAM) {
             secrets = secretsAround(s.x, s.z)
             gates = gatesAround(s.x, s.z)
+            dayGates = dayGatesAround(s.x, s.z)
             val holes = holesAround(s.x, s.z, s.universe)
             fun open(x: Double, z: Double) =
                 secrets.all { hypot(x - it.x, z - it.z) > SECRET_CLEARING } &&
                     gates.all { hypot(x - it.x, z - it.z) > GATE_CLEARING } &&
+                    dayGates.all { hypot(x - it.x, z - it.z) > DAYGATE_CLEARING } &&
                     holes.all { hypot(x - it.x, z - it.z) > HOLE_CLEARING }
             trees = trees.filter { open(it.x, it.z) }
             obstacles = obstacles.filter { open(it.x, it.z) }
-        } else { secrets = emptyList(); gates = emptyList() }
+        } else { secrets = emptyList(); gates = emptyList(); dayGates = emptyList() }
         s.trees = trees
         s.obstacles = obstacles
         worldCx = cx; worldCz = cz
@@ -300,8 +304,12 @@ class GameEngine(
 
         if (s.mode == GameMode.FREEROAM) {
             for (g in gates) if (passGate(s, g)) { buzz(30, 40, 30); audio.cue(Cue.GATE) }
+            for (g in dayGates) if (enterDayGate(s, g)) break
             for (sec in secrets) if (discoverSecret(s, sec)) onSecret()
         }
+        if (s.dive >= 0 && lastDive < 0) { buzz(40, 30, 60, 30, 80); audio.cue(Cue.GATE) }
+        if (s.dive < 0 && lastDive >= 0) audio.cue(Cue.WARPOUT)
+        lastDive = s.dive
     }
 
     private fun updateOrbs(raw: Double) {
@@ -412,18 +420,27 @@ class GameEngine(
         val canLook = s.phase == Phase.MENU || s.phase == Phase.FALLEN || s.pause != PauseState.NONE
         val lookTarget = if (canLook) steering * .5 else 0.0
         menuLook += (lookTarget - menuLook) * min(1.0, raw * (if (canLook) 1.4 else 6.0))
-        val vh = s.heading + menuLook
+        // Day gate: the runner falls forward into the ring, turns over, and stands up facing the other way (yaw, pitch, roll and dip).
+        val dive = if (s.dive >= 0) min(1.0, s.dive / DAYGATE_TIME) else -1.0
+        val diveYaw = if (dive >= 0) PI * smoothstep(dive, .45, .9) else 0.0
+        val vh = s.heading + menuLook + diveYaw
         val tx = s.x - sin(vh) * 18 + stepX
         val tz = s.z - cos(vh) * 18 + stepZ
         c.tx = tx; c.tz = tz
         c.ty = groundHeight(s.x, s.z) * .6 + groundHeight(s.x - sin(vh) * 18, s.z - cos(vh) * 18) * .4 + 1.62 + fall * 3
         val warpW = warpEnvelope(s)
+        if (dive >= 0) {
+            val pitch = -1.3 * sin(PI * smoothstep(dive, 0.0, 1.0))   // looking down into the ring in the middle of the fall
+            c.ey -= 1.05 * sin(PI * dive)
+            c.ty = c.ey + 18 * kotlin.math.tan(pitch)
+        }
         c.rotX = warpW * sin(t * 1.7) * .035 + bump * .085 + waking * sin(t * 5) * .045 + fall * .065 * sin(t * .32) +
             tripping * sin(t * 17) * .085 + (if (running) sin(s.stride) * .006 else 0.0)
         c.rotY = -leanAmount * .06
         c.rotZ = warpW * (sin(t * 1.1) * .12 + sin(t * 2.7) * .04) - leanAmount * .065 + bump * .12 + fall * .72 +
             waking * sin(t * 4) * .03 + (if (running) sin(s.stride * .5) * .007 else sin(t * .4) * .008) +
-            tripping * sin(t * 13) * .06
+            tripping * sin(t * 13) * .06 +
+            (if (dive >= 0) PI * (smoothstep(dive, .12, .5) - smoothstep(dive, .5, .92)) else 0.0)   // upside down at the middle of the fall
 
         val swayTarget = if (running) -steering * .55 else 0.0
         lampSway += (swayTarget - lampSway) * min(1.0, raw * 4)

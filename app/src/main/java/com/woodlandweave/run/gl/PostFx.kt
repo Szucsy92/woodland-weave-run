@@ -632,6 +632,7 @@ class PostFx {
         GL.glUniform1f(loc("hue"), e.hue.toFloat()); GL.glUniform1f(loc("time"), e.time.toFloat())
         GL.glUniform4f(loc("hole"), e.hole[0], e.hole[1], e.hole[2], e.hole[3])
         GL.glUniform4f(loc("gate"), e.gate[0], e.gate[1], e.gate[2], e.gate[3]); GL.glUniform1f(loc("gateSx"), e.gateSx)
+        GL.glUniform4f(loc("dgate"), e.dgate[0], e.dgate[1], e.dgate[2], e.dgate[3]); GL.glUniform1f(loc("dgateSy"), e.dgateSy); GL.glUniform1f(loc("dgateGrade"), e.dgateGrade)
         GL.glUniform1fv(loc("reach"), e.reach.size, e.reach, 0)
         GL.glUniform2f(loc("resolution"), w.toFloat(), h.toFloat())
         GL.glUniform2f(loc("uRootDp"), rootW, rootH)

@@ -19,6 +19,10 @@ class EffectState {
     /** The nearest gate on screen: x, y (0..1), radius (screen heights), strength; [gateSx] squashes the circle into the ellipse the upright ring makes. */
     val gate = floatArrayOf(.5f, .5f, .1f, 0f)
     var gateSx = 1f
+    /** The nearest day gate on screen: x, y, radius, strength; [dgateSy] squashes the circle into the ellipse the flat ring makes; [dgateGrade] > 0 when the far side is brighter. */
+    val dgate = floatArrayOf(.5f, .5f, .1f, 0f)
+    var dgateSy = 1f
+    var dgateGrade = 0f
     /** Screen aspect (width / height), so the gate-pass kick can match the gate lens's centre zoom. */
     var aspect = 16.0 / 9.0
 }
@@ -56,7 +60,7 @@ class EffectsModel {
     /** The same punch for every event, `age` seconds after it happened. */
     private fun kick(age: Double) = if (age >= 0 && age < GLITCH_KICK_TIME) punch(1 - age / GLITCH_KICK_TIME) else 0.0
 
-    fun update(s: Simulation, delta: Double, out: EffectState, holeFor: (Simulation) -> FloatArray?, gateFor: (Simulation) -> FloatArray? = { null }) {
+    fun update(s: Simulation, delta: Double, out: EffectState, holeFor: (Simulation) -> FloatArray?, gateFor: (Simulation) -> FloatArray? = { null }, dayGateFor: (Simulation) -> FloatArray? = { null }) {
         val lying = s.phase == Phase.FALLING || s.phase == Phase.FALLEN
         val awake = s.phase == Phase.AWAKENING
         val impact = if (s.impact > 0) sin((1 - s.impact / IMPACT_DURATION) * PI) else 0.0
@@ -85,6 +89,12 @@ class EffectsModel {
         }
         val arrive = if (s.phase == Phase.MENU) max(0.0, 1 - s.phaseTime / .9) * 2.9 else 0.0
         blur = max(blur + arrive, pb)
+        // Falling through a day gate: the picture smears and flashes as the runner passes the middle.
+        if (s.dive >= 0) {
+            val u = (s.dive / DAYGATE_TIME).coerceIn(0.0, 1.0)
+            blur = max(blur, sin(PI * u).pow(2.0) * 1.2)
+            glitch += max(0.0, 1 - kotlin.math.abs(u - .5) * 2.4).pow(2.0) * 1.2
+        }
         glitch += pg + arrive * .15
 
         // Power-ups: the common punch on pickup (and on expiry, below), plus a faint shimmer while active.
@@ -111,6 +121,10 @@ class EffectsModel {
         val hitAge = clock - hitAt
         if (hitAge >= 0 && hitAge < GATE_KICK_TIME) lens += gateSpring(hitAge, out.aspect)
         var flash = 0.0
+        if (s.dive >= 0) {
+            val u = (s.dive / DAYGATE_TIME).coerceIn(0.0, 1.0)
+            flash += exp(-((u - .5) / .09).pow(2.0)) * .6
+        }
         if (s.warp >= 0 && s.warp < 1.6) {
             lens += gateSpring(s.warp, out.aspect)
             flash += max(0.0, 1 - s.warp / .3) * .6
@@ -136,6 +150,10 @@ class EffectsModel {
         val gate = gateFor(s)
         if (gate != null) { out.gate[0] = gate[0]; out.gate[1] = gate[1]; out.gate[2] = gate[2]; out.gate[3] = gate[3]; out.gateSx = gate[4] }
         else { out.gate[0] = .5f; out.gate[1] = .5f; out.gate[2] = .1f; out.gate[3] = 0f; out.gateSx = 1f }
+
+        val dgate = dayGateFor(s)
+        if (dgate != null) { for (i in 0..3) out.dgate[i] = dgate[i]; out.dgateSy = dgate[4]; out.dgateGrade = dgate[5] }
+        else { out.dgate[3] = 0f; out.dgateSy = 1f; out.dgateGrade = 0f }
 
         val hueTarget = universeHue(s.universe) + warp * sin(clock * 1.4) * .7
         hueNow += (hueTarget - hueNow) * min(1.0, delta * 1.8)
