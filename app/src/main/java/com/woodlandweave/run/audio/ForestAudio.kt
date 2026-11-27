@@ -9,6 +9,8 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Process
 import com.woodlandweave.run.R
+import com.woodlandweave.run.sim.ChristmasMode
+import java.time.LocalDate
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.PI
@@ -46,6 +48,7 @@ class ForestAudio(private val context: Context) {
 
     @Volatile private var enabled = true
     @Volatile private var running = false
+    @Volatile private var christmas = false
     @Volatile private var foreground = true
     @Volatile private var muffled = false
     @Volatile private var dipUntilNs = 0L
@@ -106,6 +109,18 @@ class ForestAudio(private val context: Context) {
     }
 
     fun setMode(enabled: Boolean, running: Boolean) { this.enabled = enabled; this.running = running }
+
+    /** Selects the actual music source from the same Christmas setting used by the renderer. */
+    fun setChristmas(mode: ChristmasMode) {
+        christmas = when (mode) {
+            ChristmasMode.ON -> true
+            ChristmasMode.OFF -> false
+            ChristmasMode.AUTO -> {
+                val date = LocalDate.now()
+                date.monthValue == 12 && date.dayOfMonth in 24..31
+            }
+        }
+    }
     fun setMuffled(value: Boolean) { muffled = value }
     fun onForeground() { foreground = true }
     fun onBackground() { foreground = false }
@@ -171,8 +186,9 @@ class ForestAudio(private val context: Context) {
 
         override fun run() {
             Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
-            val pcm = try { soften(readWav(R.raw.forest_loop)) } catch (_: Exception) { return }
-            val frames = pcm.size / 2
+            var selectedChristmas = christmas
+            var pcm = try { soften(readWav(if (selectedChristmas) R.raw.forest_loop_xmas else R.raw.forest_loop)) } catch (_: Exception) { return }
+            var frames = pcm.size / 2
             val chunkFrames = 1024
             val out = ShortArray(chunkFrames * 2)
             var track: AudioTrack? = null
@@ -184,6 +200,20 @@ class ForestAudio(private val context: Context) {
             val dt = chunkFrames.toFloat() / RATE
             try {
                 while (!released && !isInterrupted) {
+                    // The setting can change while the app is running; reload the source at the next audio chunk.
+                    val requestedChristmas = christmas
+                    if (requestedChristmas != selectedChristmas) {
+                        val replacement = try {
+                            soften(readWav(if (requestedChristmas) R.raw.forest_loop_xmas else R.raw.forest_loop))
+                        } catch (_: Exception) { null }
+                        if (replacement != null && replacement.size >= 4) {
+                            pcm = replacement
+                            frames = pcm.size / 2
+                            pos = 0
+                            selectedChristmas = requestedChristmas
+                            lpL = 0f; lpR = 0f
+                        }
+                    }
                     if (!canPlay()) {
                         // Off, in the background or at zero volume: no AudioTrack exists at all.
                         track?.let { close(it) }; track = null
