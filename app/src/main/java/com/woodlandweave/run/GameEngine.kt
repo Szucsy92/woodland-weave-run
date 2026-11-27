@@ -127,6 +127,9 @@ class GameEngine(
         uiBest = next.best; uiLast = next.last
         uiBestSecrets = max(uiBestSecrets, next.bestSecrets)
         audio.setMode(next.sound, inRun())
+        // Apply the seasonal soundtrack at the moment persisted settings arrive.
+        // Do not rely on the simulation event loop to propagate a menu setting change.
+        audio.setChristmas(next.christmas)
         if (sim.phase == Phase.MENU) applySelection()
         publish(force = true)
     }
