@@ -130,6 +130,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private val occ = FloatArray(30 * 4)
     private var treeN = 0
     private var treeX = FloatArray(0); private var treeZ = FloatArray(0); private var treeR = FloatArray(0)
+    // The same trees' ids and the time the shockwave takes each one away: a trunk that is gone no longer blocks the lamp and orb lights.
+    private var treeIds: Array<String> = emptyArray(); private var treeGoneAt = DoubleArray(0)
+    private var clearedSeen = -1
+    // Scratch for the shockwave transform that moves a hit tree's bulbs and light patches (no allocation per frame).
+    private val shockM = FloatArray(16); private val shockIn = FloatArray(4); private val shockOut = FloatArray(4)
     private val pickD = DoubleArray(6); private val pickI = IntArray(6)
     // Local-light selection scratch (top-K by distance, no per-frame allocation).
     private val litIdx = IntArray(4); private val litD2 = DoubleArray(4); private val litDist = DoubleArray(4)
@@ -212,7 +217,10 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var lampDay = 1f
 
     // ---- props (trees and obstacles) ----
-    private class Prop(val id: String, val x: Double, val z: Double, val kinds: IntArray, val m: FloatArray)
+    private class Prop(val id: String, val x: Double, val z: Double, val kinds: IntArray, val m: FloatArray) {
+        /** When the shockwave starts to take this tree away (sim time); +infinity = never hit. Mirrored from Simulation.clearedAt by syncCleared(). */
+        var clearedAt = Double.POSITIVE_INFINITY
+    }
     private val cache = HashMap<String, Prop>()
     private var props: List<Prop> = emptyList()
     /** Trees outside the playable window: they exist only to cast shadows (the same trees the forest has there). */
@@ -366,8 +374,13 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         props = next
         shadowRing = ring
         treeN = s.trees.size
-        if (treeX.size < treeN) { treeX = FloatArray(treeN + 64); treeZ = FloatArray(treeN + 64); treeR = FloatArray(treeN + 64) }
+        if (treeX.size < treeN) {
+            treeX = FloatArray(treeN + 64); treeZ = FloatArray(treeN + 64); treeR = FloatArray(treeN + 64)
+            treeGoneAt = DoubleArray(treeN + 64) { Double.POSITIVE_INFINITY }; treeIds = Array(treeN + 64) { "" }
+        }
+        clearedSeen = -1   // new props and a new tree list: the cleared state is copied over again (syncCleared)
         for ((i, t) in s.trees.withIndex()) {
+            treeIds[i] = t.id
             val species = min(2, floor(hash(floor(t.x).toInt(), floor(t.z).toInt(), 200) * 3).toInt())
             val girth = TREE_GIRTH_R[species] * t.scale
             treeX[i] = t.x.toFloat(); treeZ[i] = t.z.toFloat(); treeR[i] = (.42 * girth + .08).toFloat()
@@ -430,6 +443,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private fun draw(dt: Double) {
         val e = engine; val s = e.sim; val cam = e.camera
         if (builtVersion != e.worldVersion) { rebuildProps(); builtVersion = e.worldVersion }
+        syncCleared(s)
         animT += dt
         xmas = christmasOn(e.settings.christmas)
         val tune = e.settings.fx
@@ -731,8 +745,41 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
 
     // ---- local lights and the trunks that block them ----
 
-    /** Writes up to six trunks closest to the segment a-b (within 11 m) into occluder slot [slot]. */
-    private fun pickOccluders(slot: Int, ax: Double, az: Double, bx: Double, bz: Double) {
+    /**
+     * Copies the shockwave's cleared trees (Simulation.clearedAt) into the props, the shadow ring and the occluder list. It runs only when
+     * the number of cleared trees changes (a few times per run), so the per-frame loops read a plain field instead of hashing a string.
+     */
+    private fun syncCleared(s: Simulation) {
+        val n = s.clearedAt.size
+        if (n == clearedSeen) return
+        clearedSeen = n
+        for (p in cache.values) p.clearedAt = s.clearedAt[p.id] ?: Double.POSITIVE_INFINITY
+        for (i in 0 until treeN) treeGoneAt[i] = s.clearedAt[treeIds[i]] ?: Double.POSITIVE_INFINITY
+    }
+
+    /**
+     * How the shockwave shoves a hit tree away: into the depth, tipped over and torn out of the ground. [k] runs 0..1 through the dissolve and
+     * ([bx], [by], [bz]) is the tree's foot. The tree meshes (fillInstances) and its bulbs and light patches (buildXmasLights) use this one
+     * matrix, so they can never drift apart.
+     */
+    private fun shockMatrix(out: FloatArray, s: Simulation, id: String, bx: Double, by: Double, bz: Double, k: Double) {
+        val seed = id.length * 31 + id.last().code
+        val fx = -sin(s.heading); val fz = -cos(s.heading)
+        val push = k.pow(1.4) * (34 + hash(seed, 7, 404) * 16)
+        val lift = sin(min(1.0, k * 2.6) * PI * .5) * (1.6 + hash(seed, 8, 405) * 2.2) * min(1.0, k * 1.8)
+        val tip = min(1.0, k * 1.8) * (.7 + hash(seed, 9, 406) * .7)
+        val sk = 1 - smoothRange(k, .8, 1.0)
+        val lat = (bx - s.x) * cos(s.heading) - (bz - s.z) * sin(s.heading)
+        val side = max(-1.0, min(1.0, lat / 9)) * push * .3
+        Matrix.setIdentityM(out, 0)
+        Matrix.translateM(out, 0, (bx + fx * push + cos(s.heading) * side).toFloat(), (by + lift).toFloat(), (bz + fz * push - sin(s.heading) * side).toFloat())
+        Matrix.rotateM(out, 0, Math.toDegrees(tip).toFloat(), fz.toFloat(), 0f, (-fx).toFloat())
+        Matrix.scaleM(out, 0, sk.toFloat(), sk.toFloat(), sk.toFloat())
+        Matrix.translateM(out, 0, (-bx).toFloat(), (-by).toFloat(), (-bz).toFloat())
+    }
+
+    /** Writes up to six trunks closest to the segment a-b (within 11 m) into occluder slot [slot]. Trunks the shockwave has taken away are skipped. */
+    private fun pickOccluders(slot: Int, now: Double, ax: Double, az: Double, bx: Double, bz: Double) {
         java.util.Arrays.fill(pickD, 1e9); java.util.Arrays.fill(pickI, -1)
         val dx = bx - ax; val dz = bz - az
         val len2 = max(dx * dx + dz * dz, 1e-4)
@@ -741,7 +788,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val h = ((tx * dx + tz * dz) / len2).coerceIn(0.0, 1.0)
             val ex = tx - dx * h; val ez = tz - dz * h
             val d = sqrt(ex * ex + ez * ez)
-            if (d >= pickD[5] || d > 11.0) continue
+            if (d >= pickD[5] || d > 11.0 || now >= treeGoneAt[i]) continue
             var k = 5
             while (k > 0 && pickD[k - 1] > d) { pickD[k] = pickD[k - 1]; pickI[k] = pickI[k - 1]; k-- }
             pickD[k] = d; pickI[k] = i
@@ -797,9 +844,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val tint = orbColor(orbState.p.type)
             localLightColors[offset] = tint[0]; localLightColors[offset + 1] = tint[1]; localLightColors[offset + 2] = tint[2]
             localLightColors[offset + 3] = lightRadius
-            pickOccluders(index, px, pz, cam.ex, cam.ez)
+            pickOccluders(index, s.elapsed, px, pz, cam.ex, cam.ez)
         }
-        pickOccluders(4, e.lampX, e.lampZ, cam.ex, cam.ez)
+        pickOccluders(4, s.elapsed, e.lampX, e.lampZ, cam.ex, cam.ez)
     }
 
     private fun clockHours(): Double {
@@ -1167,11 +1214,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             if ((dx * fwx + dz * fwz) / fl < -12) continue
             val far = dist > CROWN_LOD_DISTANCE
             var dissolving = false; var k = 0.0
-            if (s.cleared.contains(p.id)) {
-                val age = s.elapsed - (s.clearedAt[p.id] ?: -99.0)
-                if (age >= SHOCKWAVE_DISSOLVE) continue
-                if (age >= 0) { dissolving = true; k = min(1.0, age / SHOCKWAVE_DISSOLVE) }
-            }
+            val age = s.elapsed - p.clearedAt   // -infinity for a tree the shockwave never touched
+            if (age >= SHOCKWAVE_DISSOLVE) continue
+            if (age >= 0) { dissolving = true; k = min(1.0, age / SHOCKWAVE_DISSOLVE) }
             if (!dissolving) {
                 for (i in p.kinds.indices) {
                     val kind = p.kinds[i]
@@ -1180,23 +1225,21 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 continue
             }
             // The wave shoves it into the depth, tips it over and rips it out of the ground.
-            val seed = p.id.length * 31 + p.id.last().code
-            val fx = -sin(s.heading); val fz = -cos(s.heading)
-            val push = k.pow(1.4) * (34 + hash(seed, 7, 404) * 16)
-            val lift = sin(min(1.0, k * 2.6) * PI * .5) * (1.6 + hash(seed, 8, 405) * 2.2) * min(1.0, k * 1.8)
-            val tip = min(1.0, k * 1.8) * (.7 + hash(seed, 9, 406) * .7)
-            val sk = 1 - smoothRange(k, .8, 1.0)
-            val bx = p.m[12].toDouble(); val by = p.m[13].toDouble(); val bz = p.m[14].toDouble()
-            val lat = (bx - s.x) * cos(s.heading) - (bz - s.z) * sin(s.heading)
-            val out = max(-1.0, min(1.0, lat / 9)) * push * .3
-            Matrix.setIdentityM(tg, 0)
-            Matrix.translateM(tg, 0, (bx + fx * push + cos(s.heading) * out).toFloat(), (by + lift).toFloat(), (bz + fz * push - sin(s.heading) * out).toFloat())
-            Matrix.rotateM(tg, 0, Math.toDegrees(tip).toFloat(), fz.toFloat(), 0f, (-fx).toFloat())
-            Matrix.scaleM(tg, 0, sk.toFloat(), sk.toFloat(), sk.toFloat())
-            Matrix.translateM(tg, 0, (-bx).toFloat(), (-by).toFloat(), (-bz).toFloat())
+            shockMatrix(tg, s, p.id, p.m[12].toDouble(), p.m[13].toDouble(), p.m[14].toDouble(), k)
             for (i in p.kinds.indices) {
+                val kd = p.kinds[i]
+                if (kd == K_SHADOW) {
+                    // The contact-shadow disc lies flat on the ground: tipped over with the tree it would stand up as a dark wall.
+                    // It stays where it is and shrinks away at the start of the dissolve.
+                    val f = (1 - smoothRange(k, 0.0, .5)).toFloat()
+                    if (f <= 0f) continue
+                    System.arraycopy(p.m, i * 16, tmp2, 0, 16)
+                    for (j in 0..2) { tmp2[j] *= f; tmp2[8 + j] *= f }
+                    emit(if (far) farCrownKind(kd) else kd, tmp2, 0)
+                    continue
+                }
                 Matrix.multiplyMM(tmp2, 0, tg, 0, p.m, i * 16)
-                emit(if (far) farCrownKind(p.kinds[i]) else p.kinds[i], tmp2, 0)
+                emit(if (far) farCrownKind(kd) else kd, tmp2, 0)
             }
         }
         // Shadow casters beyond the view. The light shines from ahead, so a tree 60 m away still throws its shadow (and a
@@ -1215,10 +1258,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 val dx = p.x - cam.ex; val dz = p.z - cam.ez
                 val dist = sqrt(dx * dx + dz * dz)
                 if (pass == 0 && dist <= reach && (dx * fwx + dz * fwz) / fl >= -12) continue   // already in the visible set
-                // A shockwave-cleared tree must not be reintroduced by the shadow-only ring.
-                // Visible trees already use their dissolving/transformed instances above; this
-                // excludes the duplicate/original shadow caster from both collection passes.
-                if (dist > extraReach || s.cleared.contains(p.id)) continue
+                // A tree the shockwave has taken away casts no shadow from the window or the shadow ring either (a visible dissolving
+                // tree is in the visible set above, moved). One still standing, even if already marked for the wave, keeps its shadow.
+                if (dist > extraReach || s.elapsed >= p.clearedAt) continue
                 if ((dx * lx + dz * lz) / (ll * dist.coerceAtLeast(1e-6)) < .2) continue   // only trees on the light's side matter
                 if (abs(-dx * lz + dz * lx) / ll > sideMax) continue
                 for (i in p.kinds.indices) {
@@ -1501,6 +1543,14 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         }
     }
 
+    /** ([x], [y], [z]) moved by the current hit tree's shockwave matrix ([active]), or unchanged. The result is a shared scratch array. */
+    private fun followShock(active: Boolean, x: Double, y: Double, z: Double): FloatArray {
+        if (!active) { shockOut[0] = x.toFloat(); shockOut[1] = y.toFloat(); shockOut[2] = z.toFloat(); return shockOut }
+        shockIn[0] = x.toFloat(); shockIn[1] = y.toFloat(); shockIn[2] = z.toFloat(); shockIn[3] = 1f
+        Matrix.multiplyMV(shockOut, 0, shockM, 0, shockIn, 0)
+        return shockOut
+    }
+
     /** A soft coloured patch of light on the snow at ([x], [z]): a flat sprite just above the ground. */
     private fun snowSpot(x: Double, z: Double, size: Double, a: Double, c: FloatArray) {
         bSnowGlow.add(x, groundHeight(x, z) + .1, z, size, size, c, a)
@@ -1516,11 +1566,6 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         var n = 0
         val haloDay = 1.0 - dayLevel * .35
         val spotDay = 1.0 - dayLevel * .2
-        // Reuse scratch buffers: the same shockwave matrix that moves the tree mesh also
-        // moves every bulb and its ground-light patch.
-        val shockMatrix = FloatArray(16)
-        val point = FloatArray(4)
-        val moved = FloatArray(4)
         for (tree in s.trees) {
             if (n + XMAS_BULBS_PER_TREE + XMAS_RING_BULBS > XMAS_BULBS_MAX) break
             val dx = tree.x - s.x; val dz = tree.z - s.z
@@ -1534,47 +1579,18 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val fade = 1.0 - smoothRange(d, 26.0, 38.0)
             val phase = hash(sx, sz, 905) * 6.28
 
-            // fillInstances() applies this exact transform to the tree's mesh after a
-            // shockwave hit. Previously the decorative sprites stayed at the old position.
+            // A hit tree's bulbs and light patches follow it with the very matrix the tree mesh gets (shockMatrix), and the patches fade out.
             var shockActive = false
-            val hitAt = s.clearedAt[tree.id]
-            if (s.cleared.contains(tree.id) && hitAt != null) {
-                val age = s.elapsed - hitAt
-                if (age >= SHOCKWAVE_DISSOLVE) continue
-                if (age >= 0.0) {
-                    val k = min(1.0, age / SHOCKWAVE_DISSOLVE)
-                    val seed = tree.id.length * 31 + tree.id.last().code
-                    val fx = -sin(s.heading); val fz = -cos(s.heading)
-                    val push = k.pow(1.4) * (34 + hash(seed, 7, 404) * 16)
-                    val lift = sin(min(1.0, k * 2.6) * PI * .5) *
-                        (1.6 + hash(seed, 8, 405) * 2.2) * min(1.0, k * 1.8)
-                    val tip = min(1.0, k * 1.8) * (.7 + hash(seed, 9, 406) * .7)
-                    val sk = 1 - smoothRange(k, .8, 1.0)
-                    val prop = cache[tree.id]
-                    val bx = prop?.m?.get(12)?.toDouble() ?: tree.x
-                    val by = prop?.m?.get(13)?.toDouble() ?: base
-                    val bz = prop?.m?.get(14)?.toDouble() ?: tree.z
-                    val lat = (bx - s.x) * cos(s.heading) - (bz - s.z) * sin(s.heading)
-                    val out = max(-1.0, min(1.0, lat / 9)) * push * .3
-                    Matrix.setIdentityM(shockMatrix, 0)
-                    Matrix.translateM(shockMatrix, 0,
-                        (bx + fx * push + cos(s.heading) * out).toFloat(), (by + lift).toFloat(),
-                        (bz + fz * push - sin(s.heading) * out).toFloat())
-                    Matrix.rotateM(shockMatrix, 0, Math.toDegrees(tip).toFloat(),
-                        fz.toFloat(), 0f, (-fx).toFloat())
-                    Matrix.scaleM(shockMatrix, 0, sk.toFloat(), sk.toFloat(), sk.toFloat())
-                    Matrix.translateM(shockMatrix, 0, (-bx).toFloat(), (-by).toFloat(), (-bz).toFloat())
-                    shockActive = true
-                }
-            }
-            fun followShock(x: Double, y: Double, z: Double): FloatArray {
-                if (!shockActive) {
-                    moved[0] = x.toFloat(); moved[1] = y.toFloat(); moved[2] = z.toFloat()
-                } else {
-                    point[0] = x.toFloat(); point[1] = y.toFloat(); point[2] = z.toFloat(); point[3] = 1f
-                    Matrix.multiplyMV(moved, 0, shockMatrix, 0, point, 0)
-                }
-                return moved
+            var lightK = 1.0
+            val prop = cache[tree.id]
+            val age = s.elapsed - (prop?.clearedAt ?: Double.POSITIVE_INFINITY)
+            if (age >= SHOCKWAVE_DISSOLVE) continue
+            if (age >= 0.0) {
+                val kk = age / SHOCKWAVE_DISSOLVE
+                shockMatrix(shockM, s, tree.id, prop?.m?.get(12)?.toDouble() ?: tree.x, prop?.m?.get(13)?.toDouble() ?: base,
+                    prop?.m?.get(14)?.toDouble() ?: tree.z, min(1.0, kk))
+                shockActive = true
+                lightK = 1.0 - min(1.0, kk * 2.5)
             }
 
             for (k in 0 until XMAS_BULBS_PER_TREE) {
@@ -1584,7 +1600,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 val ang = k * 2.4 + phase
                 val tw = .7 + .3 * sin(t * 2.3 + k * 1.7 + phase)
                 val rawX = tree.x + cos(ang) * r; val rawY = base + ly * bodyY; val rawZ = tree.z + sin(ang) * r
-                val pos = followShock(rawX, rawY, rawZ)
+                val pos = followShock(shockActive, rawX, rawY, rawZ)
                 val bx = pos[0].toDouble(); val by = pos[1].toDouble(); val bz = pos[2].toDouble()
                 // A small glow (the old big ones overlapped into one streak) plus a solid, alpha-blended bulb: additive light alone
                 // washes out on the white snow, so only the red one was seen; the solid bulb keeps every colour visible.
@@ -1596,8 +1612,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 // Every fourth bulb of the spiral (the higher ones) lights the snow beyond the crown: the higher, the further out.
                 if (k % 4 == 2) {
                     val out = 1.0 + (ly - 6.9) * .13
-                    val spot = followShock(tree.x + cos(ang) * r * out, groundHeight(tree.x, tree.z) + .1, tree.z + sin(ang) * r * out)
-                    snowSpot(spot[0].toDouble(), spot[2].toDouble(), 5.0, .14 * tw * fade * spotDay, Palette.bulbs[k % 4])
+                    val spot = followShock(shockActive, tree.x + cos(ang) * r * out, groundHeight(tree.x, tree.z) + .1, tree.z + sin(ang) * r * out)
+                    snowSpot(spot[0].toDouble(), spot[2].toDouble(), 5.0, .14 * tw * fade * spotDay * lightK, Palette.bulbs[k % 4])
                 }
             }
             // The low string: hangs in swags just under the lowest tier of the crown (its underside is at about 7.4), evenly round the tree.
@@ -1607,7 +1623,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 val ly = 6.85 - .32 * (k % 2)                      // every other bulb hangs lower: a swag between the hooks
                 val col = Palette.bulbs[(k + 1) % 4]
                 val tw = .7 + .3 * sin(t * 2.0 + k * 2.1 + phase)
-                val pos = followShock(tree.x + cos(ang) * ringR, base + ly * bodyY, tree.z + sin(ang) * ringR)
+                val pos = followShock(shockActive, tree.x + cos(ang) * ringR, base + ly * bodyY, tree.z + sin(ang) * ringR)
                 val bx = pos[0].toDouble(); val by = pos[1].toDouble(); val bz = pos[2].toDouble()
                 val glow = .38 + d * .016
                 bForestLights.add(bx, by, bz, glow, glow, col, .85 * tw * haloDay * fade)
@@ -1615,8 +1631,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 bPollenCore.add(bx, by, bz, bulb, bulb, col, (.75 + .25 * tw) * fade)
                 n++
                 // The patch lies a little outside the ring: the crown above shades the middle, the light spills out from under its edge.
-                val spot = followShock(tree.x + cos(ang) * ringR * 1.2, groundHeight(tree.x, tree.z) + .1, tree.z + sin(ang) * ringR * 1.2)
-                snowSpot(spot[0].toDouble(), spot[2].toDouble(), 3.8, .30 * tw * fade * spotDay, col)
+                val spot = followShock(shockActive, tree.x + cos(ang) * ringR * 1.2, groundHeight(tree.x, tree.z) + .1, tree.z + sin(ang) * ringR * 1.2)
+                snowSpot(spot[0].toDouble(), spot[2].toDouble(), 3.8, .30 * tw * fade * spotDay * lightK, col)
             }
         }
     }
