@@ -37,6 +37,8 @@ class EffectsModel {
     private var hueNow = 0.0
     private var hadPower = false
     private var powerEndedAt = -99.0
+    private var lastImpact = 0.0
+    private var hitAt = -99.0
 
     /**
      * The gate's lens kick, used for EVERY lens event (pickup, expiry, black hole in / out, gate pass): the zoom at the centre of the
@@ -102,6 +104,12 @@ class EffectsModel {
             if (age >= 0 && age < GATE_KICK_TIME) lens = gateSpring(age, out.aspect)
             glitch += kick(age)
         }
+        // A tree hit: the very same elastic fisheye as a gate / power-up (gateSpring). It outlives the 0.5 s impact, so it is timed
+        // from the moment the hit starts (impact jumps back up to IMPACT_DURATION) and runs for the full GATE_KICK_TIME.
+        if (s.impact > lastImpact) hitAt = clock
+        lastImpact = s.impact
+        val hitAge = clock - hitAt
+        if (hitAge >= 0 && hitAge < GATE_KICK_TIME) lens += gateSpring(hitAge, out.aspect)
         var flash = 0.0
         if (s.warp >= 0 && s.warp < 1.6) {
             lens += gateSpring(s.warp, out.aspect)
