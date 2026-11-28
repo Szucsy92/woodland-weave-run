@@ -129,6 +129,9 @@ uniform float uTime;
 // Day gate: the real round hole in the ground. uHole = (x, z, radius, mode): mode > 0 shows the other world (uPortal, rendered from a second
 // camera with the same projection, so a screen-space lookup is perspective-correct), mode < 0 only cuts the hole (the pass that renders that world).
 uniform vec4 uHole; uniform vec2 uScreen; uniform sampler2D uPortal;
+// The other world exists only below the ground plane: while it is drawn (uClip.x > 0) everything of it that would come up above the plane
+// (what is below uClip.y before it is mirrored) is dropped.
+uniform vec2 uClip;
 $SUN_GAP_FN
 #ifndef Q_SHADOW
 uniform float uShadowOn, uShadowK;   // no shadow map: they only gate the canopy light (pools, dimming under the foliage)
@@ -250,6 +253,7 @@ void main() {
     if (cover < 1.0 && cover <= fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))))) discard;
   }
   if (uMode == 1) { o = vec4(finish(uColor, depth), texture(uTex, vUv).a * uAlpha); return; }
+  if (uClip.x > 0.0 && vW.y < uClip.y) discard;
   if (uMode == 2) { o = vec4(finish(uColor, depth), uAlpha); return; }
   if (uMode == 3 && uHole.w != 0.0) {
     float hd = length(vW.xz - uHole.xy);
@@ -497,6 +501,7 @@ out vec4 o;
 void main() {
   vec4 w = uInvVp * vec4(vP, 1.0, 1.0);
   vec3 d = normalize(w.xyz / w.w - uEye);
+  d.y = -d.y;                                               // the other world is the ground-plane mirror of this one: its sky is below
   float h = d.y;                                            // the world's own up: this camera looks at it from below
   vec3 col = mix(uHorizon, uZenith, pow(clamp(h * 1.5, 0.0, 1.0), 0.55));
   float c = max(dot(d, normalize(uLight)), 0.0);

@@ -212,8 +212,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var fog = Palette.fog; private var sky = Palette.moon; private var groundC = Palette.fog
     private var moonCol = Palette.moon; private var hemi = .85f; private var fogNear = 7f; private var moonI = 1f
     private val portal = PortalTarget()      // the other world, seen through a day gate's hole
-    private val view2 = FloatArray(16); private val vp2 = FloatArray(16)
-    private var portalGateId: String? = null; private var portalAx = 0.0; private var portalAz = 0.0   // the portal's turning axis, fixed per gate
+    private val vp2 = FloatArray(16)
     private var skyProg = -1; private var emptyVao = 0; private val invVp = FloatArray(16)
     private var cullBehind = true            // trees more than 12 m behind the camera are not drawn (not while the portal looks that way)
     private var lights = 1f; private var red = 0f
@@ -616,6 +615,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         var fdx = (behindX * 50).toFloat(); var fdy = 8f; var fdz = (behindZ * 50).toFloat()
         val fl = sqrt(fdx * fdx + fdy * fdy + fdz * fdz); fdx /= fl; fdy /= fl; fdz /= fl
 
+        var clipOn = 0f; var clipY = 0f   // while the other world is drawn: its part that would come up above the plane is dropped
         var eyeX = cam.ex.toFloat(); var eyeY = cam.ey.toFloat(); var eyeZ = cam.ez.toFloat()   // the camera the scene is drawn from (the portal pass changes it)
         fun scene(p: Int) {
             // The runner and opaque world meshes share this material/light uniform set:
@@ -662,6 +662,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             u3(p, "uFloodCol", Palette.pursuer[0] * floodI, Palette.pursuer[1] * floodI, Palette.pursuer[2] * floodI)
             u1(p, "uLights", lights); u1(p, "uRed", red)
             GL.glUniform1i(loc(p, "uTex"), 0); GL.glUniform1i(loc(p, "uNorm"), 1); GL.glUniform1i(loc(p, "uRoughTex"), 2)
+            GL.glUniform2f(loc(p, "uClip"), clipOn, clipY)
             GL.glUniform1i(loc(p, "uPortal"), 6)   // its own unit, like the shadow map: samplers must never share one
         }
 
@@ -736,33 +737,19 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             if (box != null) {
                 holeX = pg.x.toFloat(); holeZ = pg.z.toFloat()
                 holeR = (Visuals.GateRing.RADIUS - Visuals.GateRing.TORUS_TUBE * (Visuals.GateRing.RADIUS / Visuals.GateRing.TORUS_R) * Visuals.DayGate.HOLE_RIM).toFloat()
-                // The other world's camera: the runner's own camera turned 180 degrees about the horizontal axis through the ring's middle that
-                // lies ALONG the way the runner first saw the gate from (v -> 2 (v.f) f - v): the same forest he sees in front of him hangs there
-                // upside down (left and right swap, as when a page is turned over); up becomes down. The axis is taken once per gate and then
-                // kept, so the other world is a fixed window in the ground: it does not slide or swing when the runner steers.
-                if (pg.id != portalGateId) { portalGateId = pg.id; portalAx = -sin(s.heading); portalAz = -cos(s.heading) }
-                val rx = portalAx; val rz = portalAz
-                val o = DoubleArray(3)
-                fun turn(px: Double, py: Double, pz: Double) {
-                    val vx = px - pg.x; val vy = py - gyP; val vz = pz - pg.z
-                    val dd = vx * rx + vz * rz
-                    o[0] = pg.x + 2 * dd * rx - vx; o[1] = gyP - vy; o[2] = pg.z + 2 * dd * rz - vz
-                }
-                turn(cam.ex, cam.ey, cam.ez); val ex2 = o[0]; val ey2 = o[1]; val ez2 = o[2]
-                turn(cam.tx, cam.ty, cam.tz)
-                Matrix.setLookAtM(view2, 0, ex2.toFloat(), ey2.toFloat(), ez2.toFloat(), o[0].toFloat(), o[1].toFloat(), o[2].toFloat(), 0f, -1f, 0f)
-                Matrix.setIdentityM(tmp, 0)
-                Matrix.rotateM(tmp, 0, Math.toDegrees(-cam.rotZ).toFloat(), 0f, 0f, 1f)
-                Matrix.rotateM(tmp, 0, Math.toDegrees(-cam.rotY).toFloat(), 0f, 1f, 0f)
-                Matrix.rotateM(tmp, 0, Math.toDegrees(-cam.rotX).toFloat(), 1f, 0f, 0f)
-                Matrix.multiplyMM(tmp2, 0, tmp, 0, view2, 0)
-                Matrix.multiplyMM(vp2, 0, proj, 0, tmp2, 0)
+                // The other world is this world mirrored in the ground plane (x, y, z) -> (x, 2 gy - y, z), seen through the hole by the runner's own
+                // camera: the very same trees at the very same places hang there upside down (the ones a shockwave took are gone there too, as it
+                // is the same set of instances), under the sky of the other time of day. The mirror goes into the matrix, so nothing else changes.
+                val refl = FloatArray(16); Matrix.setIdentityM(refl, 0); refl[5] = -1f; refl[13] = (2 * gyP).toFloat()
+                Matrix.multiplyMM(vp2, 0, vp, 0, refl, 0)
 
                 // Swap the camera and the palette for this pass, draw, and put everything back.
                 val vpMain = vp.copyOf(); val fwdX = camFwdX; val fwdY = camFwdY; val fwdZ = camFwdZ
                 System.arraycopy(vp2, 0, vp, 0, 16)
-                camFwdX = -tmp2[2]; camFwdY = -tmp2[6]; camFwdZ = -tmp2[10]
-                eyeX = ex2.toFloat(); eyeY = ey2.toFloat(); eyeZ = ez2.toFloat()
+                camFwdY = -camFwdY                       // the camera as the mirrored world sees it: the same position and look, mirrored
+                eyeY = (2 * gyP - cam.ey).toFloat()
+                clipOn = 1f; clipY = gyP.toFloat()
+                GL.glFrontFace(GL.GL_CW)                 // a mirror turns the triangles' winding over
                 val wasShadow = shadowActive; shadowActive = false
                 computeSky(cyc + .5)
                 GL.glActiveTexture(GL.GL_TEXTURE6); GL.glBindTexture(GL.GL_TEXTURE_2D, 0); GL.glActiveTexture(GL.GL_TEXTURE0)   // never sample what is drawn into
@@ -776,11 +763,12 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 val pc = Palette.mix(fog, sky, .5f).let { if (post.linear) it else Palette.encodeSrgb(it) }
                 GL.glClearColor(pc[0], pc[1], pc[2], 1f)
                 GL.glClear(GL.GL_COLOR_BUFFER_BIT or GL.GL_DEPTH_BUFFER_BIT)
-                drawPortalSky(ex2.toFloat(), ey2.toFloat(), ez2.toFloat())
+                drawPortalSky(cam.ex.toFloat(), cam.ey.toFloat(), cam.ez.toFloat(), vpMain)
                 holeMode = -1f
                 ground()
                 forest()
                 GL.glDisable(GL.GL_SCISSOR_TEST)
+                GL.glFrontFace(GL.GL_CCW); clipOn = 0f
                 shadowActive = wasShadow
                 System.arraycopy(vpMain, 0, vp, 0, 16)
                 camFwdX = fwdX; camFwdY = fwdY; camFwdZ = fwdZ
@@ -791,7 +779,6 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             }
         }
         if (!portalOn) holeMode = 0f
-        if (pg == null) portalGateId = null   // out of sight: the next gate (or this one, later) takes its axis afresh
 
         post.bind()
         // Re-establish the full-frame state before clearing. Shadow/depth-only passes
@@ -852,12 +839,13 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         return if (x1 > x0 && y1 > y0) intArrayOf(x0, y0, x1, y1) else null
     }
 
-    /** The other world's sky into the portal target (current palette = the other world's), from the portal camera [vp] at ([ex], [ey], [ez]). */
-    private fun drawPortalSky(ex: Float, ey: Float, ez: Float) {
+    /** The other world's sky into the portal target (current palette = the other world's), seen from the runner's camera at ([ex], [ey], [ez]) with [mainVp]. */
+    private fun drawPortalSky(ex: Float, ey: Float, ez: Float, mainVp: FloatArray) {
         if (skyProg == -1) skyProg = GlUtil.programOrNull(Shaders.PORTAL_SKY_VS, Shaders.PORTAL_SKY_FS)
         if (skyProg <= 0) return   // the clear colour stays: a flat sky
         if (emptyVao == 0) { val v = IntArray(1); GL.glGenVertexArrays(1, v, 0); emptyVao = v[0] }
-        Matrix.invertM(invVp, 0, vp, 0)
+        Matrix.invertM(invVp, 0, mainVp, 0)   // the runner's own view: the sky is looked at through the hole, and mirrored in the shader
+        GL.glDisable(GL.GL_CULL_FACE)
         fun enc(c: FloatArray) = if (post.linear) c else Palette.encodeSrgb(c)
         val hor = enc(fog); val zen = enc(sky)
         val lc = enc(FloatArray(3) { (moonCol[it] * moonI * .5f).coerceIn(0f, 1f) })
