@@ -340,13 +340,13 @@ class ForestAudio(private val context: Context) {
             Cue.FREEZER -> listOf(Blip(660f, 330f, .65f, .09f), Blip(990f, 495f, .55f, .05f, 1, .04f))
             Cue.GHOST -> listOf(Blip(220f, 440f, .75f, .08f), Blip(330f, 660f, .75f, .045f, 0, .08f))
             Cue.SHOCKWAVE -> listOf(Blip(110f, 40f, .85f, .34f), Blip(150f, 520f, .5f, .08f, 1, .05f))
-            Cue.RING -> listOf(Blip(140f, 50f, .6f, .24f), Blip(210f, 110f, .4f, .05f, 1, .02f))
+            // The ring and the secret: the orb pickup (GHOST) one octave deeper, a little louder to carry on a phone speaker.
+            Cue.RING, Cue.SECRET -> listOf(Blip(110f, 220f, .75f, .1f), Blip(165f, 330f, .75f, .06f, 0, .09f))
             Cue.END -> listOf(Blip(300f, 150f, .45f, .065f))
             Cue.STUMBLE -> listOf(Blip(95f, 52f, .2f, .15f, 1))
             Cue.GATE -> listOf(Blip(72f, 54f, .7f, .11f), Blip(144f, 108f, .6f, .05f, 0, .05f))
             Cue.HOLE -> listOf(Blip(90f, 28f, 1.6f, .3f), Blip(520f, 70f, 1.4f, .07f, 1, .05f), Blip(330f, 1200f, 1.2f, .035f, 0, .25f))
             Cue.WARPOUT -> listOf(Blip(60f, 1500f, .5f, .09f, 2), Blip(140f, 38f, 1.1f, .32f, 0, .18f))
-            Cue.SECRET -> listOf(Blip(880f, 880f, .9f, .055f), Blip(1320f, 1320f, .9f, .04f, 0, .12f), Blip(1760f, 1760f, 1.1f, .03f, 0, .26f))
         }
         val total = b.maxOf { it.delay + it.seconds } + 0.06f
         val mix = FloatArray((total * RATE).toInt())
