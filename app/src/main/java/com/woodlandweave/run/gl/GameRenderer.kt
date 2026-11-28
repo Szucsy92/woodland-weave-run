@@ -730,8 +730,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val pg = pgate
         if (pg != null) {
             portal.resize((post.targetW * Visuals.DayGate.PORTAL_SCALE).toInt(), (post.targetH * Visuals.DayGate.PORTAL_SCALE).toInt(), post.linear)
-            if (portal.ok) {
-                val gyP = groundHeight(pg.x, pg.z)
+            val gyP = groundHeight(pg.x, pg.z)
+            val box = if (portal.ok) holeBox(pg, gyP, portal.w, portal.h) else null   // null: the hole is off screen, nothing to draw
+            if (box != null) {
                 holeX = pg.x.toFloat(); holeZ = pg.z.toFloat()
                 holeR = (Visuals.GateRing.RADIUS - Visuals.GateRing.TORUS_TUBE * (Visuals.GateRing.RADIUS / Visuals.GateRing.TORUS_R) * Visuals.DayGate.HOLE_RIM).toFloat()
                 // The other world's camera: the runner's own camera turned 180 degrees about the horizontal axis through the ring's middle that
@@ -764,7 +765,10 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 GL.glActiveTexture(GL.GL_TEXTURE6); GL.glBindTexture(GL.GL_TEXTURE_2D, 0); GL.glActiveTexture(GL.GL_TEXTURE0)   // never sample what is drawn into
                 GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, portal.fbo)
                 GL.glViewport(0, 0, portal.w, portal.h)
-                GL.glDisable(GL.GL_SCISSOR_TEST); GL.glColorMask(true, true, true, true); GL.glDepthMask(true)
+                // Only the pixels of the hole are ever looked at, so only that box of the target is drawn (and cleared): the hole is full
+                // sharpness and the pass costs what the hole covers on screen.
+                GL.glEnable(GL.GL_SCISSOR_TEST); GL.glScissor(box[0], box[1], box[2] - box[0], box[3] - box[1])
+                GL.glColorMask(true, true, true, true); GL.glDepthMask(true)
                 GL.glEnable(GL.GL_DEPTH_TEST); GL.glDisable(GL.GL_BLEND)
                 val pc = Palette.mix(fog, sky, .5f).let { if (post.linear) it else Palette.encodeSrgb(it) }
                 GL.glClearColor(pc[0], pc[1], pc[2], 1f)
@@ -773,6 +777,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 holeMode = -1f
                 ground()
                 forest()
+                GL.glDisable(GL.GL_SCISSOR_TEST)
                 shadowActive = wasShadow
                 System.arraycopy(vpMain, 0, vp, 0, 16)
                 camFwdX = fwdX; camFwdY = fwdY; camFwdZ = fwdZ
@@ -819,6 +824,28 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         for (b in spriteBatches) drawSprites(b)
 
         post.present(effectState, e.glass, pp)
+    }
+
+    /**
+     * The pixel box (x0, y0, x1, y1) of the target that the hole of [g] covers on the runner's screen, a few pixels wider; the whole target when
+     * a point of the rim is behind the camera; null when the hole is not on screen at all. Uses the main camera's [vp].
+     */
+    private fun holeBox(g: DayGate, gy: Double, w: Int, h: Int): IntArray? {
+        val r = Visuals.GateRing.RADIUS - Visuals.GateRing.TORUS_TUBE * (Visuals.GateRing.RADIUS / Visuals.GateRing.TORUS_R) * Visuals.DayGate.HOLE_RIM
+        var x0 = Int.MAX_VALUE; var y0 = Int.MAX_VALUE; var x1 = Int.MIN_VALUE; var y1 = Int.MIN_VALUE
+        for (i in 0 until 32) {
+            val a = i * 2 * PI / 32
+            val wx = (g.x + cos(a) * r).toFloat(); val wz = (g.z + sin(a) * r).toFloat(); val wy = gy.toFloat()
+            val cw = vp[3] * wx + vp[7] * wy + vp[11] * wz + vp[15]
+            if (cw <= 0.05f) return intArrayOf(0, 0, w, h)
+            val nx = (vp[0] * wx + vp[4] * wy + vp[8] * wz + vp[12]) / cw
+            val ny = (vp[1] * wx + vp[5] * wy + vp[9] * wz + vp[13]) / cw
+            val px = ((nx * .5f + .5f) * w).toInt(); val py = ((ny * .5f + .5f) * h).toInt()
+            x0 = min(x0, px); x1 = max(x1, px); y0 = min(y0, py); y1 = max(y1, py)
+        }
+        val pad = 8   // the lip, the ground's own bumps
+        x0 = (x0 - pad).coerceAtLeast(0); y0 = (y0 - pad).coerceAtLeast(0); x1 = (x1 + pad).coerceAtMost(w); y1 = (y1 + pad).coerceAtMost(h)
+        return if (x1 > x0 && y1 > y0) intArrayOf(x0, y0, x1, y1) else null
     }
 
     /** The other world's sky into the portal target (current palette = the other world's), from the portal camera [vp] at ([ex], [ey], [ez]). */

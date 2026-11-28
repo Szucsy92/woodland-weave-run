@@ -127,7 +127,7 @@ const val DAYGATE_RADIUS = 4.5       // the drawn ring (the same radius as the u
 const val DAYGATE_TRIGGER = 4.1      // the dive starts as soon as the runner is this close to the middle (at the ring itself)
 const val DAYGATE_CLEARING = 14.0    // no trees within this of the middle: room on both sides of the ring
 const val DAYGATE_REARM = 12.0       // the same gate works again after the runner has been this far from it
-const val DAYGATE_TIME = 0.9         // the whole fall through the ring, in seconds (the world switches half way)
+const val DAYGATE_TIME = 0.8         // the whole fall through the ring, in seconds (the world switches half way)
 
 /**
  * Developer tuning: how often each thing turns up, as a multiplier of the built-in rate (1.0 = as designed, 0 = never).

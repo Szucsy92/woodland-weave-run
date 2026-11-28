@@ -110,7 +110,7 @@ object Visuals {
         const val GLOW_PULSE = .15
         /** The hole is a real round cut in the ground; the other world is rendered for it into a second target while a gate is this near (m). */
         const val PORTAL_SEE = 75.0
-        const val PORTAL_SCALE = 0.65f  // the second target's size relative to the scene target
+        const val PORTAL_SCALE = 1.0f   // the second target's size relative to the scene target: the same, so the hole is pixel for pixel the scene's own sharpness
         const val HOLE_RIM = 0.6       // the cut is this many tube radii inside the ring's middle line
     }
 
