@@ -256,8 +256,11 @@ void main() {
     if (hd < uHole.z) {
       if (uHole.w < 0.0) discard;
       vec3 pc = texture(uPortal, gl_FragCoord.xy / uScreen).rgb;
-      float lip = smoothstep(uHole.z - 0.3, uHole.z, hd);   // the rim of the hole is a little darker, as if it had depth
-      o = vec4(pc * (1.0 - 0.5 * lip), 1.0);
+      float deep = 1.0 - hd / uHole.z;                        // 0 at the rim, 1 in the middle: the deeper, the colder
+      pc = mix(pc, pc * vec3(0.78, 0.84, 1.12), deep * 0.35);
+      float lip = smoothstep(uHole.z - 0.3, uHole.z, hd);     // the lip of the hole is darker, as if it had depth ...
+      float glow = smoothstep(uHole.z - 0.6, uHole.z - 0.08, hd) * (1.0 - smoothstep(uHole.z - 0.08, uHole.z, hd));   // ... with a soft glow just inside it
+      o = vec4(pc * (1.0 - 0.45 * lip) + vec3(0.42, 0.34, 0.80) * glow * 0.35, 1.0);
       return;
     }
   }
@@ -474,6 +477,35 @@ void main() {
     val SHADOW_FS = """#version 300 es
 precision mediump float;
 void main() {}
+"""
+
+    /** The other world's sky, a full-screen triangle drawn first in the portal pass: gradient, the light's glow and disc, stars at night. */
+    val PORTAL_SKY_VS = """#version 300 es
+out vec2 vP;
+void main() {
+  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+  vP = p * 2.0 - 1.0;
+  gl_Position = vec4(vP, 1.0, 1.0);
+}
+"""
+    val PORTAL_SKY_FS = """#version 300 es
+precision highp float;
+in vec2 vP;
+uniform mat4 uInvVp; uniform vec3 uEye, uHorizon, uZenith, uLight, uLightCol;
+uniform float uNight;
+out vec4 o;
+void main() {
+  vec4 w = uInvVp * vec4(vP, 1.0, 1.0);
+  vec3 d = normalize(w.xyz / w.w - uEye);
+  float h = d.y;                                            // the world's own up: this camera looks at it from below
+  vec3 col = mix(uHorizon, uZenith, pow(clamp(h * 1.5, 0.0, 1.0), 0.55));
+  float c = max(dot(d, normalize(uLight)), 0.0);
+  col += uLightCol * (pow(c, 18.0) * 0.45 + pow(c, 220.0) * 0.8 + smoothstep(0.9985, 0.9996, c) * 1.6);
+  vec3 sd = floor(d * 170.0);
+  float star = step(0.9965, fract(sin(dot(sd, vec3(12.9898, 78.233, 37.719))) * 43758.5453));
+  col += vec3(star) * uNight * smoothstep(0.05, 0.4, h);
+  o = vec4(col, 1.0);
+}
 """
 
     val SPRITE_VS = """#version 300 es

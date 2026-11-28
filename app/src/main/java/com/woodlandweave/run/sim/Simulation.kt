@@ -127,7 +127,7 @@ const val DAYGATE_RADIUS = 4.5       // the drawn ring (the same radius as the u
 const val DAYGATE_TRIGGER = 4.1      // the dive starts as soon as the runner is this close to the middle (at the ring itself)
 const val DAYGATE_CLEARING = 14.0    // no trees within this of the middle: room on both sides of the ring
 const val DAYGATE_REARM = 12.0       // the same gate works again after the runner has been this far from it
-const val DAYGATE_TIME = 1.25        // the whole fall through the ring, in seconds (the time of day changes half way)
+const val DAYGATE_TIME = 0.9         // the whole fall through the ring, in seconds (the world switches half way)
 
 /**
  * Developer tuning: how often each thing turns up, as a multiplier of the built-in rate (1.0 = as designed, 0 = never).
@@ -335,19 +335,14 @@ fun enterDayGate(s: Simulation, gate: DayGate): Boolean {
 private fun stepDive(s: Simulation, dt: Double) {
     s.dive += dt
     val u = min(1.0, s.dive / DAYGATE_TIME)
-    val mx = (s.diveX0 + s.diveX1) / 2; val mz = (s.diveZ0 + s.diveZ1) / 2   // the middle of the ring
-    if (u < 0.5) {
-        val e = smooth(u / 0.5)
-        s.x = s.diveX0 + (mx - s.diveX0) * e; s.z = s.diveZ0 + (mz - s.diveZ0) * e
-    } else {
-        if (!s.diveFlipped) {
-            s.diveFlipped = true
-            s.daySide += 1                 // the other world is the world now
-            s.heading = s.diveH0 + PI      // the movement vector turns by exactly 180 degrees; nothing else turns
-            s.gateKick = 0.0               // the gate's elastic fisheye kick, at the moment of passing
-        }
-        val e = smooth((u - 0.5) / 0.5)
-        s.x = mx + (s.diveX1 - mx) * e; s.z = mz + (s.diveZ1 - mz) * e
+    // One smooth move from the edge, through the middle of the ring (at u = .5, where the speed is highest: no stop in the middle), to the far edge.
+    val e = smooth(u)
+    s.x = s.diveX0 + (s.diveX1 - s.diveX0) * e; s.z = s.diveZ0 + (s.diveZ1 - s.diveZ0) * e
+    if (!s.diveFlipped && u >= 0.5) {
+        s.diveFlipped = true
+        s.daySide += 1                 // the other world is the world now
+        s.heading = s.diveH0 + PI      // the movement vector turns by exactly 180 degrees; nothing else turns
+        s.gateKick = 0.0               // the gate's elastic fisheye kick (the lens), at the moment of passing
     }
     if (u >= 1.0) {
         s.dive = -1.0

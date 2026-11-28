@@ -438,7 +438,7 @@ class GameEngine(
         val warpW = warpEnvelope(s)
         if (dive >= 0) {
             val pitch = if (dive < .5) -1.3 * sin(PI / 2 * dive / .5)             // looking down into the hole
-                        else 1.0 * (1 - smoothstep(dive, .5, 1.0))                   // the new world's sky, then level again
+                        else 1.3 * (1 - smoothstep(dive, .5, 1.0))                   // the same view from the new world's side (pitch mirrored), then level
             c.ey -= 1.05 * sin(PI * dive)
             c.ty = c.ey + 18 * kotlin.math.tan(pitch)
         }

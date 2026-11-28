@@ -213,6 +213,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var moonCol = Palette.moon; private var hemi = .85f; private var fogNear = 7f; private var moonI = 1f
     private val portal = PortalTarget()      // the other world, seen through a day gate's hole
     private val view2 = FloatArray(16); private val vp2 = FloatArray(16)
+    private var skyProg = -1; private var emptyVao = 0; private val invVp = FloatArray(16)
     private var cullBehind = true            // trees more than 12 m behind the camera are not drawn (not while the portal looks that way)
     private var lights = 1f; private var red = 0f
     private var encode = 1f
@@ -233,7 +234,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var builtVersion = -1
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
-        portal.release()
+        portal.release(); skyProg = -1; emptyVao = 0
         // The lit shader needs the tier defines (LOCAL_LIGHT_COUNT, Q_ENV, Q_SHADOW); start on the LOW tier.
         feat = Features(Quality.LOW); appliedQuality = null
         val startDefs = feat.litDefines()
@@ -767,6 +768,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 val pc = Palette.mix(fog, sky, .5f).let { if (post.linear) it else Palette.encodeSrgb(it) }
                 GL.glClearColor(pc[0], pc[1], pc[2], 1f)
                 GL.glClear(GL.GL_COLOR_BUFFER_BIT or GL.GL_DEPTH_BUFFER_BIT)
+                drawPortalSky(ex2.toFloat(), ey2.toFloat(), ez2.toFloat())
                 holeMode = -1f
                 ground()
                 forest()
@@ -816,6 +818,30 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         for (b in spriteBatches) drawSprites(b)
 
         post.present(effectState, e.glass, pp)
+    }
+
+    /** The other world's sky into the portal target (current palette = the other world's), from the portal camera [vp] at ([ex], [ey], [ez]). */
+    private fun drawPortalSky(ex: Float, ey: Float, ez: Float) {
+        if (skyProg == -1) skyProg = GlUtil.programOrNull(Shaders.PORTAL_SKY_VS, Shaders.PORTAL_SKY_FS)
+        if (skyProg <= 0) return   // the clear colour stays: a flat sky
+        if (emptyVao == 0) { val v = IntArray(1); GL.glGenVertexArrays(1, v, 0); emptyVao = v[0] }
+        Matrix.invertM(invVp, 0, vp, 0)
+        fun enc(c: FloatArray) = if (post.linear) c else Palette.encodeSrgb(c)
+        val hor = enc(fog); val zen = enc(sky)
+        val lc = enc(FloatArray(3) { (moonCol[it] * moonI * .5f).coerceIn(0f, 1f) })
+        GL.glUseProgram(skyProg)
+        GL.glUniformMatrix4fv(loc(skyProg, "uInvVp"), 1, false, invVp, 0)
+        GL.glUniform3f(loc(skyProg, "uEye"), ex, ey, ez)
+        GL.glUniform3f(loc(skyProg, "uHorizon"), hor[0], hor[1], hor[2])
+        GL.glUniform3f(loc(skyProg, "uZenith"), zen[0], zen[1], zen[2])
+        GL.glUniform3f(loc(skyProg, "uLight"), moonDirV[0], moonDirV[1], moonDirV[2])
+        GL.glUniform3f(loc(skyProg, "uLightCol"), lc[0], lc[1], lc[2])
+        GL.glUniform1f(loc(skyProg, "uNight"), (1.0 - dayLevel).toFloat().coerceIn(0f, 1f))
+        GL.glDisable(GL.GL_DEPTH_TEST); GL.glDepthMask(false)
+        GL.glBindVertexArray(emptyVao)
+        GL.glDrawArrays(GL.GL_TRIANGLES, 0, 3)
+        GL.glBindVertexArray(0)
+        GL.glEnable(GL.GL_DEPTH_TEST); GL.glDepthMask(true)
     }
 
     /** The day gate near and in front of the camera whose hole is drawn (the other world is rendered for it), or null. */
