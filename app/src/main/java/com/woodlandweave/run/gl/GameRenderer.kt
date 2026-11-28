@@ -213,6 +213,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var moonCol = Palette.moon; private var hemi = .85f; private var fogNear = 7f; private var moonI = 1f
     private val portal = PortalTarget()      // the other world, seen through a day gate's hole
     private val view2 = FloatArray(16); private val vp2 = FloatArray(16)
+    private var portalGateId: String? = null; private var portalAx = 0.0; private var portalAz = 0.0   // the portal's turning axis, fixed per gate
     private var skyProg = -1; private var emptyVao = 0; private val invVp = FloatArray(16)
     private var cullBehind = true            // trees more than 12 m behind the camera are not drawn (not while the portal looks that way)
     private var lights = 1f; private var red = 0f
@@ -736,9 +737,11 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 holeX = pg.x.toFloat(); holeZ = pg.z.toFloat()
                 holeR = (Visuals.GateRing.RADIUS - Visuals.GateRing.TORUS_TUBE * (Visuals.GateRing.RADIUS / Visuals.GateRing.TORUS_R) * Visuals.DayGate.HOLE_RIM).toFloat()
                 // The other world's camera: the runner's own camera turned 180 degrees about the horizontal axis through the ring's middle that
-                // lies ALONG the heading (v -> 2 (v.f) f - v). What is straight ahead stays straight ahead, so the same forest the runner sees in
-                // front of him hangs there upside down (left and right swap, as when a page is turned over); up becomes down.
-                val rx = -sin(s.heading); val rz = -cos(s.heading)
+                // lies ALONG the way the runner first saw the gate from (v -> 2 (v.f) f - v): the same forest he sees in front of him hangs there
+                // upside down (left and right swap, as when a page is turned over); up becomes down. The axis is taken once per gate and then
+                // kept, so the other world is a fixed window in the ground: it does not slide or swing when the runner steers.
+                if (pg.id != portalGateId) { portalGateId = pg.id; portalAx = -sin(s.heading); portalAz = -cos(s.heading) }
+                val rx = portalAx; val rz = portalAz
                 val o = DoubleArray(3)
                 fun turn(px: Double, py: Double, pz: Double) {
                     val vx = px - pg.x; val vy = py - gyP; val vz = pz - pg.z
@@ -788,6 +791,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             }
         }
         if (!portalOn) holeMode = 0f
+        if (pg == null) portalGateId = null   // out of sight: the next gate (or this one, later) takes its axis afresh
 
         post.bind()
         // Re-establish the full-frame state before clearing. Shadow/depth-only passes
