@@ -129,6 +129,18 @@ const val DAYGATE_CLEARING = 14.0    // no trees within this of the middle: room
 const val DAYGATE_REARM = 12.0       // the same gate works again after the runner has been this far from it
 const val DAYGATE_TIME = 1.25        // the whole fall through the ring, in seconds (the time of day changes half way)
 
+/**
+ * Developer tuning: how often each thing turns up, as a multiplier of the built-in rate (1.0 = as designed, 0 = never).
+ * Set from the Developer tab of the settings; read by the generators below.
+ */
+object Tuning {
+    @Volatile var powerUps = 1.0
+    @Volatile var dayGates = 1.0
+    @Volatile var surviveGates = 1.0
+    @Volatile var blackHoles = 1.0
+    @Volatile var secrets = 1.0
+}
+
 const val HOLE_CELL = 220
 const val HOLE_CHANCE = 0.3
 const val HOLE_SEE = 160.0
@@ -203,9 +215,12 @@ fun shockwaveReach(ring: Int, speed: Double): Double {
     return (SHOCKWAVE_AHEAD * share) / (1 + max(0.0, speed) / SHOCKWAVE_SPEED)
 }
 
+/** The distance between two power-ups: the built-in gap divided by the developer rate (never, at rate 0). */
+fun powerUpGap(): Double = if (Tuning.powerUps <= 0.0) Double.MAX_VALUE else POWERUP_GAP / Tuning.powerUps
+
 fun canSpawnPowerUp(s: Simulation, lastSpawn: Double, hasLiveOrb: Boolean) =
     s.phase == Phase.RUNNING && s.distance >= POWERUP_START && s.powerUp == null && !hasLiveOrb &&
-        (lastSpawn == 0.0 || s.distance - lastSpawn >= POWERUP_GAP)
+        (lastSpawn == 0.0 || s.distance - lastSpawn >= powerUpGap())
 
 fun placePowerUp(x: Double, z: Double, index: Int, generation: Int, heading: Double = 0.0): PowerUp? {
     if (hash(index, generation, 31) > 0.4) return null
@@ -237,7 +252,7 @@ fun secretsAround(x: Double, z: Double): List<Secret> {
     for (i in -1..1) for (j in -1..1) {
         val gx = cx + i; val gz = cz + j
         if (gx == 0 && gz == 0) continue
-        if (hash(gx, gz, 300) > SECRET_CHANCE) continue
+        if (hash(gx, gz, 300) > SECRET_CHANCE * Tuning.secrets) continue
         out += Secret(
             gx * SECRET_CELL + 15 + hash(gx, gz, 301) * (SECRET_CELL - 30),
             gz * SECRET_CELL + 15 + hash(gx, gz, 302) * (SECRET_CELL - 30),
@@ -262,7 +277,7 @@ fun gatesAround(x: Double, z: Double): List<Gate> {
     for (i in -1..1) for (j in -1..1) {
         val gx = cx + i; val gz = cz + j
         if (gx == 0 && gz == 0) continue
-        if (hash(gx, gz, 500) > GATE_CHANCE) continue
+        if (hash(gx, gz, 500) > GATE_CHANCE * Tuning.surviveGates) continue
         out += Gate(
             gx * GATE_CELL + 15 + hash(gx, gz, 501) * (GATE_CELL - 30),
             gz * GATE_CELL + 15 + hash(gx, gz, 502) * (GATE_CELL - 30),
@@ -279,7 +294,7 @@ fun dayGatesAround(x: Double, z: Double): List<DayGate> {
     for (i in -1..1) for (j in -1..1) {
         val gx = cx + i; val gz = cz + j
         if (gx == 0 && gz == 0) continue
-        if (hash(gx, gz, 520) > DAYGATE_CHANCE) continue
+        if (hash(gx, gz, 520) > DAYGATE_CHANCE * Tuning.dayGates) continue
         val px = gx * DAYGATE_CELL + 20 + hash(gx, gz, 521) * (DAYGATE_CELL - 40)
         val pz = gz * DAYGATE_CELL + 20 + hash(gx, gz, 522) * (DAYGATE_CELL - 40)
         if (upright.any { hypot(px - it.x, pz - it.z) < 40.0 }) continue   // never on top of a survive gate
@@ -363,7 +378,7 @@ fun holesAround(x: Double, z: Double, universe: Int = 0): List<BlackHole> {
     for (i in -1..1) for (j in -1..1) {
         val gx = cx + i; val gz = cz + j
         if (gx == 0 && gz == 0) continue
-        if (hash(gx + salt, gz - salt, 700) > HOLE_CHANCE) continue
+        if (hash(gx + salt, gz - salt, 700) > HOLE_CHANCE * Tuning.blackHoles) continue
         out += BlackHole(
             gx * HOLE_CELL + 25 + hash(gx + salt, gz - salt, 701) * (HOLE_CELL - 50),
             gz * HOLE_CELL + 25 + hash(gx + salt, gz - salt, 702) * (HOLE_CELL - 50),

@@ -99,6 +99,7 @@ class Actions(
     val setTimeOfDay: (Float) -> Unit,
     val setQuality: (Quality) -> Unit,
     val setFx: (String, Float) -> Unit,
+    val setDev: (String, Float) -> Unit,
     val audioStatus: () -> String,
     val finish: () -> Unit,
 )
@@ -482,11 +483,14 @@ private fun PauseContent(onResume: () -> Unit, onSettings: () -> Unit, onExit: (
 private fun SettingsContent(ui: UiState, a: Actions, updates: UpdateController, onClose: () -> Unit, onFxDrag: (FxDrag?) -> Unit) {
     val s = ui.settings
     val inMenu = ui.phase == Phase.MENU
+    var tab by remember { mutableStateOf(0) }
     Column(Modifier.widthIn(max = 320.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.fillMaxWidth()) {
             Box(Modifier.align(Alignment.CenterStart)) { IconBtn("←", onClose) }
             Text("Settings", color = Muted, fontSize = 11.sp, letterSpacing = 1.sp, fontWeight = FontWeight.Medium, modifier = Modifier.align(Alignment.Center))
         }
+        Tabs(listOf(0 to "General", 1 to "Developer"), tab) { tab = it }
+        Spacer(Modifier.height(4.dp))
         Column(
             Modifier.heightIn(max = 340.dp)
                 // mask-image: the list fades out over 26px at both ends.
@@ -502,7 +506,7 @@ private fun SettingsContent(ui: UiState, a: Actions, updates: UpdateController, 
                 .verticalScroll(rememberScrollState()),
         ) {
             // Rows that open or close (the graphics fine-tuning) glide the list's height like an accordion.
-            Column(Modifier.fillMaxWidth().animateContentSize(tween(320, easing = FastOutSlowInEasing))) {
+            if (tab == 1) DeveloperBlock(s, a) else Column(Modifier.fillMaxWidth().animateContentSize(tween(320, easing = FastOutSlowInEasing))) {
                 SettingRow("Difficulty", topLine = false, hint = if (!inMenu) "Applies from the next run." else null) {
                     Seg(listOf(Difficulty.EASY to "Easy", Difficulty.NORMAL to "Normal", Difficulty.HARD to "Hard"), s.difficulty, a.setDifficulty)
                 }
@@ -520,6 +524,47 @@ private fun SettingsContent(ui: UiState, a: Actions, updates: UpdateController, 
                 UpdateRow(updates)
             }
         }
+    }
+}
+
+/** Developer tab: the Christmas mode and how often power-ups, day gates, survive gates, black holes and relics occur (100% = as designed). */
+@Composable
+private fun DeveloperBlock(s: Settings, a: Actions) {
+    Column(Modifier.fillMaxWidth()) {
+        SettingRow("Xmas mode", topLine = false, hint = "Auto: 24-31 December.") {
+            Seg(listOf(ChristmasMode.AUTO to "Auto", ChristmasMode.ON to "On", ChristmasMode.OFF to "Off"), s.christmas, a.setChristmas)
+        }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Edge))
+        Text("Occurrence", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 10.dp, bottom = 2.dp))
+        DevSlider("Power-ups", s.dev.powerUps) { a.setDev("powerups", it) }
+        DevSlider("Day gates", s.dev.dayGates) { a.setDev("daygates", it) }
+        DevSlider("Survive gates", s.dev.surviveGates) { a.setDev("survivegates", it) }
+        DevSlider("Black holes", s.dev.blackHoles) { a.setDev("blackholes", it) }
+        DevSlider("Secrets", s.dev.secrets) { a.setDev("secrets", it) }
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+            Text(
+                "Reset to 100%", color = Muted, fontSize = 11.sp,
+                modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable {
+                    for (k in listOf("powerups", "daygates", "survivegates", "blackholes", "secrets")) a.setDev(k, 100f)
+                }.padding(horizontal = 8.dp, vertical = 6.dp),
+            )
+        }
+    }
+}
+
+/** An occurrence slider: 0% = never, 100% = as designed, up to 300%. */
+@Composable
+private fun DevSlider(label: String, value: Float, onChange: (Float) -> Unit) {
+    var drag by remember { mutableStateOf<Float?>(null) }
+    val v = (drag ?: value).coerceIn(0f, 300f)
+    Row(Modifier.fillMaxWidth().height(38.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = TextC, fontSize = 11.sp, modifier = Modifier.width(96.dp))
+        Slider(
+            value = v, onValueChange = { drag = it; onChange(it) }, onValueChangeFinished = { drag = null },
+            valueRange = 0f..300f, modifier = Modifier.weight(1f),
+            colors = SliderDefaults.colors(thumbColor = TextC, activeTrackColor = TextC, inactiveTrackColor = Edge),
+        )
+        Text("${v.toInt()}%", color = Muted, fontSize = 10.sp, modifier = Modifier.width(40.dp), textAlign = TextAlign.End)
     }
 }
 

@@ -70,6 +70,7 @@ class MainActivity : ComponentActivity() {
             setTimeOfDay = { v -> lifecycleScope.launch { repo.setTimeOfDay(v) } },
             setQuality = { v -> lifecycleScope.launch { repo.setQuality(v) } },
             setFx = { k, v -> lifecycleScope.launch { repo.setFx(k, v) } },
+            setDev = { k, v -> lifecycleScope.launch { repo.setDev(k, v) } },
             audioStatus = { audio.status() },
             finish = { finish() },
         )

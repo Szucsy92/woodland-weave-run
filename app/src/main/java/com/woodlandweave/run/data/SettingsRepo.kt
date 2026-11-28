@@ -19,6 +19,15 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlin.math.max
 
+/** Developer tab: how often each thing occurs, in percent of the built-in rate (100 = as designed, 0 = never). */
+data class DevTuning(
+    val powerUps: Float = 100f,
+    val dayGates: Float = 100f,
+    val surviveGates: Float = 100f,
+    val blackHoles: Float = 100f,
+    val secrets: Float = 100f,
+)
+
 data class Settings(
     val sound: Boolean = true,
     val haptics: Boolean = true,
@@ -32,6 +41,7 @@ data class Settings(
     val timeOfDay: Float = 0f,
     val quality: Quality = Quality.LOW,
     val fx: FxTuning = FxTuning(),
+    val dev: DevTuning = DevTuning(),
     val best: Int = 0,
     val last: Int = 0,
     /** The most relics found in a single run (the found relics themselves reset every run). */
@@ -59,6 +69,7 @@ class SettingsRepo(private val context: Context) {
     }
 
     private fun fxKey(name: String) = floatPreferencesKey("fx_$name")
+    private fun devKey(name: String) = floatPreferencesKey("dev_$name")
 
     private inline fun <reified E : Enum<E>> Preferences.enumOf(
         key: Preferences.Key<String>, default: E,
@@ -81,6 +92,10 @@ class SettingsRepo(private val context: Context) {
                 bloom = p[fxKey("bloom")] ?: FX_NEUTRAL, tone = p[fxKey("tone")] ?: FX_NEUTRAL, shadows = p[fxKey("shadows")] ?: FX_NEUTRAL,
                 ao = 0f, sharp = 0f, shafts = p[fxKey("shafts")] ?: FX_NEUTRAL, dof = p[fxKey("dof")] ?: FX_NEUTRAL, motion = p[fxKey("motion")] ?: FX_NEUTRAL,
             ),
+            dev = DevTuning(
+                powerUps = p[devKey("powerups")] ?: 100f, dayGates = p[devKey("daygates")] ?: 100f, surviveGates = p[devKey("survivegates")] ?: 100f,
+                blackHoles = p[devKey("blackholes")] ?: 100f, secrets = p[devKey("secrets")] ?: 100f,
+            ),
             best = p[K.best] ?: 0,
             last = p[K.last] ?: 0,
             bestSecrets = p[K.bestSecrets] ?: 0,
@@ -99,6 +114,7 @@ class SettingsRepo(private val context: Context) {
     suspend fun setTimeOfDay(v: Float) = context.store.edit { it[K.tod] = v.coerceIn(0f, 1f); it[K.mood] = ForestMood.MANUAL.name }
     suspend fun setQuality(v: Quality) = context.store.edit { it[K.quality] = v.name }
     suspend fun setFx(name: String, v: Float) = context.store.edit { it[fxKey(name)] = v }
+    suspend fun setDev(name: String, v: Float) = context.store.edit { it[devKey(name)] = v.coerceIn(0f, 300f) }
     suspend fun setBestSecrets(v: Int) = context.store.edit { it[K.bestSecrets] = max(it[K.bestSecrets] ?: 0, v) }
     suspend fun recordScore(score: Int) = context.store.edit {
         it[K.last] = score

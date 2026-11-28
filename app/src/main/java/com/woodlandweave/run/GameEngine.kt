@@ -132,6 +132,13 @@ class GameEngine(
         // Apply the seasonal soundtrack at the moment persisted settings arrive.
         // Do not rely on the simulation event loop to propagate a menu setting change.
         audio.setChristmas(next.christmas)
+        // Developer rates: applied at once, and the gates / holes / relics around the runner are generated again with them.
+        val d = next.dev
+        if (d != prev.dev) {
+            Tuning.powerUps = d.powerUps / 100.0; Tuning.dayGates = d.dayGates / 100.0; Tuning.surviveGates = d.surviveGates / 100.0
+            Tuning.blackHoles = d.blackHoles / 100.0; Tuning.secrets = d.secrets / 100.0
+            keyCx = Int.MIN_VALUE
+        }
         if (sim.phase == Phase.MENU) applySelection()
         publish(force = true)
     }
@@ -316,7 +323,7 @@ class GameEngine(
         val s = sim
         val live = orbs.any { it.taken == null }
         if (canSpawnPowerUp(s, lastOrbSpawn, live)) {
-            val index = floor(s.distance / POWERUP_GAP).toInt()
+            val index = floor(s.distance / powerUpGap()).toInt()
             val p = placePowerUp(s.x, s.z, index, floor(s.distance).toInt(), s.heading)
             if (p != null) {
                 // Never let a wisp hang inside a trunk: slide it to open ground beside the nearest tree.
