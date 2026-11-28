@@ -310,12 +310,12 @@ class GameEngine(
         updateOrbs(raw)
 
         if (s.mode == GameMode.FREEROAM) {
-            for (g in gates) if (passGate(s, g)) { buzz(30, 40, 30); audio.cue(Cue.GATE) }
+            for (g in gates) if (passGate(s, g)) { buzz(30, 40, 30); audio.cue(if (s.surviveTime >= 0) Cue.GHOST else Cue.END) }   // in / out of Survive
             for (g in dayGates) if (enterDayGate(s, g)) break
             for (sec in secrets) if (discoverSecret(s, sec)) onSecret()
         }
-        if (s.dive >= 0 && lastDive < 0) { buzz(40, 30, 60, 30, 80); audio.cue(Cue.GATE) }
-        if (s.dive < 0 && lastDive >= 0) audio.cue(Cue.WARPOUT)
+        if (s.dive >= 0 && lastDive < 0) { buzz(40, 30, 60, 30, 80); audio.cue(Cue.GHOST) }   // into the day gate
+        if (s.dive < 0 && lastDive >= 0) audio.cue(Cue.END)                                   // out of it
         lastDive = s.dive
     }
 
@@ -354,8 +354,8 @@ class GameEngine(
         val ring = if (s.powerUp == PowerUpType.SHOCKWAVE) min(SHOCKWAVE_RINGS - 1, floor(s.powerUpTime / SHOCKWAVE_GAP).toInt()) else -1
         if (ring > lastRing && ring > 0) audio.cue(Cue.RING)
         lastRing = ring
-        if (s.warp >= 0 && lastWarp < 0) { buzz(60, 40, 120, 40, 60); audio.cue(Cue.HOLE) }
-        if (s.warpOut >= 0 && lastWarpOut < 0) { buzz(120, 30, 40); audio.cue(Cue.WARPOUT) }
+        if (s.warp >= 0 && lastWarp < 0) { buzz(60, 40, 120, 40, 60); audio.cue(Cue.GHOST) }   // into the black hole
+        if (s.warpOut >= 0 && lastWarpOut < 0) { buzz(120, 30, 40); audio.cue(Cue.END) }   // out of it
         lastWarp = s.warp; lastWarpOut = s.warpOut
 
         val ghostLeft = POWERUP_DURATION - s.powerUpTime
@@ -379,7 +379,7 @@ class GameEngine(
     private fun onPowerUp(type: PowerUpType) {
         lastPowerType = type; activePower = type; leavingPower = null
         buzz(35, 30, 60)
-        audio.cue(when (type) { PowerUpType.FREEZER -> Cue.FREEZER; PowerUpType.GHOST -> Cue.GHOST; PowerUpType.SHOCKWAVE -> Cue.SHOCKWAVE })
+        audio.cue(Cue.GHOST)   // the ghost orb's sound for every orb (and Cue.END, its fading, when it runs out)
     }
 
     private fun onPowerUpEnd() {
