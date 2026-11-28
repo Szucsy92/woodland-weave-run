@@ -19,10 +19,6 @@ class EffectState {
     /** The nearest gate on screen: x, y (0..1), radius (screen heights), strength; [gateSx] squashes the circle into the ellipse the upright ring makes. */
     val gate = floatArrayOf(.5f, .5f, .1f, 0f)
     var gateSx = 1f
-    /** The nearest day gate on screen: x, y, radius, strength; [dgateSy] squashes the circle into the ellipse the flat ring makes; [dgateGrade] > 0 when the far side is brighter. */
-    val dgate = floatArrayOf(.5f, .5f, .1f, 0f)
-    var dgateSy = 1f
-    var dgateGrade = 0f
     /** Screen aspect (width / height), so the gate-pass kick can match the gate lens's centre zoom. */
     var aspect = 16.0 / 9.0
 }
@@ -60,7 +56,7 @@ class EffectsModel {
     /** The same punch for every event, `age` seconds after it happened. */
     private fun kick(age: Double) = if (age >= 0 && age < GLITCH_KICK_TIME) punch(1 - age / GLITCH_KICK_TIME) else 0.0
 
-    fun update(s: Simulation, delta: Double, out: EffectState, holeFor: (Simulation) -> FloatArray?, gateFor: (Simulation) -> FloatArray? = { null }, dayGateFor: (Simulation) -> FloatArray? = { null }) {
+    fun update(s: Simulation, delta: Double, out: EffectState, holeFor: (Simulation) -> FloatArray?, gateFor: (Simulation) -> FloatArray? = { null }) {
         val lying = s.phase == Phase.FALLING || s.phase == Phase.FALLEN
         val awake = s.phase == Phase.AWAKENING
         val impact = if (s.impact > 0) sin((1 - s.impact / IMPACT_DURATION) * PI) else 0.0
@@ -150,10 +146,6 @@ class EffectsModel {
         val gate = gateFor(s)
         if (gate != null) { out.gate[0] = gate[0]; out.gate[1] = gate[1]; out.gate[2] = gate[2]; out.gate[3] = gate[3]; out.gateSx = gate[4] }
         else { out.gate[0] = .5f; out.gate[1] = .5f; out.gate[2] = .1f; out.gate[3] = 0f; out.gateSx = 1f }
-
-        val dgate = dayGateFor(s)
-        if (dgate != null) { for (i in 0..3) out.dgate[i] = dgate[i]; out.dgateSy = dgate[4]; out.dgateGrade = dgate[5] }
-        else { out.dgate[3] = 0f; out.dgateSy = 1f; out.dgateGrade = 0f }
 
         val hueTarget = universeHue(s.universe) + warp * sin(clock * 1.4) * .7
         hueNow += (hueTarget - hueNow) * min(1.0, delta * 1.8)

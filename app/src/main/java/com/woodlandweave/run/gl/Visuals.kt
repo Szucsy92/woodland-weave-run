@@ -108,9 +108,10 @@ object Visuals {
         const val GLOW_SIZE = 3.2
         const val GLOW_ALPHA = .5
         const val GLOW_PULSE = .15
-        /** How strongly the far side is turned over and graded inside the ring (0..1). */
-        const val VIEW = 1.0
-        const val VIEW_FADE_NEAR = 4.0 // the view fades out over the last metres before the ring
+        /** The hole is a real round cut in the ground; the other world is rendered for it into a second target while a gate is this near (m). */
+        const val PORTAL_SEE = 75.0
+        const val PORTAL_SCALE = 0.5f  // the second target's size relative to the scene target
+        const val HOLE_RIM = 0.6       // the cut is this many tube radii inside the ring's middle line
     }
 
     /**

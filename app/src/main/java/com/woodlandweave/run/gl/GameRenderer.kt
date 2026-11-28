@@ -210,7 +210,10 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
 
     // ---- per-frame scene parameters ----
     private var fog = Palette.fog; private var sky = Palette.moon; private var groundC = Palette.fog
-    private var moonCol = Palette.moon; private var hemi = .85f; private var fogNear = 7f
+    private var moonCol = Palette.moon; private var hemi = .85f; private var fogNear = 7f; private var moonI = 1f
+    private val portal = PortalTarget()      // the other world, seen through a day gate's hole
+    private val view2 = FloatArray(16); private val vp2 = FloatArray(16)
+    private var cullBehind = true            // trees more than 12 m behind the camera are not drawn (not while the portal looks that way)
     private var lights = 1f; private var red = 0f
     private var encode = 1f
     private var camFwdX = 0f; private var camFwdY = 0f; private var camFwdZ = -1f
@@ -230,6 +233,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var builtVersion = -1
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
+        portal.release()
         // The lit shader needs the tier defines (LOCAL_LIGHT_COUNT, Q_ENV, Q_SHADOW); start on the LOW tier.
         feat = Features(Quality.LOW); appliedQuality = null
         val startDefs = feat.litDefines()
@@ -443,6 +447,68 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     }
 
     // ---- the frame ----
+    /**
+     * The day cycle's look at position [c] (0 night, .25 dawn, .5 day, .75 dusk): dayLevel, fog, sky, ground colour, hemisphere light, fog
+     * start and the key light. Called for the world the runner is in, and again for the other world the day gate's hole shows.
+     */
+    private fun computeSky(c: Double) {
+        dayLevel = .5 - .5 * cos(2.0 * PI * c)   // 0 at night, .5 at dawn and dusk, 1 at day
+        val k = dayLevel.toFloat()
+        // Twilight weight: 0 at full night / full day, 1 half way (dawn or dusk).
+        val dusk = (1f - kotlin.math.abs(2f * k - 1f)).coerceIn(0f, 1f)
+        val tw = ((dusk - .2f) / .6f).coerceIn(0f, 1f).let { it * it * (3f - 2f * it) }
+        val warmSky = floatArrayOf(1.00f, 0.17f, 0.34f)
+        val warmFog = floatArrayOf(0.46f, 0.06f, 0.24f)
+
+        // TWO lights, each with its own arc and its own on/off window (see SkyLight.kt):
+        //  - the SUN shines from sunrise (cycle .25) to sunset (.75) and is OFF at night,
+        //  - the MOON shines from moonrise (just before the sun has set) to moonset (just after the sun has risen) and is OFF by day.
+        // Each one rises in the EAST (right), climbs to its own highest point straight ahead (NORTH) and sets in the WEST (left),
+        // low -> high -> low, always in front of the runner. Nothing slides between the two: one switches off as the other switches on,
+        // so no single light has to swing from one side to the other. Heights and intensities are set per light in SkyLights.
+        // Only one directional light feeds the shadow map and the beams, the one that is stronger right now; the overlap is so short
+        // and both are faded to almost nothing at the horizon, so the hand-over is not visible.
+        // No sway, drift or pulsing: the angle depends on the time of day only (the Napszak slider / the clock), so while running
+        // the beams and light pools stay exactly where they are (the canopy openings, SUN_GAP_FN, are fixed in the world).
+        val sunTh = SkyLights.SUN.progress(c); val moonTh = SkyLights.MOON.progress(c)
+        val sunE = if (sunTh >= 0) SkyLights.SUN.intensity(sunTh) * SkyLights.SUN.weight(sunTh) else 0f
+        val moonE = if (moonTh >= 0) SkyLights.MOON.intensity(moonTh) * SkyLights.MOON.weight(moonTh) else 0f
+        val sunKey = (sunTh >= 0 && sunE >= moonE) || moonTh < 0
+        val keyTh = if (sunKey) sunTh else moonTh
+        val keyLight = if (sunKey) SkyLights.SUN else SkyLights.MOON
+        if (keyTh >= 0) keyLight.direction(keyTh, moonDirV)
+        moonCol = if (sunKey) {
+            // Warm gold / rose near the horizon, white-warm at the highest point.
+            val horizon = 1.0 - sin(PI * keyTh)
+            val warm = horizon.let { x -> val c = ((x - .5) / .5).coerceIn(0.0, 1.0); c * c * (3 - 2 * c) }.toFloat() * .85f
+            Palette.mix(Palette.sunDay, if (keyTh < .5) Palette.sunDawn else Palette.sunDusk, warm)
+        } else Palette.moon
+        moonI = maxOf(sunE, moonE)   // 0 only if both lights are off (never happens: the windows overlap)
+
+        // The day's base colours are dark and greyish: the sun itself does the lighting.
+        // Past dawn the day brightens further (dl = 0 at dawn/dusk, so the twilight look is untouched).
+        val dl0 = ((k - .5f) * 2f).coerceIn(0f, 1f)
+        val dl = dl0 * dl0 * (3f - 2f * dl0)
+        fog = Palette.mix(Palette.mix(Palette.mix(Palette.fog, Palette.dayFog, k), warmFog, tw * .22f), Palette.dayFogLight, dl)
+        sky = Palette.mix(Palette.mix(Palette.mix(Palette.moon, Palette.daySky, k), warmSky, tw * .30f), Palette.daySkyLight, dl)
+        // Richer atmospheric hues, while reducing the ambient veil that used to flatten contrast.
+        fun saturate(c: FloatArray, amount: Float): FloatArray {
+            val l = .2126f * c[0] + .7152f * c[1] + .0722f * c[2]
+            return FloatArray(3) { l + (c[it] - l) * amount }
+        }
+        fog = saturate(fog, 1.38f)
+        sky = saturate(sky, 1.42f)
+        // Deepen the atmospheric veil: richer hues, lower luminance, less milky daylight.
+        fog = floatArrayOf(fog[0] * .80f, fog[1] * .78f, fog[2] * .82f)
+        sky = floatArrayOf(sky[0] * .88f, sky[1] * .86f, sky[2] * .92f)
+        if (xmas) { fog = Palette.mix(fog, Palette.xmasFog, .32f); sky = Palette.mix(sky, Palette.xmasSky, .28f) }
+        groundC = Palette.mix(fog, Palette.pursuer, red * .55f)
+        // Ambient fill prevents crushed shadows without flattening the directional sunlight.
+        hemi = .48f + k * .19f + tw * .045f + dl * .08f + red * 1.4f
+        // Fog starts later by day, so the distant lights stay readable.
+        fogNear = 8f + k * 3.5f
+    }
+
     private fun draw(dt: Double) {
         val e = engine; val s = e.sim; val cam = e.camera
         if (builtVersion != e.worldVersion) { rebuildProps(); builtVersion = e.worldVersion }
@@ -471,13 +537,12 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             var d = target - cyc; d -= Math.rint(d)
             cyc = (((cyc + d * min(1.0, dt * 14.0)) % 1.0) + 1.0) % 1.0
         }
-        dayLevel = .5 - .5 * cos(2.0 * PI * cyc)   // 0 at night, .5 at dawn and dusk, 1 at day
+        red = e.redMix.toFloat()
+        computeSky(cyc)
         val k = dayLevel.toFloat()
         // Twilight weight: 0 at full night / full day, 1 half way (dawn or dusk).
         val dusk = (1f - kotlin.math.abs(2f * k - 1f)).coerceIn(0f, 1f)
         val tw = ((dusk - .2f) / .6f).coerceIn(0f, 1f).let { it * it * (3f - 2f * it) }
-        val warmSky = floatArrayOf(1.00f, 0.17f, 0.34f)
-        val warmFog = floatArrayOf(0.46f, 0.06f, 0.24f)
         lampDay = if (feat.rank >= 1) 1f - .2f * k else 1f
         // Keep exposure nearly constant across the cycle: the eye should read the changing light, not an artificial brightness pump.
         pp.exposureScale = .96f + .035f * k + .012f * dusk
@@ -487,53 +552,6 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         pp.shaftScale = 1.22f - .18f * k + .16f * tw
         red = e.redMix.toFloat(); lights = 1f - e.dieRef.toFloat()
 
-        // TWO lights, each with its own arc and its own on/off window (see SkyLight.kt):
-        //  - the SUN shines from sunrise (cycle .25) to sunset (.75) and is OFF at night,
-        //  - the MOON shines from moonrise (just before the sun has set) to moonset (just after the sun has risen) and is OFF by day.
-        // Each one rises in the EAST (right), climbs to its own highest point straight ahead (NORTH) and sets in the WEST (left),
-        // low -> high -> low, always in front of the runner. Nothing slides between the two: one switches off as the other switches on,
-        // so no single light has to swing from one side to the other. Heights and intensities are set per light in SkyLights.
-        // Only one directional light feeds the shadow map and the beams, the one that is stronger right now; the overlap is so short
-        // and both are faded to almost nothing at the horizon, so the hand-over is not visible.
-        // No sway, drift or pulsing: the angle depends on the time of day only (the Napszak slider / the clock), so while running
-        // the beams and light pools stay exactly where they are (the canopy openings, SUN_GAP_FN, are fixed in the world).
-        val sunTh = SkyLights.SUN.progress(cyc); val moonTh = SkyLights.MOON.progress(cyc)
-        val sunE = if (sunTh >= 0) SkyLights.SUN.intensity(sunTh) * SkyLights.SUN.weight(sunTh) else 0f
-        val moonE = if (moonTh >= 0) SkyLights.MOON.intensity(moonTh) * SkyLights.MOON.weight(moonTh) else 0f
-        val sunKey = (sunTh >= 0 && sunE >= moonE) || moonTh < 0
-        val keyTh = if (sunKey) sunTh else moonTh
-        val keyLight = if (sunKey) SkyLights.SUN else SkyLights.MOON
-        if (keyTh >= 0) keyLight.direction(keyTh, moonDirV)
-        moonCol = if (sunKey) {
-            // Warm gold / rose near the horizon, white-warm at the highest point.
-            val horizon = 1.0 - sin(PI * keyTh)
-            val warm = horizon.let { x -> val c = ((x - .5) / .5).coerceIn(0.0, 1.0); c * c * (3 - 2 * c) }.toFloat() * .85f
-            Palette.mix(Palette.sunDay, if (keyTh < .5) Palette.sunDawn else Palette.sunDusk, warm)
-        } else Palette.moon
-        val moonI = maxOf(sunE, moonE)   // 0 only if both lights are off (never happens: the windows overlap)
-
-        // The day's base colours are dark and greyish: the sun itself does the lighting.
-        // Past dawn the day brightens further (dl = 0 at dawn/dusk, so the twilight look is untouched).
-        val dl0 = ((k - .5f) * 2f).coerceIn(0f, 1f)
-        val dl = dl0 * dl0 * (3f - 2f * dl0)
-        fog = Palette.mix(Palette.mix(Palette.mix(Palette.fog, Palette.dayFog, k), warmFog, tw * .22f), Palette.dayFogLight, dl)
-        sky = Palette.mix(Palette.mix(Palette.mix(Palette.moon, Palette.daySky, k), warmSky, tw * .30f), Palette.daySkyLight, dl)
-        // Richer atmospheric hues, while reducing the ambient veil that used to flatten contrast.
-        fun saturate(c: FloatArray, amount: Float): FloatArray {
-            val l = .2126f * c[0] + .7152f * c[1] + .0722f * c[2]
-            return FloatArray(3) { l + (c[it] - l) * amount }
-        }
-        fog = saturate(fog, 1.38f)
-        sky = saturate(sky, 1.42f)
-        // Deepen the atmospheric veil: richer hues, lower luminance, less milky daylight.
-        fog = floatArrayOf(fog[0] * .80f, fog[1] * .78f, fog[2] * .82f)
-        sky = floatArrayOf(sky[0] * .88f, sky[1] * .86f, sky[2] * .92f)
-        if (xmas) { fog = Palette.mix(fog, Palette.xmasFog, .32f); sky = Palette.mix(sky, Palette.xmasSky, .28f) }
-        groundC = Palette.mix(fog, Palette.pursuer, red * .55f)
-        // Ambient fill prevents crushed shadows without flattening the directional sunlight.
-        hemi = .48f + k * .19f + tw * .045f + dl * .08f + red * 1.4f
-        // Fog starts later by day, so the distant lights stay readable.
-        fogNear = 8f + k * 3.5f
 
         // Camera: lookAt, then the same local pitch / yaw / roll nudges three.js applied.
         Matrix.setLookAtM(view, 0, cam.ex.toFloat(), cam.ey.toFloat(), cam.ez.toFloat(), cam.tx.toFloat(), cam.ty.toFloat(), cam.tz.toFloat(), 0f, 1f, 0f)
@@ -546,7 +564,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         Matrix.multiplyMM(vp, 0, proj, 0, view, 0)
 
         effectState.aspect = aspectRatio.toDouble()
-        effects.update(s, dt, effectState, { holeScreen(it, cam) }, { gateScreen(it, cam) }, { dayGateScreen(it, cam) })
+        effects.update(s, dt, effectState, { holeScreen(it, cam) }, { gateScreen(it, cam) })
 
         if (ADAPTIVE_SCALE && scaler.tick(dt)) post.setScale(scaler.density / surfaceDensity)
         encode = if (post.linear) 0f else 1f
@@ -568,18 +586,25 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         pp.motion = (sp01 * sp01 * feat.motionBlurMax * pp.tune.motion).toFloat()
 
         updateLocalLights(s, e, cam)
-        post.bind()
-        // Re-establish the full-frame state before clearing. Shadow/depth-only passes
-        // and device/driver state carry-over must never leave a clipped or masked strip
-        // at the top of the next frame.
-        GL.glDisable(GL.GL_SCISSOR_TEST)
-        GL.glColorMask(true, true, true, true)
-        GL.glDepthMask(true)
-        GL.glEnable(GL.GL_DEPTH_TEST)
-        GL.glDisable(GL.GL_BLEND)
-        val clear = if (post.linear) fog else Palette.encodeSrgb(fog)
-        GL.glClearColor(clear[0], clear[1], clear[2], 1f)
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT or GL.GL_DEPTH_BUFFER_BIT)
+
+        // The day gate whose hole is on screen (if any): its other world is rendered below, so the trees behind the camera must stay too.
+        val pgate = portalGateFor(s, cam)
+        cullBehind = pgate == null
+        // Forest.
+        if (!shadowActive) shadowValid = false
+        val shadowDue = shadowActive && (!shadowValid || (++shadowTick % SHADOW_EVERY) == 0)
+        fillInstances(s, cam, shadowDue)
+        val smap = shadow
+        if (smap != null && shadowActive) {
+            if (shadowDue) {
+                shadowPass(smap, cam)
+                shadowValid = true
+                post.bind()
+                GL.glEnable(GL.GL_DEPTH_TEST)
+            }
+            System.arraycopy(smap.vp[0], 0, pp.lightVp0, 0, 16)
+            pp.shadowTex0 = smap.tex[0]
+        } else pp.shadowTex0 = 0
 
         val behindX = sin(s.heading); val behindZ = cos(s.heading)
         val gy = groundHeight(s.x, s.z)
@@ -589,13 +614,14 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         var fdx = (behindX * 50).toFloat(); var fdy = 8f; var fdz = (behindZ * 50).toFloat()
         val fl = sqrt(fdx * fdx + fdy * fdy + fdz * fdz); fdx /= fl; fdy /= fl; fdz /= fl
 
+        var eyeX = cam.ex.toFloat(); var eyeY = cam.ey.toFloat(); var eyeZ = cam.ez.toFloat()   // the camera the scene is drawn from (the portal pass changes it)
         fun scene(p: Int) {
             // The runner and opaque world meshes share this material/light uniform set:
             // local orb lights, sky/ground bounce, directional shadows and the day/night palette
             // therefore affect the character as well as nearby scenery.
             GL.glUseProgram(p)
             GL.glUniformMatrix4fv(loc(p, "uVP"), 1, false, vp, 0)
-            u3(p, "uCam", cam.ex.toFloat(), cam.ey.toFloat(), cam.ez.toFloat())
+            u3(p, "uCam", eyeX, eyeY, eyeZ)
             u3(p, "uFwd", camFwdX, camFwdY, camFwdZ); u1(p, "uEncode", encode)
             u1(p, "uTime", animT.toFloat()); u1(p, "uSnow", if (xmas) 1f else 0f)
             val sm = shadow
@@ -634,75 +660,144 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             u3(p, "uFloodCol", Palette.pursuer[0] * floodI, Palette.pursuer[1] * floodI, Palette.pursuer[2] * floodI)
             u1(p, "uLights", lights); u1(p, "uRed", red)
             GL.glUniform1i(loc(p, "uTex"), 0); GL.glUniform1i(loc(p, "uNorm"), 1); GL.glUniform1i(loc(p, "uRoughTex"), 2)
+            GL.glUniform1i(loc(p, "uPortal"), 6)   // its own unit, like the shadow map: samplers must never share one
         }
 
-        // Ground: snapped to its own vertex lattice so the displaced terrain never shimmers.
-        scene(groundProg)
-        val gx = Math.round(s.x / GROUND_STEP) * GROUND_STEP; val gz = Math.round(s.z / GROUND_STEP) * GROUND_STEP
-        GL.glUniform2f(loc(groundProg, "uOff"), gx, gz)
-        material(groundProg, Palette.ground, mode = 3, rough = .95f, maps = true, ns = .5f)
-        bindMaps(floorTex, floorN, floorR)
-        GL.glBindVertexArray(groundVao)
-        GL.glDrawElements(GL.GL_TRIANGLES, groundIndexCount, GL.GL_UNSIGNED_SHORT, 0)
-        GL.glBindVertexArray(0)
+
+
+        // The hole of the day gate (x, z, radius): a real round cut in the ground. holeMode 0 = no hole, 1 = the hole shows the other world, -1 = cut only.
+        var holeX = 0f; var holeZ = 0f; var holeR = 0f; var holeMode = 0f
+        fun ground() {
+            // Ground: snapped to its own vertex lattice so the displaced terrain never shimmers.
+            scene(groundProg)
+            GL.glUniform4f(loc(groundProg, "uHole"), holeX, holeZ, holeR, holeMode)
+            GL.glUniform2f(loc(groundProg, "uScreen"), post.targetW.toFloat(), post.targetH.toFloat())
+            val gx = Math.round(s.x / GROUND_STEP) * GROUND_STEP; val gz = Math.round(s.z / GROUND_STEP) * GROUND_STEP
+            GL.glUniform2f(loc(groundProg, "uOff"), gx, gz)
+            material(groundProg, Palette.ground, mode = 3, rough = .95f, maps = true, ns = .5f)
+            bindMaps(floorTex, floorN, floorR)
+            GL.glBindVertexArray(groundVao)
+            GL.glDrawElements(GL.GL_TRIANGLES, groundIndexCount, GL.GL_UNSIGNED_SHORT, 0)
+            GL.glBindVertexArray(0)
+        }
+        fun forest() {
+            scene(litProg)
+            val g = e.ghostK.toFloat()
+            bindMaps(barkTex, barkN, barkR)
+            if (feat.wind) setSway(litProg, TREE_SWAY, 0f, 0f)
+            // The merged trunk/roots/limbs are closed outward-facing tubes. Cull their back faces in
+            // both normal and ghost rendering so translucent power-ups cannot reveal hidden limb backs.
+            GL.glEnable(GL.GL_CULL_FACE)
+            GL.glCullFace(GL.GL_BACK)
+            if (g > 0f) {
+                // Pass 1: establish the nearest merged tree-body surface before the ghost fade.
+                GL.glColorMask(false, false, false, false)
+                GL.glDepthMask(true)
+                GL.glDisable(GL.GL_BLEND)
+                material(litProg, Palette.trunk, mode = 4, rough = .8f, maps = true, ns = .75f, uvx = 1.5f, uvy = 7f)
+                BODY_KINDS.forEach { kind -> meshes[kind].draw(bufs[kind], counts[kind]) }
+                GL.glColorMask(true, true, true, true)
+
+                // Pass 2: shade only the nearest surfaces. Keep depth testing enabled but
+                // freeze the prepass depth so transparent batches cannot mask one another.
+                GL.glEnable(GL.GL_BLEND)
+                GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
+                GL.glDepthFunc(GL.GL_LEQUAL)
+                GL.glDepthMask(false)
+                material(litProg, Palette.trunk, Palette.ghostGlow, g * .55f, 1f - g * .34f, mode = 4, rough = .8f, maps = true, ns = .75f, uvx = 1.5f, uvy = 7f)
+                BODY_KINDS.forEach { kind -> meshes[kind].draw(bufs[kind], counts[kind]) }
+                GL.glDepthMask(true)
+                GL.glDepthFunc(GL.GL_LESS)
+                GL.glDisable(GL.GL_BLEND)
+            } else {
+                material(litProg, Palette.trunk, mode = 4, rough = .8f, maps = true, ns = .75f, uvx = 1.5f, uvy = 7f)
+                BODY_KINDS.forEach { kind -> meshes[kind].draw(bufs[kind], counts[kind]) }
+            }
+            // Joined canopy lobes are closed surfaces; back-face culling avoids drawing their hidden sides.
+            GL.glEnable(GL.GL_CULL_FACE); GL.glCullFace(GL.GL_BACK)
+            material(litProg, Palette.crown, mode = 5, rough = .9f)
+            CROWN_KINDS.forEach { kind -> meshes[kind].draw(bufs[kind], counts[kind]) }
+            CROWN_FAR_KINDS.forEach { kind -> meshes[kind].draw(bufs[kind], counts[kind]) }
+            if (feat.wind) setSway(litProg, 0f, 0f, 0f)    // rocks and bushes stay put
+            material(litProg, Palette.plant, mode = 6, rough = .9f)
+            meshes[K_PLANT].draw(bufs[K_PLANT], counts[K_PLANT])
+            GL.glDisable(GL.GL_CULL_FACE)
+        }
+
+        // ---- The day gate: the other world is drawn into its own target, then seen through the hole in the ground ----
+        var portalOn = false
+        val pg = pgate
+        if (pg != null) {
+            portal.resize((post.targetW * Visuals.DayGate.PORTAL_SCALE).toInt(), (post.targetH * Visuals.DayGate.PORTAL_SCALE).toInt(), post.linear)
+            if (portal.ok) {
+                val gyP = groundHeight(pg.x, pg.z)
+                holeX = pg.x.toFloat(); holeZ = pg.z.toFloat()
+                holeR = (Visuals.GateRing.RADIUS - Visuals.GateRing.TORUS_TUBE * (Visuals.GateRing.RADIUS / Visuals.GateRing.TORUS_R) * Visuals.DayGate.HOLE_RIM).toFloat()
+                // The other world's camera: the runner's own camera turned 180 degrees about the horizontal axis through the ring's middle that
+                // is at right angles to the heading (v -> 2 (v.r) r - v). Heading and up are turned with it: up becomes down.
+                val rx = cos(s.heading); val rz = -sin(s.heading)
+                val o = DoubleArray(3)
+                fun turn(px: Double, py: Double, pz: Double) {
+                    val vx = px - pg.x; val vy = py - gyP; val vz = pz - pg.z
+                    val dd = vx * rx + vz * rz
+                    o[0] = pg.x + 2 * dd * rx - vx; o[1] = gyP - vy; o[2] = pg.z + 2 * dd * rz - vz
+                }
+                turn(cam.ex, cam.ey, cam.ez); val ex2 = o[0]; val ey2 = o[1]; val ez2 = o[2]
+                turn(cam.tx, cam.ty, cam.tz)
+                Matrix.setLookAtM(view2, 0, ex2.toFloat(), ey2.toFloat(), ez2.toFloat(), o[0].toFloat(), o[1].toFloat(), o[2].toFloat(), 0f, -1f, 0f)
+                Matrix.setIdentityM(tmp, 0)
+                Matrix.rotateM(tmp, 0, Math.toDegrees(-cam.rotZ).toFloat(), 0f, 0f, 1f)
+                Matrix.rotateM(tmp, 0, Math.toDegrees(-cam.rotY).toFloat(), 0f, 1f, 0f)
+                Matrix.rotateM(tmp, 0, Math.toDegrees(-cam.rotX).toFloat(), 1f, 0f, 0f)
+                Matrix.multiplyMM(tmp2, 0, tmp, 0, view2, 0)
+                Matrix.multiplyMM(vp2, 0, proj, 0, tmp2, 0)
+
+                // Swap the camera and the palette for this pass, draw, and put everything back.
+                val vpMain = vp.copyOf(); val fwdX = camFwdX; val fwdY = camFwdY; val fwdZ = camFwdZ
+                System.arraycopy(vp2, 0, vp, 0, 16)
+                camFwdX = -tmp2[2]; camFwdY = -tmp2[6]; camFwdZ = -tmp2[10]
+                eyeX = ex2.toFloat(); eyeY = ey2.toFloat(); eyeZ = ez2.toFloat()
+                val wasShadow = shadowActive; shadowActive = false
+                computeSky(cyc + .5)
+                GL.glActiveTexture(GL.GL_TEXTURE6); GL.glBindTexture(GL.GL_TEXTURE_2D, 0); GL.glActiveTexture(GL.GL_TEXTURE0)   // never sample what is drawn into
+                GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, portal.fbo)
+                GL.glViewport(0, 0, portal.w, portal.h)
+                GL.glDisable(GL.GL_SCISSOR_TEST); GL.glColorMask(true, true, true, true); GL.glDepthMask(true)
+                GL.glEnable(GL.GL_DEPTH_TEST); GL.glDisable(GL.GL_BLEND)
+                val pc = Palette.mix(fog, sky, .5f).let { if (post.linear) it else Palette.encodeSrgb(it) }
+                GL.glClearColor(pc[0], pc[1], pc[2], 1f)
+                GL.glClear(GL.GL_COLOR_BUFFER_BIT or GL.GL_DEPTH_BUFFER_BIT)
+                holeMode = -1f
+                ground()
+                forest()
+                shadowActive = wasShadow
+                System.arraycopy(vpMain, 0, vp, 0, 16)
+                camFwdX = fwdX; camFwdY = fwdY; camFwdZ = fwdZ
+                eyeX = cam.ex.toFloat(); eyeY = cam.ey.toFloat(); eyeZ = cam.ez.toFloat()
+                computeSky(cyc)
+                holeMode = 1f
+                portalOn = true
+            }
+        }
+        if (!portalOn) holeMode = 0f
+
+        post.bind()
+        // Re-establish the full-frame state before clearing. Shadow/depth-only passes
+        // and device/driver state carry-over must never leave a clipped or masked strip
+        // at the top of the next frame.
+        GL.glDisable(GL.GL_SCISSOR_TEST)
+        GL.glColorMask(true, true, true, true)
+        GL.glDepthMask(true)
+        GL.glEnable(GL.GL_DEPTH_TEST)
+        GL.glDisable(GL.GL_BLEND)
+        val clear = if (post.linear) fog else Palette.encodeSrgb(fog)
+        GL.glClearColor(clear[0], clear[1], clear[2], 1f)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT or GL.GL_DEPTH_BUFFER_BIT)
+        if (portalOn) { GL.glActiveTexture(GL.GL_TEXTURE6); GL.glBindTexture(GL.GL_TEXTURE_2D, portal.tex); GL.glActiveTexture(GL.GL_TEXTURE0) }
+        ground()
 
         // Forest.
-        if (!shadowActive) shadowValid = false
-        val shadowDue = shadowActive && (!shadowValid || (++shadowTick % SHADOW_EVERY) == 0)
-        fillInstances(s, cam, shadowDue)
-        val smap = shadow
-        if (smap != null && shadowActive) {
-            if (shadowDue) {
-                shadowPass(smap, cam)
-                shadowValid = true
-                post.bind()
-                GL.glEnable(GL.GL_DEPTH_TEST)
-            }
-            System.arraycopy(smap.vp[0], 0, pp.lightVp0, 0, 16)
-            pp.shadowTex0 = smap.tex[0]
-        } else pp.shadowTex0 = 0
-        scene(litProg)
-        val g = e.ghostK.toFloat()
-        bindMaps(barkTex, barkN, barkR)
-        if (feat.wind) setSway(litProg, TREE_SWAY, 0f, 0f)
-        // The merged trunk/roots/limbs are closed outward-facing tubes. Cull their back faces in
-        // both normal and ghost rendering so translucent power-ups cannot reveal hidden limb backs.
-        GL.glEnable(GL.GL_CULL_FACE)
-        GL.glCullFace(GL.GL_BACK)
-        if (g > 0f) {
-            // Pass 1: establish the nearest merged tree-body surface before the ghost fade.
-            GL.glColorMask(false, false, false, false)
-            GL.glDepthMask(true)
-            GL.glDisable(GL.GL_BLEND)
-            material(litProg, Palette.trunk, mode = 4, rough = .8f, maps = true, ns = .75f, uvx = 1.5f, uvy = 7f)
-            BODY_KINDS.forEach { kind -> meshes[kind].draw(bufs[kind], counts[kind]) }
-            GL.glColorMask(true, true, true, true)
-
-            // Pass 2: shade only the nearest surfaces. Keep depth testing enabled but
-            // freeze the prepass depth so transparent batches cannot mask one another.
-            GL.glEnable(GL.GL_BLEND)
-            GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
-            GL.glDepthFunc(GL.GL_LEQUAL)
-            GL.glDepthMask(false)
-            material(litProg, Palette.trunk, Palette.ghostGlow, g * .55f, 1f - g * .34f, mode = 4, rough = .8f, maps = true, ns = .75f, uvx = 1.5f, uvy = 7f)
-            BODY_KINDS.forEach { kind -> meshes[kind].draw(bufs[kind], counts[kind]) }
-            GL.glDepthMask(true)
-            GL.glDepthFunc(GL.GL_LESS)
-            GL.glDisable(GL.GL_BLEND)
-        } else {
-            material(litProg, Palette.trunk, mode = 4, rough = .8f, maps = true, ns = .75f, uvx = 1.5f, uvy = 7f)
-            BODY_KINDS.forEach { kind -> meshes[kind].draw(bufs[kind], counts[kind]) }
-        }
-        // Joined canopy lobes are closed surfaces; back-face culling avoids drawing their hidden sides.
-        GL.glEnable(GL.GL_CULL_FACE); GL.glCullFace(GL.GL_BACK)
-        material(litProg, Palette.crown, mode = 5, rough = .9f)
-        CROWN_KINDS.forEach { kind -> meshes[kind].draw(bufs[kind], counts[kind]) }
-        CROWN_FAR_KINDS.forEach { kind -> meshes[kind].draw(bufs[kind], counts[kind]) }
-        if (feat.wind) setSway(litProg, 0f, 0f, 0f)    // rocks and bushes stay put
-        material(litProg, Palette.plant, mode = 6, rough = .9f)
-        meshes[K_PLANT].draw(bufs[K_PLANT], counts[K_PLANT])
-        GL.glDisable(GL.GL_CULL_FACE)
-
+        forest()
         drawLandmarks(s, e)
         drawBlackHoles(s)
         drawWarpSpores(s)
@@ -721,6 +816,20 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         for (b in spriteBatches) drawSprites(b)
 
         post.present(effectState, e.glass, pp)
+    }
+
+    /** The day gate near and in front of the camera whose hole is drawn (the other world is rendered for it), or null. */
+    private fun portalGateFor(s: Simulation, cam: CameraPose): DayGate? {
+        if (!Visuals.DayGate.ON || s.mode != GameMode.FREEROAM || s.warp >= 0) return null
+        val fx = cam.tx - cam.ex; val fz = cam.tz - cam.ez; val fl = hypot(fx, fz).coerceAtLeast(1e-6)
+        var best: DayGate? = null; var bestD = Visuals.DayGate.PORTAL_SEE
+        for (g in engine.dayGates) {
+            val dx = g.x - cam.ex; val dz = g.z - cam.ez
+            val d = hypot(dx, dz)
+            // Looking down into the hole the gate is hardly "in front": keep it while the runner is near, otherwise it has to be ahead.
+            if (d < bestD && (d < Visuals.GateRing.RADIUS * 3 || (dx * fx + dz * fz) / fl > -Visuals.GateRing.RADIUS)) { best = g; bestD = d }
+        }
+        return best
     }
 
     /** Where the nearest black hole sits on screen, for the lens effect. */
@@ -1219,7 +1328,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             val dx = p.x - cam.ex; val dz = p.z - cam.ez
             val dist = sqrt(dx * dx + dz * dz)
             if (dist > reach) continue
-            if ((dx * fwx + dz * fwz) / fl < -12) continue
+            if (cullBehind && (dx * fwx + dz * fwz) / fl < -12) continue
             val far = dist > CROWN_LOD_DISTANCE
             var dissolving = false; var k = 0.0
             val age = s.elapsed - p.clearedAt   // -infinity for a tree the shockwave never touched
@@ -1265,7 +1374,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             for (p in (if (pass == 0) props else shadowRing)) {
                 val dx = p.x - cam.ex; val dz = p.z - cam.ez
                 val dist = sqrt(dx * dx + dz * dz)
-                if (pass == 0 && dist <= reach && (dx * fwx + dz * fwz) / fl >= -12) continue   // already in the visible set
+                if (pass == 0 && dist <= reach && (!cullBehind || (dx * fwx + dz * fwz) / fl >= -12)) continue   // already in the visible set
                 // A tree the shockwave has taken away casts no shadow from the window or the shadow ring either (a visible dissolving
                 // tree is in the visible set above, moved). One still standing, even if already marked for the wave, keeps its shadow.
                 if (dist > extraReach || s.elapsed >= p.clearedAt) continue
@@ -1473,35 +1582,6 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             }
             n++
         }
-    }
-
-    /**
-     * The nearest day gate on screen, for the upside-down view inside its ring: x, y, radius (in screen heights), strength, the vertical
-     * squash of the flat ring (an ellipse seen at an angle, a line seen edge-on) and the grade (> 0 when the far side is brighter).
-     */
-    private fun dayGateScreen(s: Simulation, cam: CameraPose): FloatArray? {
-        val v = Visuals.DayGate
-        if (!v.ON || s.mode != GameMode.FREEROAM || s.warp >= 0) return null
-        var best: DayGate? = null; var bestD = v.SEE
-        for (g in engine.dayGates) {
-            val d = hypot(g.x - cam.ex, g.z - cam.ez)
-            if (d < bestD) { best = g; bestD = d }
-        }
-        val g = best ?: return null
-        val cy = groundHeight(g.x, g.z) + .2
-        val dist3 = max(.5, sqrt((g.x - cam.ex).pow(2) + (cy - cam.ey).pow(2) + (g.z - cam.ez).pow(2)))
-        val px = vp[0] * g.x + vp[4] * cy + vp[8] * g.z + vp[12]
-        val py = vp[1] * g.x + vp[5] * cy + vp[9] * g.z + vp[13]
-        val pz = vp[2] * g.x + vp[6] * cy + vp[10] * g.z + vp[14]
-        val pw = vp[3] * g.x + vp[7] * cy + vp[11] * g.z + vp[15]
-        if (pw <= 0f || pz / pw >= 1f) return null
-        val rs = .5 * Visuals.GateRing.RADIUS / dist3 / tan(Math.toRadians(FOV / 2.0))
-        // The flat ring seen from above at the angle `elev` is an ellipse that is sin(elev) as tall as it is wide.
-        val sy = ((cam.ey - cy) / dist3).coerceIn(.05, 1.0)
-        val strength = v.VIEW * ((v.SEE - dist3) / 50.0).coerceIn(0.0, 1.0) * ((hypot(g.x - cam.ex, g.z - cam.ez) - Visuals.GateRing.RADIUS * .5) / v.VIEW_FADE_NEAR).coerceIn(0.0, 1.0)
-        // The far side is the other half of the day: its brightness is 1 - ours.
-        val grade = (1.0 - 2.0 * dayLevel)
-        return floatArrayOf((px / pw * .5 + .5).toFloat(), (py / pw * .5 + .5).toFloat(), rs.toFloat(), strength.toFloat(), sy.toFloat(), (if (grade >= 0) 1f else -1f))
     }
 
     /** Where the centre of a gate's ring is: the ring's lowest point floats GAP above the ground. */

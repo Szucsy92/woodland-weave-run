@@ -318,30 +318,34 @@ fun enterDayGate(s: Simulation, gate: DayGate): Boolean {
     s.diveX0 = s.x; s.diveZ0 = s.z
     s.diveX1 = 2 * gate.x - s.x; s.diveZ1 = 2 * gate.z - s.z   // straight through the middle to the opposite point of the ring
     s.diveH0 = s.heading
-    // Heading of the fall (towards the middle); when the runner stands right in the middle, keep the heading it has.
-    s.diveHDir = if (d > 0.05) kotlin.math.atan2(dx, dz) else s.heading
     s.pushX = 0.0; s.pushZ = 0.0
     return true
 }
 
+/**
+ * The fall through a day gate. The runner never turns over: he runs on, falls face first into the middle of the hole (first half), and at the
+ * middle the WORLD switches over (the other time of day, the camera's pitch comes back from the other side) and the movement vector is turned
+ * exactly 180 degrees: from there he comes up out of the ground and runs back the way he came (second half), to the opposite point of the ring.
+ */
 private fun stepDive(s: Simulation, dt: Double) {
     s.dive += dt
     val u = min(1.0, s.dive / DAYGATE_TIME)
-    val e = smooth(u)
-    s.x = s.diveX0 + (s.diveX1 - s.diveX0) * e
-    s.z = s.diveZ0 + (s.diveZ1 - s.diveZ0) * e
-    // Turn towards the middle in the first quarter (the shortest way round), hold it for the fall.
-    var delta = (s.diveHDir - s.diveH0) % (2 * PI)
-    if (delta > PI) delta -= 2 * PI else if (delta < -PI) delta += 2 * PI
-    s.heading = s.diveH0 + delta * smooth(min(1.0, u / 0.25))
-    if (!s.diveFlipped && u >= 0.5) {
-        s.diveFlipped = true
-        s.daySide += 1            // the other time of day, from here on
-        s.gateKick = 0.0          // the gate's elastic fisheye kick, at the moment of passing
+    val mx = (s.diveX0 + s.diveX1) / 2; val mz = (s.diveZ0 + s.diveZ1) / 2   // the middle of the ring
+    if (u < 0.5) {
+        val e = smooth(u / 0.5)
+        s.x = s.diveX0 + (mx - s.diveX0) * e; s.z = s.diveZ0 + (mz - s.diveZ0) * e
+    } else {
+        if (!s.diveFlipped) {
+            s.diveFlipped = true
+            s.daySide += 1                 // the other world is the world now
+            s.heading = s.diveH0 + PI      // the movement vector turns by exactly 180 degrees; nothing else turns
+            s.gateKick = 0.0               // the gate's elastic fisheye kick, at the moment of passing
+        }
+        val e = smooth((u - 0.5) / 0.5)
+        s.x = mx + (s.diveX1 - mx) * e; s.z = mz + (s.diveZ1 - mz) * e
     }
     if (u >= 1.0) {
         s.dive = -1.0
-        s.heading = s.diveH0 + delta + PI   // standing up again, facing the way we came
         s.pushX = 0.0; s.pushZ = 0.0
         s.stumble = 0.0; s.speedMul = 1.0
     }
@@ -504,7 +508,7 @@ class Simulation {
     var universe = 0; var universeAt = 0.0
     // Day gates: [dive] is the seconds into the fall through the ring (< 0 when idle); [daySide] counts the passes (each flips day and night).
     var dive = -1.0; var diveFlipped = false; var daySide = 0; var lastDayGate = ""
-    var diveX0 = 0.0; var diveZ0 = 0.0; var diveX1 = 0.0; var diveZ1 = 0.0; var diveH0 = 0.0; var diveHDir = 0.0
+    var diveX0 = 0.0; var diveZ0 = 0.0; var diveX1 = 0.0; var diveZ1 = 0.0; var diveH0 = 0.0
 
     /** Equivalent of `Object.assign(s, makeSimulation(), { ... })`. */
     fun reset(difficulty: Difficulty = this.difficulty, mode: GameMode = this.mode, phase: Phase = Phase.MENU, elapsed: Double = 0.0) {

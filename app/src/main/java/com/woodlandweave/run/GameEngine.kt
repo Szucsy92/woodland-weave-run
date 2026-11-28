@@ -427,17 +427,18 @@ class GameEngine(
         val canLook = s.phase == Phase.MENU || s.phase == Phase.FALLEN || s.pause != PauseState.NONE
         val lookTarget = if (canLook) steering * .5 else 0.0
         menuLook += (lookTarget - menuLook) * min(1.0, raw * (if (canLook) 1.4 else 6.0))
-        // Day gate: the runner falls forward into the ring, turns over, and stands up facing the other way (yaw, pitch, roll and dip).
+        // Day gate: the runner falls face first into the hole, the world switches at the middle, and he comes up out of the ground and stands.
+        // The camera only pitches (down into the hole, then up at the new sky, then level): it never rolls and never swings round.
         val dive = if (s.dive >= 0) min(1.0, s.dive / DAYGATE_TIME) else -1.0
-        val diveYaw = if (dive >= 0) PI * smoothstep(dive, .45, .9) else 0.0
-        val vh = s.heading + menuLook + diveYaw
+        val vh = s.heading + menuLook
         val tx = s.x - sin(vh) * 18 + stepX
         val tz = s.z - cos(vh) * 18 + stepZ
         c.tx = tx; c.tz = tz
         c.ty = groundHeight(s.x, s.z) * .6 + groundHeight(s.x - sin(vh) * 18, s.z - cos(vh) * 18) * .4 + 1.62 + fall * 3
         val warpW = warpEnvelope(s)
         if (dive >= 0) {
-            val pitch = -1.3 * sin(PI * smoothstep(dive, 0.0, 1.0))   // looking down into the ring in the middle of the fall
+            val pitch = if (dive < .5) -1.3 * sin(PI / 2 * dive / .5)             // looking down into the hole
+                        else 1.0 * (1 - smoothstep(dive, .5, 1.0))                   // the new world's sky, then level again
             c.ey -= 1.05 * sin(PI * dive)
             c.ty = c.ey + 18 * kotlin.math.tan(pitch)
         }
@@ -446,8 +447,7 @@ class GameEngine(
         c.rotY = -leanAmount * .06
         c.rotZ = warpW * (sin(t * 1.1) * .12 + sin(t * 2.7) * .04) - leanAmount * .065 + bump * .12 + fall * .72 +
             waking * sin(t * 4) * .03 + (if (running) sin(s.stride * .5) * .007 else sin(t * .4) * .008) +
-            tripping * sin(t * 13) * .06 +
-            (if (dive >= 0) PI * (smoothstep(dive, .12, .5) - smoothstep(dive, .5, .92)) else 0.0)   // upside down at the middle of the fall
+            tripping * sin(t * 13) * .06
 
         val swayTarget = if (running) -steering * .55 else 0.0
         lampSway += (swayTarget - lampSway) * min(1.0, raw * 4)
