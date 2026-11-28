@@ -735,8 +735,9 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 holeX = pg.x.toFloat(); holeZ = pg.z.toFloat()
                 holeR = (Visuals.GateRing.RADIUS - Visuals.GateRing.TORUS_TUBE * (Visuals.GateRing.RADIUS / Visuals.GateRing.TORUS_R) * Visuals.DayGate.HOLE_RIM).toFloat()
                 // The other world's camera: the runner's own camera turned 180 degrees about the horizontal axis through the ring's middle that
-                // is at right angles to the heading (v -> 2 (v.r) r - v). Heading and up are turned with it: up becomes down.
-                val rx = cos(s.heading); val rz = -sin(s.heading)
+                // lies ALONG the heading (v -> 2 (v.f) f - v). What is straight ahead stays straight ahead, so the same forest the runner sees in
+                // front of him hangs there upside down (left and right swap, as when a page is turned over); up becomes down.
+                val rx = -sin(s.heading); val rz = -cos(s.heading)
                 val o = DoubleArray(3)
                 fun turn(px: Double, py: Double, pz: Double) {
                     val vx = px - pg.x; val vy = py - gyP; val vz = pz - pg.z
