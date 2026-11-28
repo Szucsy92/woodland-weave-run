@@ -212,7 +212,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     private var fog = Palette.fog; private var sky = Palette.moon; private var groundC = Palette.fog
     private var moonCol = Palette.moon; private var hemi = .85f; private var fogNear = 7f; private var moonI = 1f
     private val portal = PortalTarget()      // the other world, seen through a day gate's hole
-    private val vp2 = FloatArray(16)
+    private val vp2 = FloatArray(16); private var eyeY = 0f   // eyeY: the camera height the other world is drawn from (mirrored)
     private var skyProg = -1; private var emptyVao = 0; private val invVp = FloatArray(16)
     private var cullBehind = true            // trees more than 12 m behind the camera are not drawn (not while the portal looks that way)
     private var lights = 1f; private var red = 0f
@@ -616,7 +616,7 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
         val fl = sqrt(fdx * fdx + fdy * fdy + fdz * fdz); fdx /= fl; fdy /= fl; fdz /= fl
 
         var clipOn = 0f; var clipY = 0f   // while the other world is drawn: its part that would come up above the plane is dropped
-        var eyeX = cam.ex.toFloat(); var eyeY = cam.ey.toFloat(); var eyeZ = cam.ez.toFloat()   // the camera the scene is drawn from (the portal pass changes it)
+        var eyeX = cam.ex.toFloat(); eyeY = cam.ey.toFloat(); var eyeZ = cam.ez.toFloat()   // the camera the scene is drawn from (the portal pass changes it)
         fun scene(p: Int) {
             // The runner and opaque world meshes share this material/light uniform set:
             // local orb lights, sky/ground bounce, directional shadows and the day/night palette
@@ -727,6 +727,8 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             GL.glDisable(GL.GL_CULL_FACE)
         }
 
+        buildSprites(s, e)   // (before the portal pass: the other world shows the very same lights, snow and glows)
+
         // ---- The day gate: the other world is drawn into its own target, then seen through the hole in the ground ----
         var portalOn = false
         val pg = pgate
@@ -767,6 +769,20 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
                 holeMode = -1f
                 ground()
                 forest()
+                // The rest of the world too, so the mirror is complete: the landmarks, the black holes and spores, the contact shadows and every
+                // sprite batch (the lights strung on the trees, snow, pollen, glows, mist). The sprites were built once, for both views.
+                drawLandmarks(s, e)
+                drawBlackHoles(s)
+                drawWarpSpores(s)
+                if (!feat.shadows) {
+                    GL.glEnable(GL.GL_BLEND); GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA); GL.glDepthMask(false)
+                    bindMaps(glowTex, glowTex, glowTex)
+                    material(litProg, BLACK, alpha = .6f, mode = 1)
+                    meshes[K_SHADOW].draw(bufs[K_SHADOW], counts[K_SHADOW])
+                    GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
+                }
+                beginSprites(mirror = true)
+                for (b in spriteBatches) drawSprites(b)
                 GL.glDisable(GL.GL_SCISSOR_TEST)
                 GL.glFrontFace(GL.GL_CCW); clipOn = 0f
                 shadowActive = wasShadow
@@ -810,7 +826,6 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
             GL.glDepthMask(true); GL.glDisable(GL.GL_BLEND)
         }
 
-        buildSprites(s, e)
         beginSprites()
         for (b in spriteBatches) drawSprites(b)
 
@@ -1909,15 +1924,17 @@ class GameRenderer(private val context: Context, private val engine: GameEngine)
     }
 
     /** The sprite program and everything that is the same for every batch this frame (camera, fog, encoding): set once, not per batch. */
-    private fun beginSprites() {
+    /** [mirror]: the sprites of the other world (the ground-plane mirror of this one): the camera's up/right and position are mirrored with it. */
+    private fun beginSprites(mirror: Boolean = false) {
         val e = engine
+        val m = if (mirror) -1f else 1f
         GL.glUseProgram(spriteProg)
         GL.glUniformMatrix4fv(loc(spriteProg, "uVP"), 1, false, vp, 0)
         // Camera right/up are the first two rows of the view rotation.
-        GL.glUniform3f(loc(spriteProg, "uRight"), view[0], view[4], view[8])
-        GL.glUniform3f(loc(spriteProg, "uUp"), view[1], view[5], view[9])
+        GL.glUniform3f(loc(spriteProg, "uRight"), view[0], m * view[4], view[8])
+        GL.glUniform3f(loc(spriteProg, "uUp"), view[1], m * view[5], view[9])
         GL.glUniform1i(loc(spriteProg, "uTex"), 0)
-        GL.glUniform3f(loc(spriteProg, "uCam"), e.camera.ex.toFloat(), e.camera.ey.toFloat(), e.camera.ez.toFloat())
+        GL.glUniform3f(loc(spriteProg, "uCam"), e.camera.ex.toFloat(), if (mirror) eyeY else e.camera.ey.toFloat(), e.camera.ez.toFloat())
         GL.glUniform3f(loc(spriteProg, "uFwd"), camFwdX, camFwdY, camFwdZ)
         GL.glUniform3f(loc(spriteProg, "uFog"), fog[0], fog[1], fog[2])
         GL.glUniform1f(loc(spriteProg, "uFogNear"), fogNear); GL.glUniform1f(loc(spriteProg, "uFogFar"), fogFar)
