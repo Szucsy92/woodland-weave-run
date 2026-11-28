@@ -334,6 +334,9 @@ fun enterDayGate(s: Simulation, gate: DayGate): Boolean {
  */
 private fun stepDive(s: Simulation, dt: Double) {
     s.dive += dt
+    // The lens kick runs in real time, for the same GATE_KICK_TIME as everywhere else, however short the fall is (the normal step, which
+    // advances it, is skipped during the fall).
+    if (s.gateKick >= 0) { s.gateKick += dt; if (s.gateKick >= GATE_KICK_TIME) s.gateKick = -1.0 }
     val u = min(1.0, s.dive / DAYGATE_TIME)
     // One smooth move from the edge, through the middle of the ring (at u = .5, where the speed is highest: no stop in the middle), to the far edge.
     val e = smooth(u)
