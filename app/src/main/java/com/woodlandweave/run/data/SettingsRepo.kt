@@ -114,7 +114,7 @@ class SettingsRepo(private val context: Context) {
     suspend fun setTimeOfDay(v: Float) = context.store.edit { it[K.tod] = v.coerceIn(0f, 1f); it[K.mood] = ForestMood.MANUAL.name }
     suspend fun setQuality(v: Quality) = context.store.edit { it[K.quality] = v.name }
     suspend fun setFx(name: String, v: Float) = context.store.edit { it[fxKey(name)] = v }
-    suspend fun setDev(name: String, v: Float) = context.store.edit { it[devKey(name)] = v.coerceIn(0f, 300f) }
+    suspend fun setDev(name: String, v: Float) = context.store.edit { it[devKey(name)] = v.coerceIn(0f, 2000f) }
     suspend fun setBestSecrets(v: Int) = context.store.edit { it[K.bestSecrets] = max(it[K.bestSecrets] ?: 0, v) }
     suspend fun recordScore(score: Int) = context.store.edit {
         it[K.last] = score

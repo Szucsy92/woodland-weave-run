@@ -51,6 +51,10 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
@@ -537,7 +541,7 @@ private fun DeveloperBlock(s: Settings, a: Actions) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(Edge))
         Text("Occurrence", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 10.dp, bottom = 2.dp))
         DevSlider("Power-ups", s.dev.powerUps) { a.setDev("powerups", it) }
-        DevSlider("Day gates", s.dev.dayGates) { a.setDev("daygates", it) }
+        DevNumber("Day gates", s.dev.dayGates) { a.setDev("daygates", it) }
         DevSlider("Survive gates", s.dev.surviveGates) { a.setDev("survivegates", it) }
         DevSlider("Black holes", s.dev.blackHoles) { a.setDev("blackholes", it) }
         DevSlider("Secrets", s.dev.secrets) { a.setDev("secrets", it) }
@@ -549,6 +553,36 @@ private fun DeveloperBlock(s: Settings, a: Actions) {
                 }.padding(horizontal = 8.dp, vertical = 6.dp),
             )
         }
+    }
+}
+
+/**
+ * An occurrence typed as a number, in percent of the built-in rate: 100 = as designed, 0 = never, up to 2000. Above about 450 every
+ * cell of the lattice holds a gate and the cells shrink, so the gates get closer and closer.
+ */
+@Composable
+private fun DevNumber(label: String, value: Float, onChange: (Float) -> Unit) {
+    var text by remember { mutableStateOf(value.toInt().toString()) }
+    // Follow outside changes (Reset), but never rewrite what is being typed.
+    LaunchedEffect(value) { if (text.toFloatOrNull()?.toInt() != value.toInt()) text = value.toInt().toString() }
+    Row(Modifier.fillMaxWidth().height(38.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = TextC, fontSize = 11.sp, modifier = Modifier.width(96.dp))
+        Box(Modifier.weight(1f).height(30.dp).clip(RoundedCornerShape(6.dp)).background(Edge).padding(horizontal = 10.dp), contentAlignment = Alignment.CenterStart) {
+            BasicTextField(
+                value = text,
+                onValueChange = { t ->
+                    val clean = t.filter { it.isDigit() }.take(4)
+                    text = clean
+                    clean.toFloatOrNull()?.let { onChange(it.coerceIn(0f, 2000f)) }
+                },
+                singleLine = true,
+                textStyle = TextStyle(color = TextC, fontSize = 12.sp),
+                cursorBrush = SolidColor(TextC),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        Text("%", color = Muted, fontSize = 10.sp, modifier = Modifier.width(28.dp), textAlign = TextAlign.End)
     }
 }
 

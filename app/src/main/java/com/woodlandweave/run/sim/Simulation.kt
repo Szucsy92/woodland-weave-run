@@ -288,15 +288,20 @@ fun gatesAround(x: Double, z: Double): List<Gate> {
 }
 
 fun dayGatesAround(x: Double, z: Double): List<DayGate> {
-    val cx = fl(x / DAYGATE_CELL); val cz = fl(z / DAYGATE_CELL)
+    // The rate: the chance of a cell holding a gate. Above 1 (every cell has one) the cells shrink instead, so the gates keep getting denser.
+    val rate = DAYGATE_CHANCE * Tuning.dayGates
+    val chance = min(1.0, rate)
+    val cell = if (rate > 1.0) DAYGATE_CELL / sqrt(rate) else DAYGATE_CELL.toDouble()
+    val margin = min(20.0, cell * 0.1)
+    val cx = fl(x / cell); val cz = fl(z / cell)
     val upright = gatesAround(x, z)
     val out = ArrayList<DayGate>()
     for (i in -1..1) for (j in -1..1) {
         val gx = cx + i; val gz = cz + j
         if (gx == 0 && gz == 0) continue
-        if (hash(gx, gz, 520) > DAYGATE_CHANCE * Tuning.dayGates) continue
-        val px = gx * DAYGATE_CELL + 20 + hash(gx, gz, 521) * (DAYGATE_CELL - 40)
-        val pz = gz * DAYGATE_CELL + 20 + hash(gx, gz, 522) * (DAYGATE_CELL - 40)
+        if (hash(gx, gz, 520) > chance) continue
+        val px = gx * cell + margin + hash(gx, gz, 521) * (cell - 2 * margin)
+        val pz = gz * cell + margin + hash(gx, gz, 522) * (cell - 2 * margin)
         if (upright.any { hypot(px - it.x, pz - it.z) < 40.0 }) continue   // never on top of a survive gate
         out += DayGate(px, pz, "d$gx:$gz")
     }
